@@ -1,0 +1,118 @@
+ rank, cartesian coords in cube
+           0           0           0           0
+           1           1           0           0
+           2           0           1           0
+           3           1           1           0
+           4           0           0           1
+           5           1           0           1
+           6           0           1           1
+           7           1           1           1
+ checkpoints to recompose:
+ 50.0
+ 30.0
+ 20.0
+ 10.0
+  7.5
+  5.0
+  2.0
+  1.0
+  0.0
+ processing z=   50.00000    
+ number of particles =     5451776
+ particles / node
+           0      681645
+           1      681467
+           2      681283
+           3      681457
+           4      682056
+           5      681459
+           6      680650
+           7      681759
+ processing z=   30.00000    
+ number of particles =     5451776
+ particles / node
+           0      683251
+           1      681352
+           2      679845
+           3      683700
+           4      681811
+           5      678983
+           6      674214
+           7      688620
+ processing z=   20.00000    
+ number of particles =     5451775
+ particles / node
+           0      685478
+           1      681363
+           2      678011
+           3      686999
+           4      680339
+           5      678413
+           6      667258
+           7      693914
+ processing z=   10.00000    
+ number of particles =     5451775
+ particles / node
+           0      688718
+           1      684444
+           2      674005
+           3      691559
+           4      677876
+           5      678070
+           6      652324
+           7      704779
+ processing z=   7.500000    
+ number of particles =     5451770
+ particles / node
+           0      689837
+           1      685171
+           2      672093
+           3      695569
+           4      676897
+           5      677210
+           6      642109
+           7      712884
+ processing z=   5.000000    
+ number of particles =     5451767
+ particles / node
+           0      693045
+           1      686285
+           2      668714
+           3      701455
+           4      674052
+           5      675670
+           6      626537
+           7      726009
+ processing z=   2.000000    
+ number of particles =     5451762
+ particles / node
+           0      700527
+           1      690345
+           2      652958
+           3      723592
+           4      665374
+           5      673885
+           6      569192
+           7      775889
+ processing z=   1.000000    
+ number of particles =     5451757
+ particles / node
+           0      699901
+           1      691589
+           2      642453
+           3      743952
+           4      661796
+           5      667609
+           6      520985
+           7      823472
+ processing z=  0.0000000E+00
+ number of particles =     5451742
+ particles / node
+           0      702946
+           1      699967
+           2      625048
+           3      795625
+           4      630138
+           5      653269
+           6      444694
+           7      900055

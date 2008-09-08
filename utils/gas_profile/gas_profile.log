@@ -1,0 +1,98 @@
+ dist_init running on           8 nodes
+ using cubic distribution:           2 nodes per dimension
+         160 cells in mesh
+ nodes              8
+ nc               160
+ 
+ box         100.0000    
+ 
+    0.00  Called write params
+ checkpoints to recompose:
+ 55.0
+ 50.0
+ 45.0
+ 40.0
+ 35.0
+ 12.0
+  9.0
+  5.0
+  2.0
+  1.0
+  0.0
+    0.03  Called init var
+ calculating spectrum for z=   55.00000    
+    0.00  Called profile
+ Writing 
+ /scratch/merz/pm_mhd/160/out_gas_only/55.000gas_profile.dat                    
+  
+    0.00  Called write gas profile
+    0.01  Called init var
+ calculating spectrum for z=   50.00000    
+    0.00  Called profile
+ Writing 
+ /scratch/merz/pm_mhd/160/out_gas_only/50.000gas_profile.dat                    
+  
+    0.00  Called write gas profile
+    0.01  Called init var
+ calculating spectrum for z=   45.00000    
+    0.00  Called profile
+ Writing 
+ /scratch/merz/pm_mhd/160/out_gas_only/45.000gas_profile.dat                    
+  
+    0.00  Called write gas profile
+    0.02  Called init var
+ calculating spectrum for z=   40.00000    
+    0.22  Called profile
+ Writing 
+ /scratch/merz/pm_mhd/160/out_gas_only/40.000gas_profile.dat                    
+  
+    0.00  Called write gas profile
+    0.03  Called init var
+ calculating spectrum for z=   35.00000    
+    0.00  Called profile
+ Writing 
+ /scratch/merz/pm_mhd/160/out_gas_only/35.000gas_profile.dat                    
+  
+    0.00  Called write gas profile
+    0.02  Called init var
+ calculating spectrum for z=   12.00000    
+    0.17  Called profile
+ Writing 
+ /scratch/merz/pm_mhd/160/out_gas_only/12.000gas_profile.dat                    
+  
+    0.00  Called write gas profile
+    0.01  Called init var
+ calculating spectrum for z=   9.000000    
+    0.12  Called profile
+ Writing 
+ /scratch/merz/pm_mhd/160/out_gas_only/9.000gas_profile.dat                     
+  
+    0.00  Called write gas profile
+    0.02  Called init var
+ calculating spectrum for z=   5.000000    
+    0.05  Called profile
+ Writing 
+ /scratch/merz/pm_mhd/160/out_gas_only/5.000gas_profile.dat                     
+  
+    0.00  Called write gas profile
+    0.01  Called init var
+ calculating spectrum for z=   2.000000    
+    0.06  Called profile
+ Writing 
+ /scratch/merz/pm_mhd/160/out_gas_only/2.000gas_profile.dat                     
+  
+    0.00  Called write gas profile
+    0.01  Called init var
+ calculating spectrum for z=   1.000000    
+    0.00  Called profile
+ Writing 
+ /scratch/merz/pm_mhd/160/out_gas_only/1.000gas_profile.dat                     
+  
+    0.00  Called write gas profile
+    0.01  Called init var
+ calculating spectrum for z=  0.0000000E+00
+    0.07  Called profile
+ Writing 
+ /scratch/merz/pm_mhd/160/out_gas_only/0.000gas_profile.dat                     
+  
+    0.00  Called write gas profile

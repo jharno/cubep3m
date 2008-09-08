@@ -1,0 +1,9 @@
+
+#0  0x080b582b in spinlock ()
+#1  0x080b5b04 in lam_ssi_rpi_usysv_low_fastrecv ()
+#2  0x00000000 in ?? ()
+
+Seems to have hung on half the nodes
+
+call mpi_scatter(iseed_all,seedsize,mpi_integer,iseed,seedsize,mpi_integer,0,mpi_comm_world,ierr)
+

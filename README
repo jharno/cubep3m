@@ -1,0 +1,28 @@
+# To source when checking out the code for the first time.
+# This prevents your next repository update OVER the
+# user-defined files:
+#
+# 1- Personal cosmological parameters 
+cp parameters.example parameters
+# 2- Checkpoints (redshift) for simulation 'xv' data
+cp input/checkpoints.example input/checkpoints
+# 3- Redshift for halofinder
+cp input/halofinds.example input/halofinds
+# 4- Projection for images and Lensing
+cp input/projections.example input/projections
+# 5- batch-submission parameters
+cp batch/EXAMPLES/batch_parameters.csh.example batch/EXAMPLE/batch_parameters
+# 6-  batch-submission scripts
+cp batch/EXAMPLES/cubepm.pbs.example batch/cubepm.pbs
+# 7-  Initialization scripts
+cp batch/EXAMPLES/init_pp_threads.csh.example batch/init_pp_threads.csh
+# 8- Tranfer function
+cp ../utils/dist_init/cmbfast.lcdm.example ../utils/dist_init/cmbfast.lcdm
+
+# This prevents your next repository update from 
+# erasing your personal cosmological parameters [1],
+# your disired checkpoints, halofinds and projection redshifts [2,3,4], 
+# your favourite batch-submission scripts [5,6] and 
+# your transfer function [7].
+
+

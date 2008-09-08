@@ -1,0 +1,21 @@
+#!/bin/csh 
+if ( $#argv != 1 ) then
+  echo usage: devel_cmd.csh command
+else
+  set HNAME = `hostname`
+  echo executing: $1 
+  set ITER=0
+  set NUM_DEVEL_NODES=4
+  while ($ITER < $NUM_DEVEL_NODES )
+    @ ITER++
+    set DNAME = "devel$ITER"
+    echo running on: $DNAME
+    rsh $DNAME $1 
+  end
+  unset ITER
+  unset NUM_DEVEL_NODES
+  unset HNAME
+  unset DNAME
+endif
+
+exit 0

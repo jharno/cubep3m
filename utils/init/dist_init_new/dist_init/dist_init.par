@@ -1,0 +1,63 @@
+!! distributed cdm initial condition generator parameter file
+!! Originally written by Hy Trac :: trac@cita.utoronto.ca
+!! Parallelized by Hugh Merz :: merz@cita.utoronto.ca  
+!! 2005 01 18
+
+!! nc = cells in global mesh
+!! np = particles / dimension of mesh
+!!      (currently only hc is supported)
+
+integer(4), parameter :: nc=160
+integer(4), parameter :: hc=nc/2
+integer(4), parameter :: np=hc
+
+!! path for all files 
+
+character(len=*), parameter :: ic_path='/scratch/merz/pmfast/dist_init/'
+
+!! nk is the length of the tf.init file (from cmbfast)
+
+character(len=*), parameter :: tffn='./tf.wmap'
+integer(4), parameter :: nk=380
+
+!! computational cluster parameters
+!! nt = number of threads / process (currently not enabled)
+!! nodes_dim = processes / dimension of cubic decomposition
+!!             (total nodes = nodes_dim^3)
+ 
+integer(4), parameter   :: nt = 1 !2
+integer(4), parameter   :: nodes_dim = 2 
+
+!! cosmological parameters
+!! box = physical size of simulation volume in Mpc/h
+!! s8  = sigma8
+!! omegam = Omega Matter
+!! omegal = Omega Lambda
+!! redshift = redshift to generate initial conditions at
+
+real(4), parameter :: box=100 !35
+real(4), parameter :: s8=0.84
+real(4), parameter :: omegam=0.30
+real(4), parameter :: omegal=0.70
+real(4), parameter :: redshift=60
+
+!! physical constants
+
+real(4), parameter :: pi = 3.141592654
+real(4), parameter :: eps = 1.0e-03
+
+!! internals (do not modify!)
+
+real(4), parameter :: scalefactor=1/(1+redshift)
+integer(4), parameter :: nc_node_dim = nc/nodes_dim
+integer(4), parameter :: np_node_dim = np/nodes_dim
+integer(4), parameter :: np_local = np_node_dim**3
+integer(4), parameter   :: max_np = 2*np_node_dim**3 
+
+integer(4), parameter   :: max_path = 100
+
+integer(4), parameter   :: nodes = nodes_dim * nodes_dim * nodes_dim
+
+integer(4), parameter   :: nodes_slab = nodes_dim * nodes_dim
+integer(4), parameter   :: nc_slab = nc / nodes
+

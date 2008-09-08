@@ -1,0 +1,17 @@
+#!/bin/csh
+#PBS -l nodes=4:ppn=2
+#PBS -q workq
+#PBS -r n
+#PBS -l walltime=0:30:00
+
+cd $PBS_O_WORKDIR
+
+lamboot
+foreach f ( `cat $PBS_NODEFILE` )
+  ssh $f rm -rf /scratch/merz
+  ssh $f mkdir /scratch/merz
+  ssh $f mkdir /scratch/merz/cubepm
+end
+cat $PBS_NODEFILE > nodes_dist_test
+mpirun -np 8 dist_init >& dist_init.test.log
+lamhalt

@@ -1,0 +1,52 @@
+! path to initial conditions (use local scratch space)
+character(*), parameter :: ic_path        = '/cita/d/scratch-2week/merz/cubep3m_threads/' 
+
+! path to local scratch (for writing temp files)
+character(*), parameter :: scratch_path = '/cita/d/scratch-2week/merz/cubep3m_threads/'
+
+! path to simulation output (use local scratch space)
+character(*), parameter :: output_path    = '/cita/d/scratch-2week/merz/cubep3m_threads/' 
+
+! path to cubepm root directory 
+character(*), parameter :: cubepm_root    = '/home/merz/cubep3m_threads/'
+
+! nodes / dimension, total nodes = nodes_dim**3
+integer(4),   parameter :: nodes_dim      = 3 !4 
+
+! fine mesh tiles / node / dimension
+integer(4),   parameter :: tiles_node_dim = 6 
+
+! cores / node
+integer(4),   parameter :: cores = 8
+
+! density buffer fraction (1.0 == no buffer, 2.0 == 2x avg density, etc)
+real(4), parameter :: density_buffer = 2.0 !1.5
+
+! size of fine mesh tile in cells / dimension
+! this must be set as:
+!  nf_tile = I*mesh_scale*(nodes_dim)**2 / tiles_node_dim + 2*nf_buf
+!   -- where I is an integer 
+! run batch/mem_usage to calculate
+
+integer(4),   parameter :: nf_tile        = 144 ! 96 !112 !120 !128
+
+! boxsize of simulation in Mpc/h
+real(4),      parameter :: box            = 200.0 
+
+! initial redshift
+real(4),      parameter :: z_i            = 200.0
+
+! omega fractions 
+real(4),      parameter :: omega_l        = 0.76 
+real(4),      parameter :: omega_m        = 1.0 - omega_l
+real(4),      parameter :: omega_b        = 0.04 
+!real(4),      parameter :: omega_b        = omega_m
+
+! Fine mesh force cut-off in fine mesh cells (determined by kernel)
+integer(4),   parameter :: nf_cutoff      = 16
+
+! Fine mesh buffer size in fine mesh cells
+integer(4),   parameter :: nf_buf         = nf_cutoff + 8
+
+! number of cells / dimension of entire simulation
+integer(4),   parameter :: nc             = (nf_tile-2*nf_buf)*tiles_node_dim*nodes_dim

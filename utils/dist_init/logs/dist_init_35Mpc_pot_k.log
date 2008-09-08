@@ -1,0 +1,225 @@
+ dist_init running on           8 nodes
+ using cubic distribution:           2 nodes per dimension
+         320 cells in mesh
+ nodes              8
+ nc               320
+ np               160
+ 
+ n_s         1.000000    
+ sigma_8    0.9000000    
+ omega_m    0.2700000    
+ omega_l    0.7300000    
+ omega_b    3.9999999E-02
+ 
+ box         35.00000    
+ redshift    60.00000    
+ 
+    0.00  Called write params
+    0.66  Called init var
+ Reading cmbfast.lcdm
+    0.00  Called transfer fnc
+ rank           0 Reading /scratch/merz/cubepm_050727/seed0.init
+ rank           1 Reading /scratch/merz/cubepm_050727/seed1.init
+ rank           2 Reading /scratch/merz/cubepm_050727/seed2.init
+ rank           6 Reading /scratch/merz/cubepm_050727/seed6.init
+ rank           5 Reading /scratch/merz/cubepm_050727/seed5.init
+ rank           4 Reading /scratch/merz/cubepm_050727/seed4.init
+ rank           7 Reading /scratch/merz/cubepm_050727/seed7.init
+ rank           3 Reading /scratch/merz/cubepm_050727/seed3.init
+ rank           0 Writing /scratch/merz/cubepm_050727/seed0.init
+ rank           1 Writing /scratch/merz/cubepm_050727/seed1.init
+ rank           5 Writing /scratch/merz/cubepm_050727/seed5.init
+ rank           7 Writing /scratch/merz/cubepm_050727/seed7.init
+ rank           6 Writing /scratch/merz/cubepm_050727/seed6.init
+ rank           4 Writing /scratch/merz/cubepm_050727/seed4.init
+ rank           3 Writing /scratch/merz/cubepm_050727/seed3.init
+ rank           2 Writing /scratch/merz/cubepm_050727/seed2.init
+           1   1.100000    
+           2  0.9000000    
+           3  0.9816738    
+           4  0.9284235    
+           5  0.9827846    
+           6  0.9990379    
+           7  0.9610641    
+           8  0.9939954    
+           9   1.023070    
+          10   1.007517    
+          11   1.014243    
+          12   1.072358    
+          13   1.027951    
+          14   1.034082    
+          15  0.9728298    
+          16   1.002257    
+          17  0.9282944    
+          18   1.002979    
+          19  0.9666526    
+          20   1.015969    
+          21   1.016161    
+          22  0.9790511    
+          23  0.9980650    
+          24  0.9930217    
+          25  0.9979769    
+          26   1.025260    
+          27  0.9896477    
+          28   1.006355    
+          29  0.9956741    
+          30   1.013116    
+          31   1.001346    
+          32  0.9898571    
+          33  0.9874184    
+          34  0.9995677    
+          35   1.019094    
+          36   1.008289    
+          37  0.9993057    
+          38  0.9810266    
+          39  0.9906058    
+          40   1.017557    
+          41  0.9829931    
+          42  0.9931077    
+          43   1.003001    
+          44  0.9997483    
+          45  0.9902374    
+          46  0.9882327    
+          47   1.012226    
+          48   1.000285    
+          49   1.013783    
+          50   1.001086    
+          51  0.9970303    
+          52  0.9886642    
+          53   1.008511    
+          54  0.9902899    
+          55   1.005638    
+          56  0.9961421    
+          57   1.000091    
+          58   1.006480    
+          59  0.9996699    
+          60   1.004174    
+          61   1.004816    
+          62   1.001377    
+          63  0.9991242    
+          64  0.9888479    
+          65  0.9982769    
+          66  0.9958590    
+          67  0.9991044    
+          68  0.9954987    
+          69  0.9964677    
+          70  0.9976969    
+          71  0.9981185    
+          72   1.007042    
+          73   1.002128    
+          74  0.9948691    
+          75   1.003929    
+          76  0.9876055    
+          77  0.9993954    
+          78  0.9972993    
+          79  0.9984711    
+          80   1.013186    
+          81  0.9980451    
+          82  0.9965756    
+          83  0.9996676    
+          84  0.9987897    
+          85  0.9926696    
+          86  0.9966651    
+          87  0.9976416    
+          88   1.007639    
+          89   1.002878    
+          90  0.9961810    
+          91   1.005874    
+          92   1.002723    
+          93   1.004953    
+          94   1.002470    
+          95   1.006321    
+          96   1.003256    
+          97   1.004761    
+          98   1.002659    
+          99  0.9949003    
+         100  0.9919926    
+         101   1.003871    
+         102   1.003222    
+         103  0.9946638    
+         104  0.9934353    
+         105   1.001742    
+         106   1.002132    
+         107  0.9950836    
+         108  0.9972507    
+         109  0.9961295    
+         110   1.004268    
+         111  0.9950478    
+         112   1.005712    
+         113  0.9968664    
+         114   1.001175    
+         115  0.9972727    
+         116  0.9998385    
+         117   1.001737    
+         118  0.9943810    
+         119  0.9969845    
+         120  0.9996436    
+         121   1.002513    
+         122  0.9965981    
+         123  0.9985799    
+         124   1.000018    
+         125  0.9955276    
+         126  0.9998448    
+         127   1.001716    
+         128  0.9996100    
+         129   1.002452    
+         130   1.001825    
+         131  0.9999533    
+         132   1.002339    
+         133  0.9971514    
+         134  0.9947083    
+         135  0.9970598    
+         136  0.9991574    
+         137   1.000335    
+         138   1.002326    
+         139   1.000556    
+         140  0.9989669    
+         141  0.9971773    
+         142  0.9968290    
+         143  0.9989854    
+         144   1.000218    
+         145  0.9990146    
+         146   1.000204    
+         147  0.9997477    
+         148  0.9988789    
+         149   1.002868    
+         150  0.9964269    
+         151  0.9997923    
+         152   1.000370    
+         153   1.000281    
+         154   1.001451    
+         155  0.9991555    
+         156  0.9969788    
+         157  0.9993664    
+         158   1.000241    
+         159  0.9983829    
+         160   1.001980    
+    0.32  Called normalize noise
+   40.51  Called noisemap
+    0.16  Called power spectrum
+    0.16  Called power spectrum
+    3.15  Called delta field
+    4.26  Called potential field
+ total exiting particles =       28078
+ total buffered particles =           0
+ total particles =     4096000
+ DM total mass=  3.2768002E+07
+ 
+ DM min      -1.000000    
+ DM max       6.968903    
+ Delta sum   7.4421832E-12
+ Delta var    1.170130    
+ 
+    0.17  Called power spectrum
+    6.02  Called dm
+    4.49  Called potential field
+ 
+ Gas min    -0.9024755    
+ Gas max     0.8174277    
+ Delta sum  -3.8480360E-12
+ Delta var   0.1523006    
+ 
+    5.96  Called gas
+ Writing /scratch/merz/cubepm_050727/pk.init                         
+ Writing /scratch/merz/cubepm_050727/pk0.init                        
+    0.02  Called write power spectra

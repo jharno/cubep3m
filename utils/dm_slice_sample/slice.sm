@@ -1,0 +1,7 @@
+dev postencap slice.eps
+data /home/merz/h1/cubepm/0.000slice.dat
+read { x 1 y 2 z 3}
+limits x y
+box
+ptype 1 0
+points x y

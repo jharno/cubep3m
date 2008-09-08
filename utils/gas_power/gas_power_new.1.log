@@ -1,0 +1,197 @@
+ dist_init running on           8 nodes
+ using cubic distribution:           2 nodes per dimension
+         160 cells in mesh
+ nodes              8
+ nc               160
+ 
+ box         100.0000    
+ 
+    0.00  Called write params
+ checkpoints to recompose:
+ 55.0
+ 50.0
+ 45.0
+ 40.0
+ 35.0
+ 12.0
+  9.0
+  5.0
+  2.0
+  1.0
+  0.0
+    0.04  Called init var
+ calculating spectrum for z=   55.00000    
+ gas total mass=   667496.3    
+ 
+ gas min     -0.4511174    
+ gas max      0.4545084    
+ Delta sum  -9.4319610E-08
+ Delta var   8.9809448E-02
+ 
+    0.27  Called power spectrum
+   29.89  Called overdensity
+ Writing 
+ /scratch/merz/pm_mhd/160/out_pm/55.000gasps.dat                                
+  
+    0.00  Called write power spectra
+    0.02  Called init var
+ calculating spectrum for z=   50.00000    
+ gas total mass=   667496.3    
+ 
+ gas min     -0.4646007    
+ gas max      0.4931808    
+ Delta sum  -9.4243973E-08
+ Delta var   9.4796769E-02
+ 
+    0.02  Called power spectrum
+    0.16  Called overdensity
+ Writing 
+ /scratch/merz/pm_mhd/160/out_pm/50.000gasps.dat                                
+  
+    0.00  Called write power spectra
+    0.02  Called init var
+ calculating spectrum for z=   45.00000    
+ gas total mass=   667496.2    
+ 
+ gas min     -0.4784886    
+ gas max      0.5618365    
+ Delta sum  -9.3947612E-08
+ Delta var   0.1009869    
+ 
+    0.02  Called power spectrum
+    0.25  Called overdensity
+ Writing 
+ /scratch/merz/pm_mhd/160/out_pm/45.000gasps.dat                                
+  
+    0.00  Called write power spectra
+    0.03  Called init var
+ calculating spectrum for z=   40.00000    
+ gas total mass=   667496.3    
+ 
+ gas min     -0.5088382    
+ gas max      0.6475459    
+ Delta sum  -9.3976027E-08
+ Delta var   0.1089125    
+ 
+    0.03  Called power spectrum
+    0.23  Called overdensity
+ Writing 
+ /scratch/merz/pm_mhd/160/out_pm/40.000gasps.dat                                
+  
+    0.00  Called write power spectra
+    0.03  Called init var
+ calculating spectrum for z=   35.00000    
+ gas total mass=   667496.3    
+ 
+ gas min     -0.5713162    
+ gas max      0.7589316    
+ Delta sum  -9.3938134E-08
+ Delta var   0.1195534    
+ 
+    0.02  Called power spectrum
+    0.17  Called overdensity
+ Writing 
+ /scratch/merz/pm_mhd/160/out_pm/35.000gasps.dat                                
+  
+    0.00  Called write power spectra
+    0.02  Called init var
+ calculating spectrum for z=   12.00000    
+ gas total mass=   667496.2    
+ 
+ gas min     -0.9252167    
+ gas max       4.140799    
+ Delta sum  -9.3992199E-08
+ Delta var   0.3049456    
+ 
+    0.41  Called power spectrum
+    0.58  Called overdensity
+ Writing 
+ /scratch/merz/pm_mhd/160/out_pm/12.000gasps.dat                                
+  
+    0.00  Called write power spectra
+    0.02  Called init var
+ calculating spectrum for z=   9.000000    
+ gas total mass=   667496.2    
+ 
+ gas min     -0.9539930    
+ gas max       8.936218    
+ Delta sum  -9.3883415E-08
+ Delta var   0.4035831    
+ 
+    0.03  Called power spectrum
+    0.17  Called overdensity
+ Writing 
+ /scratch/merz/pm_mhd/160/out_pm/9.000gasps.dat                                 
+  
+    0.00  Called write power spectra
+    0.04  Called init var
+ calculating spectrum for z=   5.000000    
+ gas total mass=   667496.2    
+ 
+ gas min     -0.9887162    
+ gas max       47.93063    
+ Delta sum  -9.4287735E-08
+ Delta var   0.7705226    
+ 
+    0.25  Called power spectrum
+    0.39  Called overdensity
+ Writing 
+ /scratch/merz/pm_mhd/160/out_pm/5.000gasps.dat                                 
+  
+    0.00  Called write power spectra
+    0.04  Called init var
+ calculating spectrum for z=   2.000000    
+ gas total mass=   667496.2    
+ 
+ gas min     -0.9989641    
+ gas max       188.4909    
+ Delta sum  -9.4544816E-08
+ Delta var    2.251752    
+ 
+    0.03  Called power spectrum
+    0.17  Called overdensity
+ Writing 
+ /scratch/merz/pm_mhd/160/out_pm/2.000gasps.dat                                 
+  
+    0.00  Called write power spectra
+    0.04  Called init var
+ calculating spectrum for z=   1.000000    
+ error opening checkpoint
+ rank           0 file:
+ /scratch/merz/pm_mhd/160/out_pm/1.000mhd0.dat                                  
+                      
+ error opening checkpoint
+ rank           1 file:
+ /scratch/merz/pm_mhd/160/out_pm/1.000mhd1.dat                                  
+ error opening checkpoint
+ rank           4 file:
+ /scratch/merz/pm_mhd/160/out_pm/1.000mhd4.dat                                  
+                      
+ error opening checkpoint
+ rank           5 file:
+ /scratch/merz/pm_mhd/160/out_pm/1.000mhd5.dat                                  
+                      
+ error opening checkpoint
+ rank           6 file:
+ /scratch/merz/pm_mhd/160/out_pm/1.000mhd6.dat                                  
+                      
+ error opening checkpoint
+ rank           7 file:
+ /scratch/merz/pm_mhd/160/out_pm/1.000mhd7.dat                                  
+                      
+ error opening checkpoint
+ rank           2 file:
+ /scratch/merz/pm_mhd/160/out_pm/1.000mhd2.dat                                  
+                      
+ error opening checkpoint
+ rank           3 file:
+ /scratch/merz/pm_mhd/160/out_pm/1.000mhd3.dat                                  
+                      
+-----------------------------------------------------------------------------
+One of the processes started by mpirun has exited with a nonzero exit
+code.  This typically indicates that the process finished in error.
+If your process did not finish in error, be sure to include a "return
+0" or "exit(0)" in your C code before exiting the application.
+
+PID 22988 failed on node n0 (10.3.1.1) with exit status 1.
+-----------------------------------------------------------------------------

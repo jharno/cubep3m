@@ -1,0 +1,73 @@
+ dist_init running on           8 nodes
+ using cubic distribution:           2 nodes per dimension
+         320 cells in mesh
+ nodes              8
+ nc               320
+ np               160
+ 
+ n_s         1.000000    
+ sigma_8    0.9000000    
+ omega_m    0.2700000    
+ omega_l    0.7300000    
+ omega_b    3.9999999E-02
+ 
+ box         35.00000    
+ redshift    60.00000    
+ 
+    0.00  Called write params
+    0.68  Called init var
+ Reading cmbfast.lcdm
+    0.00  Called transfer fnc
+ Generating seeds
+ rank           0 Writing /scratch/merz/cubepm_050727/seed0.init
+ rank           1 Writing /scratch/merz/cubepm_050727/seed1.init
+ rank           6 Writing /scratch/merz/cubepm_050727/seed6.init
+ rank           3 Writing /scratch/merz/cubepm_050727/seed3.init
+ rank           7 Writing /scratch/merz/cubepm_050727/seed7.init
+ rank           2 Writing /scratch/merz/cubepm_050727/seed2.init
+ rank           4 Writing /scratch/merz/cubepm_050727/seed4.init
+ rank           5 Writing /scratch/merz/cubepm_050727/seed5.init
+   39.94  Called noisemap
+    0.16  Called power spectrum
+    0.15  Called power spectrum
+    3.18  Called delta field
+    4.46  Called potential field
+ total exiting particles =       34623
+ total buffered particles =           0
+ total particles =     4096000
+ DM total mass=  3.2768000E+07
+ 
+ DM min      -1.000000    
+ DM max       6.974177    
+ Delta sum  -1.1083398E-11
+ Delta var    1.168608    
+ 
+    0.17  Called power spectrum
+    6.42  Called dm
+ Writing /scratch/merz/cubepm_050727/xv1.ic                          
+ Writing /scratch/merz/cubepm_050727/xv0.ic                          
+ Writing /scratch/merz/cubepm_050727/xv2.ic                          
+ Writing /scratch/merz/cubepm_050727/xv6.ic                          
+ Writing /scratch/merz/cubepm_050727/xv4.ic                          
+ Writing /scratch/merz/cubepm_050727/xv5.ic                          
+ Writing /scratch/merz/cubepm_050727/xv7.ic                          
+ Writing /scratch/merz/cubepm_050727/xv3.ic                          
+    7.31  Called write dm
+    7.25  Called write dm
+    7.31  Called write dm
+    7.18  Called write dm
+    7.43  Called write dm
+    7.44  Called write dm
+   11.22  Called write dm
+   11.29  Called write dm
+    4.20  Called potential field
+ 
+ Gas min    -0.8360494    
+ Gas max     0.8266768    
+ Delta sum  -3.3446020E-11
+ Delta var   0.1522861    
+ 
+    5.89  Called gas
+ Writing /scratch/merz/cubepm_050727/pk.init                         
+ Writing /scratch/merz/cubepm_050727/pk0.init                        
+    0.01  Called write power spectra

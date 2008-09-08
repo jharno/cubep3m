@@ -1,0 +1,22 @@
+kernels readme
+--------------
+
+Current kernels included:
+
+spherical fit:
+
+  wfxyz2.ascii :: coarse force kernel, spanning 1:4 elements
+  wg1.ascii    :: fine potential kernel, spanning 1:16 elements
+
+least squares fit:
+
+  kernelcoarseall.dat :: coarse force kernel, spanning 1:6 elements
+  kernelfineall.dat :: fine potential kernel, spanning 1:16 elements
+
+--------------
+
+  -- change files that are read in for kernel correction
+  -- change bounds that kernels are read in over accordingly
+
+--------------
+

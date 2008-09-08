@@ -1,0 +1,39 @@
+ dist_init running on           1 nodes
+ using cubic distribution:           1 nodes per dimension
+         192 cells in mesh
+ nodes              1
+ nc               192
+ np                96
+ 
+ n_s        0.9500000    
+ sigma_8    0.7400000    
+ omega_m    0.2700000    
+ omega_l    0.7300000    
+ 
+ box         100.0000    
+ redshift    200.0000    
+ 
+    0.00  Called write params
+    0.12  Called init var
+ Reading cmbfast.lcdm
+    0.00  Called transfer fnc
+ Generating seeds
+ rank           0 Writing /scratch/merz/cubep3m/seed0.init
+    0.27  Called power spectrum
+   40.86  Called noisemap
+    0.27  Called power spectrum
+ 
+ Delta min     -0.1063956    
+ Delta max      0.1197559    
+ Delta sum  -4.1104720E-13
+ Delta var   2.1666070E-02
+ 
+    4.59  Called delta field
+ Caching Delta on disk
+    3.58  Called potential field
+ np_node_dim=          96
+ writing out np_local=      884736
+    4.28  Called dm
+ Writing /scratch/merz/cubep3m/pk.init                               
+ Writing /scratch/merz/cubep3m/pk0.init                              
+    0.00  Called write power spectra

@@ -1,0 +1,116 @@
+ 20070418 10:28:02
+ cubepm running on           1 nodes with           8 cores per node
+ using cubic distribution:           1 nodes per dimension
+         576 cells in mesh
+ majority of memory used / node :
+  2.1585395E+09 bytes
+   2.010297     GB
+ Starting simulation at:
+ z      a
+200.0  0.0050
+ Checkpointing performed at:
+ 12.0  0.0769
+  9.0  0.1000
+  3.0  0.2500
+  0.0  1.0000
+ Projections performed at:
+ z        a
+ 25.0000  0.0385
+ 19.0000  0.0500
+ 13.0000  0.0714
+ 10.0000  0.0909
+  7.0000  0.1250
+  5.0000  0.1667
+  2.5000  0.2857
+  2.0000  0.3333
+  1.5000  0.4000
+  1.0000  0.5000
+  0.7500  0.5714
+  0.5000  0.6667
+  0.2500  0.8000
+  0.0000  1.0000
+ Halo catalogs generated at:
+ z        a
+12.0000  0.0769
+ 9.0000  0.1000
+ 3.0000  0.2500
+ 0.0000  1.0000
+ finished variable init   3.420500    
+ finished kernel init   66.53480    
+ opening particle list:/mnt/scratch/local/merz/cubep3m_threads/xv0.ic
+ number of particles =               2097152
+ particle mass=   91.12500    
+ total dark matter mass =  1.9110298E+08
+ finished initializing particles   67.05160    
+ starting main loop
+ 
+ Sweep number:            1
+ Tau         :   -42.53234      -41.53234    
+ Redshift    :    200.0000       190.6595    
+ Scale factor:   4.9751243E-03  5.0963550E-03  5.2175857E-03
+ Expansion   :   4.6470076E-02
+ Time step   :    1.000000       1.000000       1000.000       1000.000    
+   1000.000    
+ current shake offset:  -1.999998      -1.898078     -0.5899354    
+ pos updt :   1.8700000E-02  1.8700000E-02  1.8700000E-02
+ linklist :   0.1213000      0.1213000      0.1213000    
+ par pass :   0.1819000      0.1819000      0.1819000    
+ maximum timestep from fine force=   2.742335    
+ maximum timestep from pp force=   1.798426    
+ sum of rho_f=   191102976.000000     
+ cm  mass :   0.3680000      0.3680000      0.3680000    
+ sum of rho_c=   191102976.026200     
+ cm force :   0.8659000      0.8659000      0.8659000    
+ cf  buff :   6.2000002E-03  6.2000002E-03  6.2000002E-03
+ maximum dt from coarse grid=   1.433856    
+ c max dt :   6.2300000E-02  6.2300000E-02  6.2300000E-02
+ cm   vel :   0.1737000      0.1737000      0.1737000    
+ total number of particles =               2097152
+ del part :   6.2300000E-02  6.2300000E-02  6.2300000E-02
+ finished particle mesh   114.9774    
+ 
+ Sweep number:            2
+ Tau         :   -41.53234      -40.53234    
+ Redshift    :    190.6595       181.5413    
+ Scale factor:   5.2175857E-03  5.3478996E-03  5.4782135E-03
+ Expansion   :   4.7575310E-02
+ Time step   :    1.000000       1.000000       2.742335       1.798426    
+   1.433856    
+ current shake offset:  -1.332341     -4.5856237E-02  0.7632173    
+ pos updt :   1.5200000E-02  1.5200000E-02  1.5200000E-02
+ linklist :   0.1217000      0.1217000      0.1217000    
+ par pass :   0.1679000      0.1679000      0.1679000    
+ maximum timestep from fine force=   2.399924    
+ maximum timestep from pp force=   1.721952    
+ sum of rho_f=   191102976.000000     
+ cm  mass :   0.3631000      0.3631000      0.3631000    
+ sum of rho_c=   191102976.003324     
+ cm force :   0.8564000      0.8564000      0.8564000    
+ cf  buff :   6.0999999E-03  6.0999999E-03  6.0999999E-03
+ maximum dt from coarse grid=   1.382790    
+ c max dt :   6.2300000E-02  6.2300000E-02  6.2300000E-02
+ cm   vel :   0.1720000      0.1720000      0.1720000    
+ total number of particles =               2097152
+ del part :   5.9000000E-02  5.9000000E-02  5.9000000E-02
+ finished particle mesh   138.7662    
+ 
+ Sweep number:            3
+ Tau         :   -40.53234      -39.53234    
+ Redshift    :    181.5413       172.6452    
+ Scale factor:   5.4782135E-03  5.6185410E-03  5.7588685E-03
+ Expansion   :   4.8734404E-02
+ Time step   :    1.000000       1.000000       2.399924       1.721952    
+   1.382790    
+ current shake offset:  -1.990920       1.615453       1.946672    
+ pos updt :   1.4500000E-02  1.4500000E-02  1.4500000E-02
+ linklist :   0.1214000      0.1214000      0.1214000    
+ par pass :   0.1509000      0.1509000      0.1509000    
+forrtl: error (78): process killed (SIGTERM)
+-----------------------------------------------------------------------------
+One of the processes started by mpirun has exited with a nonzero exit
+code.  This typically indicates that the process finished in error.
+If your process did not finish in error, be sure to include a "return
+0" or "exit(0)" in your C code before exiting the application.
+
+PID 14893 failed on node n0 (127.0.0.1) with exit status 1.
+-----------------------------------------------------------------------------

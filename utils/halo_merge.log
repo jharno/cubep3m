@@ -1,0 +1,85 @@
+ halofinds to recompose:
+ 14.0
+ 12.0
+  9.0
+  6.0
+  2.0
+  1.0
+  0.0
+ processing z=   14.00000    
+ rank:           0 number of halos=           0
+ rank:           1 number of halos=           0
+ rank:           2 number of halos=           0
+ rank:           3 number of halos=           0
+ rank:           4 number of halos=           0
+ rank:           5 number of halos=           0
+ rank:           6 number of halos=           0
+ rank:           7 number of halos=           0
+ total halos=           0
+ finished pass
+ processing z=   12.00000    
+ rank:           0 number of halos=           0
+ rank:           1 number of halos=           0
+ rank:           2 number of halos=           0
+ rank:           3 number of halos=           0
+ rank:           4 number of halos=           0
+ rank:           5 number of halos=           0
+ rank:           6 number of halos=           0
+ rank:           7 number of halos=           0
+ total halos=           0
+ finished pass
+ processing z=   9.000000    
+ rank:           0 number of halos=           0
+ rank:           1 number of halos=           0
+ rank:           2 number of halos=           0
+ rank:           3 number of halos=           0
+ rank:           4 number of halos=           0
+ rank:           5 number of halos=           0
+ rank:           6 number of halos=           0
+ rank:           7 number of halos=           0
+ total halos=           0
+ finished pass
+ processing z=   6.000000    
+ rank:           0 number of halos=           1
+ rank:           1 number of halos=           0
+ rank:           2 number of halos=           1
+ rank:           3 number of halos=           0
+ rank:           4 number of halos=           1
+ rank:           5 number of halos=           0
+ rank:           6 number of halos=           0
+ rank:           7 number of halos=           0
+ total halos=           3
+ finished pass
+ processing z=   2.000000    
+ rank:           0 number of halos=         292
+ rank:           1 number of halos=         360
+ rank:           2 number of halos=         380
+ rank:           3 number of halos=         314
+ rank:           4 number of halos=         253
+ rank:           5 number of halos=         227
+ rank:           6 number of halos=         363
+ rank:           7 number of halos=         369
+ total halos=        2558
+ finished pass
+ processing z=   1.000000    
+ rank:           0 number of halos=         478
+ rank:           1 number of halos=         542
+ rank:           2 number of halos=         551
+ rank:           3 number of halos=         541
+ rank:           4 number of halos=         403
+ rank:           5 number of halos=         381
+ rank:           6 number of halos=         585
+ rank:           7 number of halos=         587
+ total halos=        4068
+ finished pass
+ processing z=  0.0000000E+00
+ rank:           0 number of halos=         539
+ rank:           1 number of halos=         592
+ rank:           2 number of halos=         637
+ rank:           3 number of halos=         560
+ rank:           4 number of halos=         415
+ rank:           5 number of halos=         407
+ rank:           6 number of halos=         623
+ rank:           7 number of halos=         636
+ total halos=        4409
+ finished pass

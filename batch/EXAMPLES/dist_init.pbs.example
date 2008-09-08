@@ -1,0 +1,62 @@
+#!/bin/csh 
+#PBS -l nodes=64:ppn=8
+#PBS -q workq
+#PBS -r n
+#PBS -l walltime=48:00:00
+#PBS -N dist_init
+
+
+cd $PBS_O_WORKDIR
+
+source batch_parameters.csh
+
+lamboot
+
+# clean scratch path
+#lamexec N rm -rf $LOCAL_SCRATCH_PATH 
+rm -rf $LOCAL_SCRATCH_PATH 
+
+# make scratch directory
+#lamexec N mkdir -p $LOCAL_SCRATCH_PATH 
+mkdir -p $LOCAL_SCRATCH_PATH 
+
+# log nodes used
+cat $PBS_NODEFILE > nodes$RUN_SUFFIX
+
+# list of programs to run
+mpirun -np $NUM_CPU_COMPILED dist_init >& dist_init$RUN_SUFFIX
+mpirun -np $NUM_CPU_COMPILED cic_init_power >& cic_init_power$RUN_SUFFIX
+#mpirun -np $NUM_CPU_COMPILED cubep3m >& cubep3m$RUN_SUFFIX
+#mpirun -np $NUM_CPU_COMPILED halo_merge >& halo_merge$RUN_SUFFIX
+#mpirun -np $NUM_CPU_COMPILED cic_power >& cic_power$RUN_SUFFIX
+# Might not need these
+#mpirun -np $NUM_CPU_COMPILED gas_power >& gas_power$RUN_SUFFIX
+#mpirun -np $NUM_CPU_COMPILED recompose >& recompose$RUN_SUFFIX
+
+# Serial, but should be fast
+#ssh `head -1 nodes$RUN_SUFFIX` $PBS_O_WORKDIR/PSvsSim >& PSvsSim$RUN_SUFFIX
+#ssh `head -1 nodes$RUN_SUFFIX` $PBS_O_WORKDIR/pgm_proj >& pgm_proj$RUN_SUFFIX
+#ssh `head -1 nodes$RUN_SUFFIX` $PBS_O_WORKDIR/slice_sample >& slice_sample$RUN_SUFFIX
+
+# Delete archival path 
+#rm -rf $ARCHIVAL_PATH 
+
+# Make archive path
+#mkdir $ARCHIVAL_PATH 
+
+# archive the scratch directories on uber
+#lamexec N uber_copy.csh 
+
+# remove the scratch directories
+#lamexec N rm -rf $LOCAL_SCRATCH_PATH 
+
+# shutdown lamds
+lamhalt
+
+# put logs in archive directory
+#mv *$RUN_SUFFIX $ARCHIVAL_PATH 
+
+unset RUN_SUFFIX
+unset NUM_CPU_COMPILED
+#unset ARCHIVAL_PATH
+unset LOCAL_SCRATCH_PATH

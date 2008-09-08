@@ -1,0 +1,90 @@
+ dist_init running on           8 nodes
+ using cubic distribution:           2 nodes per dimension
+         160 cells in mesh
+ nodes              8
+ nc               160
+ 
+ box         100.0000    
+ 
+    0.00  Called write params
+ checkpoints to recompose:
+ 55.0
+ 50.0
+ 45.0
+ 40.0
+ 35.0
+    0.05  Called init var
+ calculating spectrum for z=   55.00000    
+ gas total mass=   667496.3    
+ 
+ gas min     -0.4511176    
+ gas max      0.4545082    
+ Delta sum  -9.4384042E-08
+ Delta var   8.9809448E-02
+ 
+    0.02  Called power spectrum
+   29.67  Called overdensity
+ Writing 
+ /scratch/merz/pm_mhd/160/out_pm/55.000gasps.dat                                
+  
+    0.00  Called write power spectra
+    0.04  Called init var
+ calculating spectrum for z=   50.00000    
+ gas total mass=   667496.3    
+ 
+ gas min     -0.4646009    
+ gas max      0.4931824    
+ Delta sum  -9.4468191E-08
+ Delta var   9.4796769E-02
+ 
+    0.02  Called power spectrum
+    0.17  Called overdensity
+ Writing 
+ /scratch/merz/pm_mhd/160/out_pm/50.000gasps.dat                                
+  
+    0.00  Called write power spectra
+    0.04  Called init var
+ calculating spectrum for z=   45.00000    
+ gas total mass=   667496.2    
+ 
+ gas min     -0.4784889    
+ gas max      0.5618378    
+ Delta sum  -9.4245898E-08
+ Delta var   0.1009869    
+ 
+    0.02  Called power spectrum
+    0.17  Called overdensity
+ Writing 
+ /scratch/merz/pm_mhd/160/out_pm/45.000gasps.dat                                
+  
+    0.00  Called write power spectra
+    0.04  Called init var
+ calculating spectrum for z=   40.00000    
+ gas total mass=   667496.3    
+ 
+ gas min     -0.5088382    
+ gas max      0.6475468    
+ Delta sum  -9.4202370E-08
+ Delta var   0.1089125    
+ 
+    0.02  Called power spectrum
+    0.19  Called overdensity
+ Writing 
+ /scratch/merz/pm_mhd/160/out_pm/40.000gasps.dat                                
+  
+    0.00  Called write power spectra
+    0.04  Called init var
+ calculating spectrum for z=   35.00000    
+ gas total mass=   667496.3    
+ 
+ gas min     -0.5713175    
+ gas max      0.7589321    
+ Delta sum  -9.4177160E-08
+ Delta var   0.1195534    
+ 
+    0.02  Called power spectrum
+    0.36  Called overdensity
+ Writing 
+ /scratch/merz/pm_mhd/160/out_pm/35.000gasps.dat                                
+  
+    0.00  Called write power spectra

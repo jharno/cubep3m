@@ -1,0 +1,376 @@
+ dist_init running on          64 nodes
+ using cubic distribution:           4 nodes per dimension
+         768 cells in mesh
+ nodes             64
+ nc               768
+ np               384
+ 
+ n_s         1.000000    
+ sigma_8    0.9000000    
+ omega_m    0.2700000    
+ omega_l    0.7300000    
+ omega_b    3.9999999E-02
+ 
+ box         100.0000    
+ redshift    140.0000    
+ 
+    0.00  Called write params
+    0.68  Called init var
+ Reading cmbfast.lcdm
+    0.43  Called transfer fnc
+ Generating seeds
+ rank          16 Writing /scratch/merz/cubepm/seed16.init
+ rank          29 Writing /scratch/merz/cubepm/seed29.init
+ rank          25 Writing /scratch/merz/cubepm/seed25.init
+ rank          19 Writing /scratch/merz/cubepm/seed19.init
+ rank          30 Writing /scratch/merz/cubepm/seed30.init
+ rank          28 Writing /scratch/merz/cubepm/seed28.init
+ rank           5 Writing /scratch/merz/cubepm/seed5.init
+ rank          21 Writing /scratch/merz/cubepm/seed21.init
+ rank           3 Writing /scratch/merz/cubepm/seed3.init
+ rank          11 Writing /scratch/merz/cubepm/seed11.init
+ rank          15 Writing /scratch/merz/cubepm/seed15.init
+ rank          13 Writing /scratch/merz/cubepm/seed13.init
+ rank          27 Writing /scratch/merz/cubepm/seed27.init
+ rank           2 Writing /scratch/merz/cubepm/seed2.init
+ rank          20 Writing /scratch/merz/cubepm/seed20.init
+ rank           6 Writing /scratch/merz/cubepm/seed6.init
+ rank          14 Writing /scratch/merz/cubepm/seed14.init
+ rank           1 Writing /scratch/merz/cubepm/seed1.init
+ rank          12 Writing /scratch/merz/cubepm/seed12.init
+ rank          23 Writing /scratch/merz/cubepm/seed23.init
+ rank          58 Writing /scratch/merz/cubepm/seed58.init
+ rank          41 Writing /scratch/merz/cubepm/seed41.init
+ rank          49 Writing /scratch/merz/cubepm/seed49.init
+ rank          31 Writing /scratch/merz/cubepm/seed31.init
+ rank          63 Writing /scratch/merz/cubepm/seed63.init
+ rank          22 Writing /scratch/merz/cubepm/seed22.init
+ rank          40 Writing /scratch/merz/cubepm/seed40.init
+ rank          36 Writing /scratch/merz/cubepm/seed36.init
+ rank          50 Writing /scratch/merz/cubepm/seed50.init
+ rank           4 Writing /scratch/merz/cubepm/seed4.init
+ rank          42 Writing /scratch/merz/cubepm/seed42.init
+ rank          10 Writing /scratch/merz/cubepm/seed10.init
+ rank          24 Writing /scratch/merz/cubepm/seed24.init
+ rank           9 Writing /scratch/merz/cubepm/seed9.init
+ rank          56 Writing /scratch/merz/cubepm/seed56.init
+ rank          39 Writing /scratch/merz/cubepm/seed39.init
+ rank           8 Writing /scratch/merz/cubepm/seed8.init
+ rank          26 Writing /scratch/merz/cubepm/seed26.init
+ rank           7 Writing /scratch/merz/cubepm/seed7.init
+ rank          18 Writing /scratch/merz/cubepm/seed18.init
+ rank          32 Writing /scratch/merz/cubepm/seed32.init
+ rank          17 Writing /scratch/merz/cubepm/seed17.init
+ rank          54 Writing /scratch/merz/cubepm/seed54.init
+ rank           0 Writing /scratch/merz/cubepm/seed0.init
+ rank          44 Writing /scratch/merz/cubepm/seed44.init
+ rank          38 Writing /scratch/merz/cubepm/seed38.init
+ rank          52 Writing /scratch/merz/cubepm/seed52.init
+ rank          59 Writing /scratch/merz/cubepm/seed59.init
+ rank          47 Writing /scratch/merz/cubepm/seed47.init
+ rank          33 Writing /scratch/merz/cubepm/seed33.init
+ rank          57 Writing /scratch/merz/cubepm/seed57.init
+ rank          60 Writing /scratch/merz/cubepm/seed60.init
+ rank          34 Writing /scratch/merz/cubepm/seed34.init
+ rank          43 Writing /scratch/merz/cubepm/seed43.init
+ rank          55 Writing /scratch/merz/cubepm/seed55.init
+ rank          45 Writing /scratch/merz/cubepm/seed45.init
+ rank          53 Writing /scratch/merz/cubepm/seed53.init
+ rank          46 Writing /scratch/merz/cubepm/seed46.init
+ rank          37 Writing /scratch/merz/cubepm/seed37.init
+ rank          51 Writing /scratch/merz/cubepm/seed51.init
+ rank          48 Writing /scratch/merz/cubepm/seed48.init
+ rank          61 Writing /scratch/merz/cubepm/seed61.init
+ rank          62 Writing /scratch/merz/cubepm/seed62.init
+ rank          35 Writing /scratch/merz/cubepm/seed35.init
+    0.26  Called power spectrum
+   62.38  Called noisemap
+ 
+ Delta min     -0.3614877    
+ Delta max      0.3794598    
+ Delta sum  -1.2664297E-12
+ Delta var   6.3966736E-02
+ 
+    0.27  Called power spectrum
+    0.31  Called power spectrum
+    8.61  Called delta field
+    8.08  Called potential field
+ total exiting particles =      214505
+ total buffered particles =           0
+ total particles =              56623104
+ DM total mass=  4.5298483E+08
+ 
+ DM min      -1.000000    
+ DM max       6.989517    
+ DM Delta sum  -1.1399524E-12
+ DM Delta var    1.189072    
+ 
+ Writing /scratch/merz/cubepm/xv4.ic                                 
+ Writing /scratch/merz/cubepm/xv8.ic                                 
+ Writing /scratch/merz/cubepm/xv10.ic                                
+ Writing /scratch/merz/cubepm/xv1.ic                                 
+ Writing /scratch/merz/cubepm/xv33.ic                                
+ Writing /scratch/merz/cubepm/xv5.ic                                 
+ Writing /scratch/merz/cubepm/xv16.ic                                
+ Writing /scratch/merz/cubepm/xv28.ic                                
+ Writing /scratch/merz/cubepm/xv18.ic                                
+ Writing /scratch/merz/cubepm/xv50.ic                                
+ Writing /scratch/merz/cubepm/xv26.ic                                
+ Writing /scratch/merz/cubepm/xv58.ic                                
+ Writing /scratch/merz/cubepm/xv23.ic                                
+ Writing /scratch/merz/cubepm/xv9.ic                                 
+ Writing /scratch/merz/cubepm/xv41.ic                                
+ Writing /scratch/merz/cubepm/xv19.ic                                
+ Writing /scratch/merz/cubepm/xv51.ic                                
+ Writing /scratch/merz/cubepm/xv27.ic                                
+ Writing /scratch/merz/cubepm/xv59.ic                                
+ Writing /scratch/merz/cubepm/xv12.ic                                
+ Writing /scratch/merz/cubepm/xv15.ic                                
+ Writing /scratch/merz/cubepm/xv6.ic                                 
+ Writing /scratch/merz/cubepm/xv3.ic                                 
+ Writing /scratch/merz/cubepm/xv7.ic                                 
+ Writing /scratch/merz/cubepm/xv39.ic                                
+ Writing /scratch/merz/cubepm/xv30.ic                                
+ Writing /scratch/merz/cubepm/xv62.ic                                
+ Writing /scratch/merz/cubepm/xv29.ic                                
+ Writing /scratch/merz/cubepm/xv61.ic                                
+ Writing /scratch/merz/cubepm/xv24.ic                                
+ Writing /scratch/merz/cubepm/xv56.ic                                
+ Writing /scratch/merz/cubepm/xv20.ic                                
+ Writing /scratch/merz/cubepm/xv52.ic                                
+ Writing /scratch/merz/cubepm/xv31.ic                                
+ Writing /scratch/merz/cubepm/xv63.ic                                
+ Writing /scratch/merz/cubepm/xv22.ic                                
+ Writing /scratch/merz/cubepm/xv54.ic                                
+ Writing /scratch/merz/cubepm/xv25.ic                                
+ Writing /scratch/merz/cubepm/xv57.ic                                
+ Writing /scratch/merz/cubepm/xv17.ic                                
+ Writing /scratch/merz/cubepm/xv49.ic                                
+ Writing /scratch/merz/cubepm/xv42.ic                                
+ Writing /scratch/merz/cubepm/xv60.ic                                
+ Writing /scratch/merz/cubepm/xv35.ic                                
+    0.27  Called power spectrum
+   10.98  Called dm
+ Writing /scratch/merz/cubepm/xv0.ic                                 
+ Writing /scratch/merz/cubepm/xv32.ic                                
+ Writing /scratch/merz/cubepm/xv40.ic                                
+ Writing /scratch/merz/cubepm/xv47.ic                                
+ Writing /scratch/merz/cubepm/xv36.ic                                
+ Writing /scratch/merz/cubepm/xv38.ic                                
+ Writing /scratch/merz/cubepm/xv2.ic                                 
+ Writing /scratch/merz/cubepm/xv34.ic                                
+ Writing /scratch/merz/cubepm/xv44.ic                                
+ Writing /scratch/merz/cubepm/xv13.ic                                
+ Writing /scratch/merz/cubepm/xv45.ic                                
+ Writing /scratch/merz/cubepm/xv55.ic                                
+ Writing /scratch/merz/cubepm/xv11.ic                                
+ Writing /scratch/merz/cubepm/xv43.ic                                
+ Writing /scratch/merz/cubepm/xv48.ic                                
+ Writing /scratch/merz/cubepm/xv14.ic                                
+ Writing /scratch/merz/cubepm/xv46.ic                                
+ Writing /scratch/merz/cubepm/xv37.ic                                
+ Writing /scratch/merz/cubepm/xv21.ic                                
+    0.24  Called write dm
+    0.20  Called write dm
+    0.23  Called write dm
+    0.20  Called write dm
+    0.34  Called write dm
+    0.32  Called write dm
+    0.33  Called write dm
+    0.31  Called write dm
+    0.37  Called write dm
+    0.32  Called write dm
+    0.23  Called write dm
+    0.35  Called write dm
+    0.31  Called write dm
+    0.36  Called write dm
+    0.34  Called write dm
+    0.36  Called write dm
+    0.32  Called write dm
+    0.31  Called write dm
+    0.30  Called write dm
+    0.31  Called write dm
+    0.34  Called write dm
+    0.34  Called write dm
+    0.35  Called write dm
+    0.23  Called write dm
+    0.36  Called write dm
+    0.36  Called write dm
+    0.37  Called write dm
+    0.35  Called write dm
+    0.25  Called write dm
+    0.33  Called write dm
+    0.32  Called write dm
+    0.38  Called write dm
+    0.22  Called write dm
+    0.35  Called write dm
+    0.33  Called write dm
+    0.34  Called write dm
+    0.32  Called write dm
+    0.33  Called write dm
+    0.32  Called write dm
+    0.38  Called write dm
+    0.41  Called write dm
+    0.31  Called write dm
+    0.36  Called write dm
+    0.31  Called write dm
+    0.34  Called write dm
+    0.27  Called write dm
+    0.26  Called write dm
+    0.39  Called write dm
+    0.35  Called write dm
+    0.27  Called write dm
+    0.34  Called write dm
+    0.39  Called write dm
+    0.30  Called write dm
+    0.24  Called write dm
+    0.33  Called write dm
+    0.34  Called write dm
+    0.31  Called write dm
+ Writing /scratch/merz/cubepm/xv53.ic                                
+    0.30  Called write dm
+    0.31  Called write dm
+    0.41  Called write dm
+    0.23  Called write dm
+    0.27  Called write dm
+    0.33  Called write dm
+    0.32  Called write dm
+    7.73  Called potential field
+ Writing /scratch/merz/cubepm/mhd_ic57.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic41.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic35.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic33.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic51.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic50.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic63.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic1.dat                            
+ Writing /scratch/merz/cubepm/mhd_ic19.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic53.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic7.dat                            
+ Writing /scratch/merz/cubepm/mhd_ic3.dat                            
+ Writing /scratch/merz/cubepm/mhd_ic21.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic5.dat                            
+ Writing /scratch/merz/cubepm/mhd_ic45.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic49.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic43.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic18.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic39.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic46.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic2.dat                            
+ Writing /scratch/merz/cubepm/mhd_ic34.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic47.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic55.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic44.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic42.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic13.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic54.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic62.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic52.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic61.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic9.dat                            
+ Writing /scratch/merz/cubepm/mhd_ic4.dat                            
+ Writing /scratch/merz/cubepm/mhd_ic37.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic11.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic40.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic6.dat                            
+ Writing /scratch/merz/cubepm/mhd_ic38.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic14.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic60.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic58.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic15.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic36.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic59.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic27.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic10.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic56.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic23.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic8.dat                            
+ Writing /scratch/merz/cubepm/mhd_ic48.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic29.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic17.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic20.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic26.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic12.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic22.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic25.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic31.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic32.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic30.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic28.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic24.dat                           
+ Writing /scratch/merz/cubepm/mhd_ic16.dat                           
+ 
+ Gas min    -0.3597026    
+ Gas max     0.3775840    
+ Delta sum   2.2637346E-12
+ Delta var   6.3650019E-02
+ 
+   10.48  Called gas
+ Writing /scratch/merz/cubepm/mhd_ic0.dat                            
+    2.09  Called write gas
+    2.09  Called write gas
+    2.08  Called write gas
+    2.29  Called write gas
+    1.83  Called write gas
+    2.00  Called write gas
+    2.16  Called write gas
+    1.99  Called write gas
+    2.30  Called write gas
+    2.17  Called write gas
+    2.11  Called write gas
+    2.27  Called write gas
+    2.34  Called write gas
+    1.80  Called write gas
+    2.15  Called write gas
+    2.23  Called write gas
+    2.02  Called write gas
+    2.19  Called write gas
+    2.06  Called write gas
+    2.26  Called write gas
+    2.27  Called write gas
+    1.99  Called write gas
+    2.14  Called write gas
+    2.29  Called write gas
+    2.12  Called write gas
+    2.29  Called write gas
+    1.91  Called write gas
+    2.12  Called write gas
+    1.98  Called write gas
+    2.07  Called write gas
+    2.15  Called write gas
+    2.06  Called write gas
+    2.24  Called write gas
+    2.55  Called write gas
+    2.01  Called write gas
+    2.15  Called write gas
+    1.99  Called write gas
+    2.20  Called write gas
+    2.05  Called write gas
+    1.98  Called write gas
+    2.10  Called write gas
+    2.03  Called write gas
+    2.34  Called write gas
+    2.20  Called write gas
+    2.25  Called write gas
+    1.92  Called write gas
+    2.41  Called write gas
+    2.18  Called write gas
+    1.91  Called write gas
+    2.04  Called write gas
+    2.02  Called write gas
+    2.32  Called write gas
+    2.28  Called write gas
+    2.19  Called write gas
+    2.02  Called write gas
+    2.00  Called write gas
+    2.27  Called write gas
+    2.30  Called write gas
+    2.00  Called write gas
+    2.26  Called write gas
+    2.24  Called write gas
+    2.32  Called write gas
+    2.30  Called write gas
+    1.99  Called write gas
+ Writing /scratch/merz/cubepm/pk.init                                
+ Writing /scratch/merz/cubepm/pk0.init                               
+    0.03  Called write power spectra

@@ -1,0 +1,61 @@
+! :: dist_init header file
+
+include 'dist_init.par'
+
+! :: mpi variables
+
+integer(4), dimension(0:nodes_dim-1,0:nodes_dim-1) :: slab_neighbor
+integer(4), dimension(6) :: cart_neighbor
+integer(4), dimension(3) :: slab_coord, cart_coords
+integer(4) :: slab_rank, mpi_comm_cart, cart_rank, rank, ierr  
+
+#ifdef IA64  !!! REMEMBER TO CHANGE ON 64 BIT SYSTEMS
+!  integer(8) :: plan, iplan
+#else
+  integer(4) :: plan, iplan
+#endif
+
+logical :: firstfftw
+
+! :: simulation variables
+
+integer(4) :: wc_counter, count_i,count_f,count_r, np_local
+real(4) :: mass_p
+
+! :: arrays
+
+real(4), dimension(nc_node_dim,nc_node_dim,nc_node_dim) 		:: cube,den 
+real(4), dimension(0:nc_node_dim+1,0:nc_node_dim+1,0:nc_node_dim+1)     :: phi
+real(4), dimension(nc+2,nc,nc_slab) 				        :: slab, slab_work,init
+real(4), dimension(nc_node_dim,nc_node_dim,nc_slab,0:nodes_slab-1) 	:: recv_cube
+
+!! Power spectrum arrays
+real(4), dimension(5,nk) :: tf
+real(8), dimension(4,nc) :: psinit,psg,psdm
+
+
+! checknoise array
+real(8), dimension(2,(hc+1)**2) :: Asum
+
+! powerspectrum array
+real(8), dimension(5,nc) :: ps_sum
+
+
+! :: particle arrays
+
+real(4), dimension(6,max_np) 						:: xv
+real(4), dimension(6,np_node_dim,np_node_dim,np_node_dim)               :: xv_grid
+
+!! equivalence if possible
+
+equivalence (xv,xv_grid)
+
+common / ivar / slab_rank, plan, iplan, &
+                slab_coord, slab_neighbor, mpi_comm_cart, &
+                cart_rank, cart_neighbor, cart_coords, rank, ierr, &
+                wc_counter, count_i, count_r, count_f, np_local, &
+
+common / rvar / mass_p,init, &
+                slab, cube, slab_work, recv_cube, xv
+
+common / lvar / firstfftw 
