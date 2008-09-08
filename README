@@ -1,4 +1,5 @@
-# To source when checking out the code for the first time.
+# To source when checking out the code FOR THE FIRST TIME
+ 
 # This prevents your next repository update OVER the
 # user-defined files:
 #
@@ -11,13 +12,13 @@ cp input/halofinds.example input/halofinds
 # 4- Projection for images and Lensing
 cp input/projections.example input/projections
 # 5- batch-submission parameters
-cp batch/EXAMPLES/batch_parameters.csh.example batch/EXAMPLE/batch_parameters
+cp batch/EXAMPLES/batch_parameters.csh.example batch/batch_parameters.csh
 # 6-  batch-submission scripts
-cp batch/EXAMPLES/cubepm.pbs.example batch/cubepm.pbs
+cp batch/EXAMPLES/cubep3m.pbs.example batch/cubep3m.pbs
 # 7-  Initialization scripts
 cp batch/EXAMPLES/init_pp_threads.csh.example batch/init_pp_threads.csh
 # 8- Tranfer function
-cp ../utils/dist_init/cmbfast.lcdm.example ../utils/dist_init/cmbfast.lcdm
+cp utils/dist_init/cmbfast.lcdm.example utils/dist_init/cmbfast.lcdm
 
 # This prevents your next repository update from 
 # erasing your personal cosmological parameters [1],
