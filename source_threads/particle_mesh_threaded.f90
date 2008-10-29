@@ -88,6 +88,12 @@
 !      call fine_mesh(tile,thread)
 !#endif
 
+!#ifdef P5M
+!      call pp_extended_force(tile, thread)
+!#endif
+
+
+
 !! normalize fine mesh density
       rho_f(:,:,:,thread)= 0.0
 !! calculate coarse mesh offsets
@@ -98,6 +104,12 @@
       cic_l(:) = nc_tile_dim * tile(:) + 1 - nc_buf
       cic_h(:) = nc_tile_dim * (tile(:) + 1) + nc_buf
 #endif
+
+!#ifdef P5M_DEBUG
+      !write(*,*) 'Tile :', tile
+      !write(*,*) 'Calculatied BC:', cic_l, cic_h  
+!#endif
+
 !! calculate fine mesh density for tile
       do k = cic_l(3), cic_h(3)
         do j = cic_l(2), cic_h(2)
@@ -143,7 +155,7 @@
 !! transform and calculate fine mesh force 
       call cubepm_fftw2('f',thread)
 #ifdef DEBUG
-      print *,'rank',rank,'finished first fft'
+      print *,'rank',rank,'thread',thread,'finished first fft'
 #endif
       cmplx_rho_f(:,:,:,thread)=rho_f(:,:,:,thread)
 
@@ -201,7 +213,7 @@
             pp = hoc(i,j,k)
 #ifdef PPINT
 #ifdef DEBUG
-            if (pp /= 0) print *,pp,i,j,k
+            if (pp /= 0) print *,pp,i,j,k, xv(:,pp)
 #endif
             ipl=0
 #endif
@@ -295,8 +307,9 @@
                         pp_force_accum(:,ip,thread)=pp_force_accum(:,ip,thread)-force_pp
                         pp_force_accum(:,jp,thread)=pp_force_accum(:,jp,thread)+force_pp
                         if (pp_force_flag) then
-                          xv(4:,pp1)=xv(4:,pp1)-force_pp*a_mid*G*dt
-                          xv(4:,pp2)=xv(4:,pp2)+force_pp*a_mid*G*dt
+                           write(*,*) 'Modifying  xv due to PP'
+                           xv(4:,pp1)=xv(4:,pp1)-force_pp*a_mid*G*dt
+                           xv(4:,pp2)=xv(4:,pp2)+force_pp*a_mid*G*dt
                         endif
                       endif
                     enddo
@@ -315,8 +328,28 @@
 ! end fine velocity
 
     enddo
+
+
+
     !$omp end do
     !$omp end parallel
+
+#ifdef P5M
+
+    do cur_tile=1,tiles_node
+       tile(3) = (cur_tile-1) / (tiles_node_dim * tiles_node_dim)
+       j = cur_tile - tile(3) * tiles_node_dim * tiles_node_dim
+       tile(2) = (j-1) /  tiles_node_dim
+       j = j - tile(2) * tiles_node_dim
+       tile(1) = j - 1
+       
+       call pp_extended_force(tile,1)
+
+    enddo
+
+#endif
+
+
 
 #ifdef MHD
     cmaxl=cmax
@@ -328,6 +361,7 @@
       print *,'fluid stats',cmax/freeze,dt*cmax,nerr
     endif
 #endif
+
 
 !! calculate maximum dt from fine mesh force
 

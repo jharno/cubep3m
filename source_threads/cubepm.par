@@ -33,8 +33,9 @@ real(4), parameter      :: cfactor = 1.05
 !! initial and final conditions
 
 ! maximum number of timesteps (in case simulation runs off on us)
+! or for pairwise force testing
 
-integer(4), parameter   :: max_nts = 4000
+integer(4), parameter   :: max_nts = 1000
 
 ! if we are going to restart a simulation, set to true and
 ! specify which checkpoint to restart from
@@ -48,7 +49,7 @@ integer(4), parameter   :: restart_checkpoint = 1
 
 logical, parameter      :: random_ic   = .false.
 logical, parameter      :: grid_ic     = .false.
-logical, parameter      :: pairwise_ic = .false. !.true. 
+logical, parameter      :: pairwise_ic = .false.!.true. 
 logical, parameter      :: pair_infall = .false.
 logical, parameter      :: pair_infall_no_shake = .false.
 logical, parameter      :: pp_test     = .false.
@@ -56,7 +57,7 @@ logical, parameter      :: shake_test_ic = .false.
 real, parameter         :: pair_infall_mass = 1000
 real, parameter         :: pair_infall_sep  = 2.0
 real, parameter         :: min_sep=0.0 !10
-real, parameter         :: max_sep=3.0 !20 !nf_buf !2.0 !1
+real, parameter         :: max_sep=10 !nf_buf !2.0 !1
 real, parameter         :: sep_inc=0.1
 
 !! particle-particle interaction parameters
@@ -72,6 +73,7 @@ real(4), parameter      :: pp_bias = 1.0 !0.85 !0.1 !0.4642
 
 logical, parameter :: ngp_fmesh_force = .true. 
 logical, parameter :: pp_force_flag = .true.
+logical, parameter :: pp_force_ext_flag = .true.
 logical, parameter :: coarse_vel_update = .true.
 
 !! additional simulation analysis
@@ -128,6 +130,10 @@ logical, parameter :: backward= .false.
 
 integer(4), parameter   :: mesh_scale = 4
 integer(4), parameter   :: fine_clumping_scale = 8
+
+! size of buffer around fine cell
+! for extended pp force calculation:
+integer(4), parameter   :: buff_fm = 4 !1
 
 integer(4), parameter :: max_np = density_buffer * ( ((nf_tile-2*nf_buf)*tiles_node_dim/2)**3 + &
                                   (8*nf_buf**3 + 6*nf_buf*(((nf_tile-2*nf_buf)*tiles_node_dim)**2) + &

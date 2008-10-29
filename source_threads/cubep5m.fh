@@ -1,4 +1,4 @@
-! :: cubepm header file
+! :: cubep5m header file
 
 include 'cubepm.par'
 
@@ -49,6 +49,7 @@ real(4), dimension(3,max_llf,cores) :: pp_force_accum
 
 integer(4), dimension(max_llf,mesh_scale+buff_fm,mesh_scale+buff_fm,mesh_scale+buff_fm,cores) :: llf_ext
 !integer(4), dimension(max_llf,mesh_scale+2*buff_fm,mesh_scale+2*buff_fm,mesh_scale+buff_fm,cores) :: llf_ext
+
 
 
 ! :: coarse mesh arrays

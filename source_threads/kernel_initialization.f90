@@ -21,6 +21,7 @@
 
     rho_f=0.0
 
+
     do k=1,nf_cutoff
       do j=1,nf_cutoff
         do i=1,nf_cutoff
@@ -33,7 +34,26 @@
         end do
       end do
     end do
-           
+      
+#ifdef P5M
+
+    if (pp_force_ext_flag) then
+       write(*,*) 'Using modified fine mesh kernel'
+       !! Set the kernel to 0 for immediate neighbors
+       do k=1,buff_fm+1
+          do j=1,buff_fm+1
+             do i=1,buff_fm+1
+                rho_f(i,j,k,1) = 0
+             enddo
+          enddo
+       enddo
+    else
+       write(*,*) 'NOT using modified fine mesh kernel (flag set to .false.)'
+    endif
+
+#endif
+
+     
 !! Reflect accross y/2 plane
              
       do j=2,nf_cutoff
@@ -83,6 +103,25 @@
         end do
       end do
     end do
+
+#ifdef P5M
+
+    if (pp_force_ext_flag) then
+       !write(*,*) 'Using modified fine mesh kernel'
+       !! Set the kernel to 0 for immediate neighbors
+       do k=1,buff_fm+1
+          do j=1,buff_fm+1
+             do i=1,buff_fm+1
+                rho_f(i,j,k,1) = 0
+             enddo
+          enddo
+       enddo
+    else
+       !write(*,*) 'NOT using modified fine mesh kernel (flag set to .false.)'
+    endif
+
+#endif
+
 
 !! Reflect accross y/2 plane
 
@@ -134,6 +173,25 @@
       end do
     end do
       
+#ifdef P5M
+
+    if (pp_force_ext_flag) then
+       !write(*,*) 'Using modified fine mesh kernel'
+       !! Set the kernel to 0 for immediate neighbors
+       do k=1,buff_fm+1
+          do j=1,buff_fm+1
+             do i=1,buff_fm+1
+                rho_f(i,j,k,1) = 0
+             enddo
+          enddo
+       enddo
+    else
+       !write(*,*) 'NOT using modified fine mesh kernel (flag set to .false.)'
+    endif
+
+#endif
+
+
 !! Reflect accross y/2 plane
   
       do j=2,nf_cutoff
