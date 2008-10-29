@@ -15,7 +15,7 @@ character(*), parameter :: kernel_path=cubepm_root//'kernels/'
 
 ! turn this off for pair-wise force tests
 
-logical, parameter 	:: cosmo = .true. !.false.
+logical, parameter 	:: cosmo = .false. !.true. !.false.
 
 ! equation of state for dark energy w parameter
 
@@ -49,7 +49,7 @@ integer(4), parameter   :: restart_checkpoint = 1
 
 logical, parameter      :: random_ic   = .false.
 logical, parameter      :: grid_ic     = .false.
-logical, parameter      :: pairwise_ic = .false.!.true. 
+logical, parameter      :: pairwise_ic = .true. 
 logical, parameter      :: pair_infall = .false.
 logical, parameter      :: pair_infall_no_shake = .false.
 logical, parameter      :: pp_test     = .false.
