@@ -39,6 +39,13 @@ real(4)									:: f_force_max(cores)
 real(4)									:: pp_force_max(cores)
 real(8)									:: f_mesh_mass(cores)
 
+!Changed: special for halo finding only!!
+!Make special versions of the mesh parameters using finer_halo_grid
+
+real(4), dimension(nf_tile_halos+2,nf_tile_halos,nf_tile_halos)   :: rho_f_halos
+
+
+
 ! :: pp arrays
 
 integer(4), dimension(max_llf,mesh_scale,mesh_scale,mesh_scale,cores) :: llf
@@ -50,7 +57,7 @@ real(4), dimension(3,max_llf,cores) :: pp_force_accum
 !real(4), dimension(3,nc_dim+2,nc_dim,nc_dim)	 			:: ck
 real(4), dimension(3,nc_node_dim,nc_node_dim,nc_node_dim)	 	:: ck
 real(4), dimension(3,nc_dim/2+1,nc_dim,nc_slab)				:: kern_c
-real(4), dimension(3,nc_dim+2,nc_dim,nc_slab)                           :: tmp_kern_c
+!real(4), dimension(3,nc_dim+2,nc_dim,nc_slab)                           :: tmp_kern_c
 real(4), dimension(nc_node_dim,nc_node_dim,nc_node_dim) 		:: rho_c
 real(4), dimension(3,0:nc_node_dim+1,0:nc_node_dim+1,0:nc_node_dim+1) 	:: force_c
 real(4), dimension(nc_dim+2,nc_dim,nc_slab) 				:: cmplx_rho_c
@@ -72,25 +79,30 @@ integer(4), dimension(max_np) 						:: ll
 integer(4), dimension(hoc_nc_l:hoc_nc_h,hoc_nc_l:hoc_nc_h,hoc_nc_l:hoc_nc_h) :: hoc
 integer(4) 								:: np_buf
 
+integer(4), dimension(max_np)					        :: dens_p     ! local density associated 
+	    								   	      ! with a particle
+
 ! density projection arrays
 
 real(4), dimension(nf_physical_dim,nf_physical_dim)        :: rp_buf,rho_pxy,rho_pxz,rho_pyz
 
 ! :: halofinding arrays
 
-integer(4), dimension(max_maxima)					:: isortpeak
+integer(4), dimension(max_maxima)					:: isortpeak,peak_pointer
 integer(4), dimension(nlist)                                            :: isortdist
-integer(4), dimension(3,max_maxima)			                :: ipeak
+integer(4), dimension(3,max_maxima)			                :: ipeak, ipeak_fine
 integer(4), dimension(3,nlist)						:: idist
 integer(4) 								:: irtot, nhalo
-real(4), dimension(3,max_maxima)					:: peak_pos
+real(4), dimension(3,max_maxima)					:: peak_pos, peak_pos_fine
 real(4), dimension(max_maxima)					        :: den_peak 
 !real(4), dimension(max_maxima)					        :: halo_peak 
 real(4), dimension(nlist)						:: rdist
 
 ! :: rescaling of the mass in case of overshooting on the threshold overdensity
 real(4), dimension(10000)						:: mass_rescaling,overdens
-integer(4)								:: iii
+real(4), dimension(max_bins)						:: rad_bins
+integer(4), dimension(max_bins)						:: mass_bins
+integer(4)								:: iii, num_particles
 
 real(4), dimension(3,nc_node_dim*mesh_scale/coarsened_velocity_scale,&
 	nc_node_dim*mesh_scale/coarsened_velocity_scale,&
@@ -98,11 +110,6 @@ real(4), dimension(3,nc_node_dim*mesh_scale/coarsened_velocity_scale,&
 real(4), dimension(nc_node_dim*mesh_scale/coarsened_velocity_scale,&
 	nc_node_dim*mesh_scale/coarsened_velocity_scale, &
         nc_node_dim*mesh_scale/coarsened_velocity_scale) :: fine_clumping 
-
-!real(4), dimension(3,nc_node_dim*mesh_scale/fine_clumping_scale,nc_node_dim*mesh_scale/fine_clumping_scale, &
-!                     nc_node_dim*mesh_scale/fine_clumping_scale) :: velocity_field
-!real(4), dimension(nc_node_dim*mesh_scale/fine_clumping_scale,nc_node_dim*mesh_scale/fine_clumping_scale, &
-!                     nc_node_dim*mesh_scale/fine_clumping_scale) :: fine_clumping 
 real(8) :: cfmass, cfmass2, cftmass, cftmass2
 
 ! :: these are for passing to C^2Ray
@@ -130,9 +137,11 @@ equivalence (force_f,force_c)
 
 equivalence (rho_f,rho_c)
 
+!equivalence (rho_f_halos,rho_f)
+
 equivalence (send_buf,force_c_buffer,fast_buf,slab_work) !,cmplx_rho_f)
 
-equivalence (cmplx_rho_f,tmp_kern_c) !Will need reversing for very large runs!!!! See mem_usage.f90
+equivalence (cmplx_rho_f,tmp_kern_c)
 
 equivalence (recv_buf,recv_cube,fast_pos)
 
@@ -157,8 +166,12 @@ common / rvar / a, a_mid, t, tau, dt, dt_old, dt_gas, mass_p, rho_f, kern_f,forc
                 shake_offset,cur_sep,dt_max_v,velocity_field,fine_clumping,pp_force_accum, &
                 cmplx_rho_f
 
-common / C2RAY_HALO / halo_pos,halo_mass,halo_x_mean,halo_v_mean,halo_l,halo_v_disp, &
-                        halo_radius_calc,halo_imass,nhalo,halo_mass1
+common /halopars/ rho_f_halos
+
+common /testing/ halo_mass1
+
+common / C2RAY_HALO / halo_pos,halo_mass,halo_x_mean,halo_v_mean,halo_l,&
+			halo_v_disp,halo_radius_calc,halo_imass,nhalo,halo_mass1
 
 common / lvar / firstfftw, firstfftw2, projection_step, checkpoint_step, halofind_step, final_step
 

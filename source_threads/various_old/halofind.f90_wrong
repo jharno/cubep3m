@@ -4,7 +4,7 @@
     implicit none
 
     include 'mpif.h'
-    include 'cubep3m.fh'
+    include 'cubepm.fh'
 
     real(4) :: z_write
     integer(4) :: i,j,k,fstat
@@ -15,7 +15,7 @@
     character (len=3) :: t_s
     character (len=5) :: r_s
 
-    integer(4) :: hi,pp,mass_cell
+    integer(4) :: hi,pp,mass_cell!,hi_current
     integer(4), dimension(3,2) :: search_limit
     integer(8) :: imass
     real(4) :: r,radius_calc,v_disp,clump_factor
@@ -66,8 +66,6 @@
       stop
     endif
 
-#ifdef CLUMPING
-
 !! calculate clumping factor on fine mesh 
 
     cfmassl=0.0 
@@ -104,15 +102,7 @@
     write(72) fine_clumping 
     close(72)
 
-#endif
-
-#ifdef COARSE_DENS
-
 !! construct coarse density and velocity field
-
-   rho_c=0.0 !Have to fill it with zeros first?
-   velocity_field=0.0
-
 
     do k = 0, nc_node_dim + 1
       do j = 0, nc_node_dim + 1
@@ -145,76 +135,6 @@
     write(72) rho_c
     close(72)
 
-#ifdef COARSEST
-!! Write out density field on the coarsened grid (for RT)
-
-    ! redistribute data to coarsest grid
-    do i=1,n_coarsest
-       do j=1,n_coarsest
-          do k=1,n_coarsest
-             density_field_coarsest(i,j,k)=&
-                  sum(rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                  coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                  coarsest_scale*k-coarsest_scale+1:coarsest_scale*k))
-          end do
-       end do
-    end do
-
-!! write coarsest density
-    ofile=output_path//z_s(1:len_trim(z_s))//'rho_coarsest'//  &
-          r_s(1:len_trim(r_s))//'.dat'
-#ifdef BINARY
-    open (unit=72,file=ofile,status='replace',iostat=fstat,form='binary')
-#else
-    open (unit=72,file=ofile,status='replace',iostat=fstat,form='unformatted')
-#endif
-    if (fstat /= 0) then
-      write(*,*) 'error opening coarse density file for write'
-      write(*,*) 'rank',rank,'file:',ofile
-      stop
-    endif
-    write(72) density_field_coarsest
-    close(72)
-
-!! Write out fine clumping on the coarsened grid (for RT)
-
-    ! redistribute data to coarsest grid
-    do i=1,n_coarsest
-       do j=1,n_coarsest
-          do k=1,n_coarsest
-             fine_clumping_coarsest(i,j,k)=&
-                  sum(fine_clumping(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                  coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                  coarsest_scale*k-coarsest_scale+1:coarsest_scale*k)&
-                  *rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                  coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                  coarsest_scale*k-coarsest_scale+1:coarsest_scale*k)**2)/coarsest_scale**3
-             fine_clumping_coarsest(i,j,k)=fine_clumping_coarsest(i,j,k)/&
-                  (density_field_coarsest(i,j,k)/coarsest_scale**3)**2
-
-!clumping3(i,j,k)=sum(1.0d0*clumping2(2*i-1:2*i,2*j-1:2*j,2*k-1:2*k)*rho2(2*i-1:2*i,2*j-1:2*j,2*k-1:2*k)**2)/8.
-!              clumping3(i,j,k)=clumping3(i,j,k)/(rho3(i,j,k)/8.)**2
-          end do
-       end do
-    end do
-
-
-    ofile=output_path//z_s(1:len_trim(z_s))//'fc_coarsest'//  &
-          r_s(1:len_trim(r_s))//'.dat'
-#ifdef BINARY
-    open (unit=72,file=ofile,status='replace',iostat=fstat,form='binary')
-#else
-    open (unit=72,file=ofile,status='replace',iostat=fstat,form='unformatted')
-#endif
-    if (fstat /= 0) then
-      write(*,*) 'error opening coarsened fine clumping file for write'
-      write(*,*) 'rank',rank,'file:',ofile
-      stop
-    endif
-    write(72) fine_clumping_coarsest
-    close(72)
-#endif
-
 #ifdef HALO_VEL_FIELD
 
 !!  write velocity field 
@@ -233,101 +153,14 @@
     write(72) velocity_field 
     close(72)
 
-#ifdef COARSEST
-    ! mean bulk velocity: we need to divide the values in the file (which are sum over all 
-    ! particles) by the number of particles in the cell 
-    ! NOTE: assumes (as currently set) that coarsened_velocity_scale = mesh_scale (i.e. that 
-    ! velocity_field (each direction) and rho_c have the same dimensions) 
-
-    do i=1,nc_node_dim
-       do j=1,nc_node_dim
-          do k=1,nc_node_dim
-             !note: the 8 is to convert grid masses to particle masses
-             velocity_field(1,i,j,k) = velocity_field(1,i,j,k)/(rho_c(i,j,k)/8.)
-             velocity_field(2,i,j,k) = velocity_field(2,i,j,k)/(rho_c(i,j,k)/8.)
-             velocity_field(3,i,j,k) = velocity_field(3,i,j,k)/(rho_c(i,j,k)/8.)
-          end do
-       end do
-    end do
-    
-
-    !! Write out velocity field on the coarsened grid (for RT)
-    
-    ! redistribute data to coarsest grid
-    do i=1,n_coarsest
-       do j=1,n_coarsest
-          do k=1,n_coarsest
-             if(sum(rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                  coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                  coarsest_scale*k-coarsest_scale+1:coarsest_scale*k)).gt.0.0d0)then
-                velocity_field_coarsest(1,i,j,k)= &
-                     sum(velocity_field(1,coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                     coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                     coarsest_scale*k-coarsest_scale+1:coarsest_scale*k)&
-                     *rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                     coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                     coarsest_scale*k-coarsest_scale+1:coarsest_scale*k))/&
-                     sum(rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                     coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                     coarsest_scale*k-coarsest_scale+1:coarsest_scale*k))!mean bulk velocity per coarsest cell
-                velocity_field_coarsest(2,i,j,k)= &
-                     sum(velocity_field(2,coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                     coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                     coarsest_scale*k-coarsest_scale+1:coarsest_scale*k)&
-                     *rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                     coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                     coarsest_scale*k-coarsest_scale+1:coarsest_scale*k))/&
-                     sum(rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                     coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                     coarsest_scale*k-coarsest_scale+1:coarsest_scale*k))!mean bulk velocity per coarsest cell
-                velocity_field_coarsest(3,i,j,k)= &
-                     sum(velocity_field(3,coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                     coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                     coarsest_scale*k-coarsest_scale+1:coarsest_scale*k)&
-                     *rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                     coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                     coarsest_scale*k-coarsest_scale+1:coarsest_scale*k))/&
-                     sum(rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                     coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                     coarsest_scale*k-coarsest_scale+1:coarsest_scale*k))!mean bulk velocity per coarsest cell
-              else
-                 velocity_field_coarsest(1,i,j,k)=0.0d0
-                 velocity_field_coarsest(2,i,j,k)=0.0d0
-                 velocity_field_coarsest(3,i,j,k)=0.0d0
-              end if
-           end do
-        end do
-     end do
-
-!!  write coarsest velocity field
-    ofile=output_path//z_s(1:len_trim(z_s))//'vel_coarsest'//  &
-          r_s(1:len_trim(r_s))//'.dat'
-#ifdef BINARY
-    open (unit=72,file=ofile,status='replace',iostat=fstat,form='binary')
-#else
-    open (unit=72,file=ofile,status='replace',iostat=fstat,form='unformatted')
 #endif
-    if (fstat /= 0) then
-      write(*,*) 'error opening velocity field file for write'
-      write(*,*) 'rank',rank,'file:',ofile
-      stop
-    endif
-    write(72) velocity_field_coarsest
-    close(72)
-
-#endif
-#endif
-
-#endif
-
-
-
-
 
 !! Do halo analysis, dump to file
 
     write(12) nhalo
 
+!    hi_current=1
+!    nhalo_final=nhalo !the final number of halos might change if there are empty halos
     do hi=1,nhalo     
        radius_calc=(halo_mass(hi)/halo_odc/(4.0*pi/3.0))**(1.0/3.0)
        search_limit(:,1)=int(1.0/real(mesh_scale)*halo_pos(:,hi)-1.0/real(mesh_scale)*radius_calc-1.0)
@@ -358,18 +191,16 @@
               if (pp==0) exit
               dx=halo_pos(:,hi)-xv(:3,pp)
               r=sqrt(dx(1)**2+dx(2)**2+dx(3)**2)
-              if(r<radius_calc)then
-                 mass_cell=mass_cell+1
-                 imass=imass+1
-                 x_mean=x_mean+xv(:3,pp)
-                 v_mean=v_mean+xv(4:,pp)
-                 v2_mean=v2_mean+xv(4:,pp)*xv(4:,pp)
-                 l(1)=l(1)+(dx(3)*xv(5,pp)-dx(2)*xv(6,pp))
-                 l(2)=l(2)+(dx(1)*xv(6,pp)-dx(3)*xv(4,pp))
-                 l(3)=l(3)+(dx(2)*xv(4,pp)-dx(1)*xv(5,pp))
-              end if
+              mass_cell=mass_cell+1
+              imass=imass+1
+              x_mean=x_mean+xv(:3,pp)
+              v_mean=v_mean+xv(4:,pp)
+              v2_mean=v2_mean+xv(4:,pp)*xv(4:,pp)
+              l(1)=l(1)+(dx(3)*xv(5,pp)-dx(2)*xv(6,pp))
+              l(2)=l(2)+(dx(1)*xv(6,pp)-dx(3)*xv(4,pp))
+              l(3)=l(3)+(dx(2)*xv(4,pp)-dx(1)*xv(5,pp))
               pp=ll(pp)
-           enddo
+            enddo
 !            halo_particle_count ????
           enddo
         enddo
@@ -384,7 +215,7 @@
          !!      write stuff to file or store in common arrays for Ifront 
          !!      to store in common block arrays, each array should be
          !!      max_maxima in size
-         if (halo_write .and. imass>0 .and. halo_mass(hi)>160) write(12) halo_pos(:,hi),x_mean,v_mean,l,v_disp,radius_calc,halo_mass(hi),imass*mass_p,halo_mass1(hi)
+         if (halo_write) write(12) halo_pos(:,hi),x_mean,v_mean,l,v_disp,radius_calc,halo_mass(hi),imass*mass_p,halo_mass1(hi)
          !! these plus nhalo should be passed to C^2Ray for each iteration
          halo_x_mean(:,hi)=x_mean
          halo_v_mean(:,hi)=v_mean
@@ -393,8 +224,6 @@
          halo_radius_calc(hi)=radius_calc
          halo_imass(hi)=imass*mass_p
     enddo         
-
-!! close halo catalog
 
     close(12)
 
@@ -412,7 +241,7 @@
 
   subroutine find_halos(tile)
     implicit none
-    include 'cubep3m.fh'
+    include 'cubepm.fh'
 
 !!  Halo finding variables
 
@@ -482,7 +311,6 @@
             ipeak(:,ic)=(/i,j,k/)
             den_peak(ic)=denmax
 
-!parabolic interpolation for finding the peak position/halo center
             if (para_inter_hc) then
               x(1)=real(i-1)-0.5
               x(2)=real(i)-0.5
@@ -562,13 +390,12 @@
       if (nhalo > 0) then
         halo_pos(:,nhalo)=peak_pos(:,iloc)+offset !(/os_x,os_y,os_z/)
         halo_mass1(nhalo)=amtot
-!        write(*,*) 'check mass rescaling 0',overdens(5),mass_rescaling(5)
-!        write(*,*) 'check mass rescaling 1',amtot,halo_nondim_mass,actual_odc
+        write(*,*) 'check mass rescaling 0',overdens(5),overdens(10000),mass_rescaling(5),mass_rescaling(10000)
+        write(*,*) 'check mass rescaling 1',amtot,halo_nondim_mass,actual_odc
         do iii=1,9999
            if((overdens(iii)-actual_odc)*(overdens(iii+1)-actual_odc)<0)then
               halo_mass(nhalo)=amtot*(halo_nondim_mass/mass_rescaling(iii+1))
-!              write(*,*) 'check mass rescaling 2',iii,amtot,halo_mass(nhalo),mass_rescaling(iii+1)
-!              write(*,*) 'check mass rescaling 3',actual_odc,overdens(iii),overdens(iii+1)
+              write(*,*) 'check mass rescaling 2',iii,amtot,halo_mass(nhalo),mass_rescaling(iii+1),overdens(iii)
               exit
            end if
         end do
@@ -639,7 +466,7 @@
   subroutine initialize_halofind
 
     implicit none
-    include 'cubep3m.fh'
+    include 'cubepm.fh'
     include 'mpif.h'
 
     integer(4) :: ii, i, j, k, fstat
@@ -654,7 +481,7 @@
     do i=-nc_halo_max,nc_halo_max
       do j=-nc_halo_max,nc_halo_max
         do k=-nc_halo_max,nc_halo_max
-          r=sqrt(real(i)**2+real(j)**2+real(k)**2)
+          r=sqrt(i**2+j**2+k**2*1.)
           if (r>nc_halo_max) cycle
           ii=ii+1
           if (ii>nlist) then
@@ -688,14 +515,15 @@
        endif
        do iii=1,10000
           read(11,*) mass_rescaling(iii),overdens(iii)
-!          write(*,*) 'table check',mass_rescaling(iii),overdens(iii)
+          write(*,*) 'table check',mass_rescaling(iii),overdens(iii)
        enddo
-81     close(11)
+       close(11)
+
+       call mpi_bcast(mass_rescaling,10000,mpi_real,0,mpi_comm_world,ierr)
+       call mpi_bcast(overdens,10000,mpi_real,0,mpi_comm_world,ierr)
+
     end if
-    
-    call mpi_bcast(mass_rescaling,10000,mpi_real,0,mpi_comm_world,ierr)
-    call mpi_bcast(overdens,10000,mpi_real,0,mpi_comm_world,ierr)
-    
+
   end subroutine initialize_halofind
 
 !-----------------------------------------------------------------------------!
@@ -704,7 +532,7 @@
   subroutine coarse_cic_mass_vel(pp)
     implicit none
 
-    include 'cubep3m.fh'
+    include 'cubepm.fh'
 
     integer(4), parameter :: CV=fine_clumping_scale/mesh_scale
     integer(4) :: pp
@@ -713,7 +541,7 @@
 
     do
       if (pp == 0) exit
-      x(:) = (1.0/real(mesh_scale)) * xv(1:3,pp) - 0.5 !maybe this -0.5 is the problem??
+      x(:) = (1.0/real(mesh_scale)) * xv(1:3,pp) !- 0.5 !maybe this -0.5 is the problem??
       i1(:) = floor(x(:)) + 1
       i2(:) = i1(:) + 1
       dx1(:) = i1(:) - x(:)
@@ -774,7 +602,7 @@
   subroutine coarse_cic_mass_vel_boundry(pp)
     implicit none
 
-    include 'cubep3m.fh'
+    include 'cubepm.fh'
 
     integer(4), parameter :: CV=fine_clumping_scale/mesh_scale
     integer(4) :: pp
@@ -783,7 +611,7 @@
 
     do
       if (pp == 0) exit
-      x(:) = (1.0/real(mesh_scale)) * xv(1:3,pp) - 0.5 !maybe this -0.5 is the problem??
+      x(:) = (1.0/real(mesh_scale)) * xv(1:3,pp)!- 0.5 !maybe this -0.5 is the problem??
       i1(:) = floor(x(:)) + 1
       i2(:) = i1(:) + 1
       dx1(:) = i1(:) - x(:)
@@ -799,83 +627,75 @@
 
       if (i1(3) >= 1 .and. i1(3) <= nc_node_dim) then
         if (i1(2) >= 1 .and. i1(2) <= nc_node_dim) then
-          if (i1(1) >= 1 .and. i1(1) <= nc_node_dim) then
-             rho_c(i1(1),i1(2),i1(3)) = rho_c(i1(1),i1(2),i1(3)) + &
-                  dx1(1) * dx1(2) * dx1(3)
+          if (i1(1) >= 1 .and. i1(1) <= nc_node_dim) &
+            rho_c(i1(1),i1(2),i1(3)) = rho_c(i1(1),i1(2),i1(3)) + &
+                                       dx1(1) * dx1(2) * dx1(3)
 #ifdef HALO_VEL_FIELD
-             velocity_field(:,(i1(1)-1)/CV+1,(i1(2)-1)/CV+1,(i1(3)-1)/CV+1) = &
-                  velocity_field(:,(i1(1)-1)/CV+1,(i1(2)-1)/CV+1,(i1(3)-1)/CV+1)+vx1*dx1(2)*dx1(3)
+            velocity_field(:,(i1(1)-1)/CV+1,(i1(2)-1)/CV+1,(i1(3)-1)/CV+1) = &
+               velocity_field(:,(i1(1)-1)/CV+1,(i1(2)-1)/CV+1,(i1(3)-1)/CV+1)+vx1*dx1(2)*dx1(3)
 #endif
-          end if
-          if (i2(1) >= 1 .and. i2(1) <= nc_node_dim) then
-             rho_c(i2(1),i1(2),i1(3)) = rho_c(i2(1),i1(2),i1(3)) + &
-                  dx2(1) * dx1(2) * dx1(3)
+          if (i2(1) >= 1 .and. i2(1) <= nc_node_dim) &
+            rho_c(i2(1),i1(2),i1(3)) = rho_c(i2(1),i1(2),i1(3)) + &
+                                       dx2(1) * dx1(2) * dx1(3)
 #ifdef HALO_VEL_FIELD
-             velocity_field(:,(i2(1)-1)/CV+1,(i1(2)-1)/CV+1,(i1(3)-1)/CV+1) = &
-                  velocity_field(:,(i2(1)-1)/CV+1,(i1(2)-1)/CV+1,(i1(3)-1)/CV+1)+vx2*dx1(2)*dx1(3)
+            velocity_field(:,(i2(1)-1)/CV+1,(i1(2)-1)/CV+1,(i1(3)-1)/CV+1) = &
+               velocity_field(:,(i2(1)-1)/CV+1,(i1(2)-1)/CV+1,(i1(3)-1)/CV+1)+vx2*dx1(2)*dx1(3)
 #endif
-          endif
-       end if
-       if (i2(2) >= 1 .and. i2(2) <= nc_node_dim) then
-          if (i1(1) >= 1 .and. i1(1) <= nc_node_dim) then
-             rho_c(i1(1),i2(2),i1(3)) = rho_c(i1(1),i2(2),i1(3)) + &
-                  dx1(1) * dx2(2) * dx1(3)
+        endif
+        if (i2(2) >= 1 .and. i2(2) <= nc_node_dim) then
+          if (i1(1) >= 1 .and. i1(1) <= nc_node_dim) &
+            rho_c(i1(1),i2(2),i1(3)) = rho_c(i1(1),i2(2),i1(3)) + &
+                                       dx1(1) * dx2(2) * dx1(3)
 #ifdef HALO_VEL_FIELD
-             velocity_field(:,(i1(1)-1)/CV+1,(i2(2)-1)/CV+1,(i1(3)-1)/CV+1) = &
-                  velocity_field(:,(i1(1)-1)/CV+1,(i2(2)-1)/CV+1,(i1(3)-1)/CV+1)+vx1*dx2(2)*dx1(3)
+            velocity_field(:,(i1(1)-1)/CV+1,(i2(2)-1)/CV+1,(i1(3)-1)/CV+1) = &
+               velocity_field(:,(i1(1)-1)/CV+1,(i2(2)-1)/CV+1,(i1(3)-1)/CV+1)+vx1*dx2(2)*dx1(3)
 #endif
-          end if
-          if (i2(1) >= 1 .and. i2(1) <= nc_node_dim) then
-             rho_c(i2(1),i2(2),i1(3)) = rho_c(i2(1),i2(2),i1(3)) + &
-                  dx2(1) * dx2(2) * dx1(3)
+          if (i2(1) >= 1 .and. i2(1) <= nc_node_dim) &
+            rho_c(i2(1),i2(2),i1(3)) = rho_c(i2(1),i2(2),i1(3)) + &
+                                       dx2(1) * dx2(2) * dx1(3)
 #ifdef HALO_VEL_FIELD
-             velocity_field(:,(i2(1)-1)/CV+1,(i2(2)-1)/CV+1,(i1(3)-1)/CV+1) = &
-                  velocity_field(:,(i2(1)-1)/CV+1,(i2(2)-1)/CV+1,(i1(3)-1)/CV+1)+vx2*dx2(2)*dx1(3)
+            velocity_field(:,(i2(1)-1)/CV+1,(i2(2)-1)/CV+1,(i1(3)-1)/CV+1) = &
+               velocity_field(:,(i2(1)-1)/CV+1,(i2(2)-1)/CV+1,(i1(3)-1)/CV+1)+vx2*dx2(2)*dx1(3)
 #endif
-          end if
-       endif
-    endif
+        endif
+      endif
 
-    if (i2(3) >= 1 .and. i2(3) <= nc_node_dim) then
-       if (i1(2) >= 1 .and. i1(2) <= nc_node_dim) then
-          if (i1(1) >= 1 .and. i1(1) <= nc_node_dim) then
-             rho_c(i1(1),i1(2),i2(3)) = rho_c(i1(1),i1(2),i2(3)) + &
-                  dx1(1) * dx1(2) * dx2(3)
+      if (i2(3) >= 1 .and. i2(3) <= nc_node_dim) then
+        if (i1(2) >= 1 .and. i1(2) <= nc_node_dim) then
+          if (i1(1) >= 1 .and. i1(1) <= nc_node_dim) &
+            rho_c(i1(1),i1(2),i2(3)) = rho_c(i1(1),i1(2),i2(3)) + &
+                                       dx1(1) * dx1(2) * dx2(3)
 #ifdef HALO_VEL_FIELD
-             velocity_field(:,(i1(1)-1)/CV+1,(i1(2)-1)/CV+1,(i2(3)-1)/CV+1) = &
-                  velocity_field(:,(i1(1)-1)/CV+1,(i1(2)-1)/CV+1,(i2(3)-1)/CV+1)+vx1*dx1(2)*dx2(3)
+            velocity_field(:,(i1(1)-1)/CV+1,(i1(2)-1)/CV+1,(i2(3)-1)/CV+1) = &
+               velocity_field(:,(i1(1)-1)/CV+1,(i1(2)-1)/CV+1,(i2(3)-1)/CV+1)+vx1*dx1(2)*dx2(3)
 #endif
-          end if
-          if (i2(1) >= 1 .and. i2(1) <= nc_node_dim) then
-             rho_c(i2(1),i1(2),i2(3)) = rho_c(i2(1),i1(2),i2(3)) + &
-                  dx2(1) * dx1(2) * dx2(3)
+          if (i2(1) >= 1 .and. i2(1) <= nc_node_dim) &
+            rho_c(i2(1),i1(2),i2(3)) = rho_c(i2(1),i1(2),i2(3)) + &
+                                       dx2(1) * dx1(2) * dx2(3)
 #ifdef HALO_VEL_FIELD
-             velocity_field(:,(i2(1)-1)/CV+1,(i1(2)-1)/CV+1,(i2(3)-1)/CV+1) = &
-                  velocity_field(:,(i2(1)-1)/CV+1,(i1(2)-1)/CV+1,(i2(3)-1)/CV+1)+vx2*dx1(2)*dx2(3)
+            velocity_field(:,(i2(1)-1)/CV+1,(i1(2)-1)/CV+1,(i2(3)-1)/CV+1) = &
+               velocity_field(:,(i2(1)-1)/CV+1,(i1(2)-1)/CV+1,(i2(3)-1)/CV+1)+vx2*dx1(2)*dx2(3)
 #endif
-          endif
-       end if
-       if (i2(2) >= 1 .and. i2(2) <= nc_node_dim) then
-          if (i1(1) >= 1 .and. i1(1) <= nc_node_dim) then
-             rho_c(i1(1),i2(2),i2(3)) = rho_c(i1(1),i2(2),i2(3)) + &
-                  dx1(1) * dx2(2) * dx2(3)
+        endif
+        if (i2(2) >= 1 .and. i2(2) <= nc_node_dim) then
+          if (i1(1) >= 1 .and. i1(1) <= nc_node_dim) &
+            rho_c(i1(1),i2(2),i2(3)) = rho_c(i1(1),i2(2),i2(3)) + &
+                                       dx1(1) * dx2(2) * dx2(3)
 #ifdef HALO_VEL_FIELD
-             velocity_field(:,(i1(1)-1)/CV+1,(i2(2)-1)/CV+1,(i2(3)-1)/CV+1) = &
-                  velocity_field(:,(i1(1)-1)/CV+1,(i2(2)-1)/CV+1,(i2(3)-1)/CV+1)+vx1*dx2(2)*dx2(3)
+            velocity_field(:,(i1(1)-1)/CV+1,(i2(2)-1)/CV+1,(i2(3)-1)/CV+1) = &
+               velocity_field(:,(i1(1)-1)/CV+1,(i2(2)-1)/CV+1,(i2(3)-1)/CV+1)+vx1*dx2(2)*dx2(3)
 #endif
-          end if
-          if (i2(1) >= 1 .and. i2(1) <= nc_node_dim) then
-             rho_c(i2(1),i2(2),i2(3)) = rho_c(i2(1),i2(2),i2(3)) + &
-                  dx2(1) * dx2(2) * dx2(3)
+          if (i2(1) >= 1 .and. i2(1) <= nc_node_dim) &
+            rho_c(i2(1),i2(2),i2(3)) = rho_c(i2(1),i2(2),i2(3)) + &
+                                       dx2(1) * dx2(2) * dx2(3)
 #ifdef HALO_VEL_FIELD
-             velocity_field(:,(i2(1)-1)/CV+1,(i2(2)-1)/CV+1,(i2(3)-1)/CV+1) = &
-                  velocity_field(:,(i2(1)-1)/CV+1,(i2(2)-1)/CV+1,(i2(3)-1)/CV+1)+vx2*dx2(2)*dx2(3)
+            velocity_field(:,(i2(1)-1)/CV+1,(i2(2)-1)/CV+1,(i2(3)-1)/CV+1) = &
+               velocity_field(:,(i2(1)-1)/CV+1,(i2(2)-1)/CV+1,(i2(3)-1)/CV+1)+vx2*dx2(2)*dx2(3)
 #endif
-          end if
-       endif
-    endif
+        endif
+      endif
     
-    pp = ll(pp)
- enddo
+      pp = ll(pp)
+    enddo
   
-end subroutine coarse_cic_mass_vel_boundry
+  end subroutine coarse_cic_mass_vel_boundry

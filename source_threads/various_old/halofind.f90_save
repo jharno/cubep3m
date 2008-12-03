@@ -4,7 +4,7 @@
     implicit none
 
     include 'mpif.h'
-    include 'cubep3m.fh'
+    include 'cubepm.fh'
 
     real(4) :: z_write
     integer(4) :: i,j,k,fstat
@@ -66,8 +66,6 @@
       stop
     endif
 
-#ifdef CLUMPING
-
 !! calculate clumping factor on fine mesh 
 
     cfmassl=0.0 
@@ -104,15 +102,7 @@
     write(72) fine_clumping 
     close(72)
 
-#endif
-
-#ifdef COARSE_DENS
-
 !! construct coarse density and velocity field
-
-   rho_c=0.0 !Have to fill it with zeros first?
-   velocity_field=0.0
-
 
     do k = 0, nc_node_dim + 1
       do j = 0, nc_node_dim + 1
@@ -145,76 +135,6 @@
     write(72) rho_c
     close(72)
 
-#ifdef COARSEST
-!! Write out density field on the coarsened grid (for RT)
-
-    ! redistribute data to coarsest grid
-    do i=1,n_coarsest
-       do j=1,n_coarsest
-          do k=1,n_coarsest
-             density_field_coarsest(i,j,k)=&
-                  sum(rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                  coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                  coarsest_scale*k-coarsest_scale+1:coarsest_scale*k))
-          end do
-       end do
-    end do
-
-!! write coarsest density
-    ofile=output_path//z_s(1:len_trim(z_s))//'rho_coarsest'//  &
-          r_s(1:len_trim(r_s))//'.dat'
-#ifdef BINARY
-    open (unit=72,file=ofile,status='replace',iostat=fstat,form='binary')
-#else
-    open (unit=72,file=ofile,status='replace',iostat=fstat,form='unformatted')
-#endif
-    if (fstat /= 0) then
-      write(*,*) 'error opening coarse density file for write'
-      write(*,*) 'rank',rank,'file:',ofile
-      stop
-    endif
-    write(72) density_field_coarsest
-    close(72)
-
-!! Write out fine clumping on the coarsened grid (for RT)
-
-    ! redistribute data to coarsest grid
-    do i=1,n_coarsest
-       do j=1,n_coarsest
-          do k=1,n_coarsest
-             fine_clumping_coarsest(i,j,k)=&
-                  sum(fine_clumping(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                  coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                  coarsest_scale*k-coarsest_scale+1:coarsest_scale*k)&
-                  *rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                  coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                  coarsest_scale*k-coarsest_scale+1:coarsest_scale*k)**2)/coarsest_scale**3
-             fine_clumping_coarsest(i,j,k)=fine_clumping_coarsest(i,j,k)/&
-                  (density_field_coarsest(i,j,k)/coarsest_scale**3)**2
-
-!clumping3(i,j,k)=sum(1.0d0*clumping2(2*i-1:2*i,2*j-1:2*j,2*k-1:2*k)*rho2(2*i-1:2*i,2*j-1:2*j,2*k-1:2*k)**2)/8.
-!              clumping3(i,j,k)=clumping3(i,j,k)/(rho3(i,j,k)/8.)**2
-          end do
-       end do
-    end do
-
-
-    ofile=output_path//z_s(1:len_trim(z_s))//'fc_coarsest'//  &
-          r_s(1:len_trim(r_s))//'.dat'
-#ifdef BINARY
-    open (unit=72,file=ofile,status='replace',iostat=fstat,form='binary')
-#else
-    open (unit=72,file=ofile,status='replace',iostat=fstat,form='unformatted')
-#endif
-    if (fstat /= 0) then
-      write(*,*) 'error opening coarsened fine clumping file for write'
-      write(*,*) 'rank',rank,'file:',ofile
-      stop
-    endif
-    write(72) fine_clumping_coarsest
-    close(72)
-#endif
-
 #ifdef HALO_VEL_FIELD
 
 !!  write velocity field 
@@ -233,96 +153,7 @@
     write(72) velocity_field 
     close(72)
 
-#ifdef COARSEST
-    ! mean bulk velocity: we need to divide the values in the file (which are sum over all 
-    ! particles) by the number of particles in the cell 
-    ! NOTE: assumes (as currently set) that coarsened_velocity_scale = mesh_scale (i.e. that 
-    ! velocity_field (each direction) and rho_c have the same dimensions) 
-
-    do i=1,nc_node_dim
-       do j=1,nc_node_dim
-          do k=1,nc_node_dim
-             !note: the 8 is to convert grid masses to particle masses
-             velocity_field(1,i,j,k) = velocity_field(1,i,j,k)/(rho_c(i,j,k)/8.)
-             velocity_field(2,i,j,k) = velocity_field(2,i,j,k)/(rho_c(i,j,k)/8.)
-             velocity_field(3,i,j,k) = velocity_field(3,i,j,k)/(rho_c(i,j,k)/8.)
-          end do
-       end do
-    end do
-    
-
-    !! Write out velocity field on the coarsened grid (for RT)
-    
-    ! redistribute data to coarsest grid
-    do i=1,n_coarsest
-       do j=1,n_coarsest
-          do k=1,n_coarsest
-             if(sum(rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                  coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                  coarsest_scale*k-coarsest_scale+1:coarsest_scale*k)).gt.0.0d0)then
-                velocity_field_coarsest(1,i,j,k)= &
-                     sum(velocity_field(1,coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                     coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                     coarsest_scale*k-coarsest_scale+1:coarsest_scale*k)&
-                     *rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                     coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                     coarsest_scale*k-coarsest_scale+1:coarsest_scale*k))/&
-                     sum(rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                     coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                     coarsest_scale*k-coarsest_scale+1:coarsest_scale*k))!mean bulk velocity per coarsest cell
-                velocity_field_coarsest(2,i,j,k)= &
-                     sum(velocity_field(2,coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                     coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                     coarsest_scale*k-coarsest_scale+1:coarsest_scale*k)&
-                     *rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                     coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                     coarsest_scale*k-coarsest_scale+1:coarsest_scale*k))/&
-                     sum(rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                     coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                     coarsest_scale*k-coarsest_scale+1:coarsest_scale*k))!mean bulk velocity per coarsest cell
-                velocity_field_coarsest(3,i,j,k)= &
-                     sum(velocity_field(3,coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                     coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                     coarsest_scale*k-coarsest_scale+1:coarsest_scale*k)&
-                     *rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                     coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                     coarsest_scale*k-coarsest_scale+1:coarsest_scale*k))/&
-                     sum(rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                     coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                     coarsest_scale*k-coarsest_scale+1:coarsest_scale*k))!mean bulk velocity per coarsest cell
-              else
-                 velocity_field_coarsest(1,i,j,k)=0.0d0
-                 velocity_field_coarsest(2,i,j,k)=0.0d0
-                 velocity_field_coarsest(3,i,j,k)=0.0d0
-              end if
-           end do
-        end do
-     end do
-
-!!  write coarsest velocity field
-    ofile=output_path//z_s(1:len_trim(z_s))//'vel_coarsest'//  &
-          r_s(1:len_trim(r_s))//'.dat'
-#ifdef BINARY
-    open (unit=72,file=ofile,status='replace',iostat=fstat,form='binary')
-#else
-    open (unit=72,file=ofile,status='replace',iostat=fstat,form='unformatted')
 #endif
-    if (fstat /= 0) then
-      write(*,*) 'error opening velocity field file for write'
-      write(*,*) 'rank',rank,'file:',ofile
-      stop
-    endif
-    write(72) velocity_field_coarsest
-    close(72)
-
-#endif
-#endif
-
-#endif
-
-
-
-
 
 !! Do halo analysis, dump to file
 
@@ -412,7 +243,7 @@
 
   subroutine find_halos(tile)
     implicit none
-    include 'cubep3m.fh'
+    include 'cubepm.fh'
 
 !!  Halo finding variables
 
@@ -482,7 +313,6 @@
             ipeak(:,ic)=(/i,j,k/)
             den_peak(ic)=denmax
 
-!parabolic interpolation for finding the peak position/halo center
             if (para_inter_hc) then
               x(1)=real(i-1)-0.5
               x(2)=real(i)-0.5
@@ -639,7 +469,7 @@
   subroutine initialize_halofind
 
     implicit none
-    include 'cubep3m.fh'
+    include 'cubepm.fh'
     include 'mpif.h'
 
     integer(4) :: ii, i, j, k, fstat
@@ -654,7 +484,7 @@
     do i=-nc_halo_max,nc_halo_max
       do j=-nc_halo_max,nc_halo_max
         do k=-nc_halo_max,nc_halo_max
-          r=sqrt(real(i)**2+real(j)**2+real(k)**2)
+          r=sqrt(i**2+j**2+k**2*1.)
           if (r>nc_halo_max) cycle
           ii=ii+1
           if (ii>nlist) then
@@ -704,7 +534,7 @@
   subroutine coarse_cic_mass_vel(pp)
     implicit none
 
-    include 'cubep3m.fh'
+    include 'cubepm.fh'
 
     integer(4), parameter :: CV=fine_clumping_scale/mesh_scale
     integer(4) :: pp
@@ -774,7 +604,7 @@
   subroutine coarse_cic_mass_vel_boundry(pp)
     implicit none
 
-    include 'cubep3m.fh'
+    include 'cubepm.fh'
 
     integer(4), parameter :: CV=fine_clumping_scale/mesh_scale
     integer(4) :: pp

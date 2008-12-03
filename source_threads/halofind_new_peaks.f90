@@ -106,13 +106,10 @@
 
 #endif
 
-#ifdef COARSE_DENS
-
 !! construct coarse density and velocity field
 
    rho_c=0.0 !Have to fill it with zeros first?
    velocity_field=0.0
-
 
     do k = 0, nc_node_dim + 1
       do j = 0, nc_node_dim + 1
@@ -176,6 +173,8 @@
     write(72) density_field_coarsest
     close(72)
 
+#ifdef CLUMPING
+
 !! Write out fine clumping on the coarsened grid (for RT)
 
     ! redistribute data to coarsest grid
@@ -213,6 +212,8 @@
     endif
     write(72) fine_clumping_coarsest
     close(72)
+#endif
+
 #endif
 
 #ifdef HALO_VEL_FIELD
@@ -318,20 +319,16 @@
 #endif
 #endif
 
-#endif
-
-
-
-
-
 !! Do halo analysis, dump to file
 
     write(12) nhalo
 
     do hi=1,nhalo     
        radius_calc=(halo_mass(hi)/halo_odc/(4.0*pi/3.0))**(1.0/3.0)
-       search_limit(:,1)=int(1.0/real(mesh_scale)*halo_pos(:,hi)-1.0/real(mesh_scale)*radius_calc-1.0)
-       search_limit(:,2)=int(1.0/real(mesh_scale)*halo_pos(:,hi)+1.0/real(mesh_scale)*radius_calc+1.0)
+       search_limit(:,1)=int(1.0/real(mesh_scale)*halo_pos(:,hi)-1.0 &
+            /real(mesh_scale)*radius_calc-1.0)
+       search_limit(:,2)=int(1.0/real(mesh_scale)*halo_pos(:,hi)+1.0 &
+            /real(mesh_scale)*radius_calc+1.0)
        imass=0
        x_mean=0.0
        v_mean=0.0
@@ -384,7 +381,9 @@
          !!      write stuff to file or store in common arrays for Ifront 
          !!      to store in common block arrays, each array should be
          !!      max_maxima in size
-         if (halo_write .and. imass>0 .and. halo_mass(hi)>160) write(12) halo_pos(:,hi),x_mean,v_mean,l,v_disp,radius_calc,halo_mass(hi),imass*mass_p,halo_mass1(hi)
+         if (halo_write .and. imass>0 .and. halo_mass(hi)>160) &
+              write(12) halo_pos(:,hi),x_mean,v_mean,l,v_disp,radius_calc,&
+              halo_mass(hi),imass*mass_p,halo_mass1(hi)
          !! these plus nhalo should be passed to C^2Ray for each iteration
          halo_x_mean(:,hi)=x_mean
          halo_v_mean(:,hi)=v_mean
@@ -419,12 +418,12 @@
     integer(4), dimension(3) :: offset
     integer(4), dimension(3) :: cic_l,cic_h,tile
 
-    integer(4) :: i,j,k,pp,ix,iy,iz,ix0,iy0,iz0,k1,j1,i1
+    integer(4) :: i,j,k,pp,ix,iy,iz,ix0,iy0,iz0,k1,j1,i1,pp1
     integer(4) :: ic,iloc,ilcic,jlcic,klcic,thread
 
     real(4)    :: denmax,r,amass,amtot,fcf,fcf2
 
-    real(4),dimension(3) :: x,fx,x0
+    real(4),dimension(3) :: x,fx,x0,dx
 
     real(4) :: para_inter 
     external para_inter 
@@ -432,12 +431,14 @@
 !! calculate offsets for tile in local coords
 
     offset=tile*nf_physical_tile_dim-nf_buf
+!    offset_fine=tile*nf_physical_tile_dim_halos-nf_buf_halos
  
 !! initialize density 
 
     thread=1
 
     rho_f(:,:,:,thread)=0.0
+    rho_f_halos(:,:,:)=0.0
 
 !! limits for mass assignment.  Ignore outmost buffer
 !! cells (4 fine cells).
@@ -445,13 +446,82 @@
     cic_l(:) = nc_tile_dim * tile(:) + 2 - nc_buf
     cic_h(:) = nc_tile_dim * (tile(:) + 1) + nc_buf - 1
 
+#ifdef SONEW    ! if defined use the new Spherical Overdensity peak 
+                 ! finding algorithm, based on Tinker et al. 2008
+
+!! calculate density associated with each particle in the
+!! local volume
+ 
+    dens=1 !initially no particles are yet in halos, set density to 1
+           !dens=0 will indicate that this particle is inside a halo 
+           !dens>1 means it is a local peak
+
+    ic=0 !will contain (local for this cuboid) number of peaks
+
+    do k = cic_l(3), cic_h(3)
+      do j = cic_l(2), cic_h(2)
+        do i = cic_l(1), cic_h(1)
+           !start with the first particle in the chain for this coarse grid cell
+           pp=hoc(i,j,k) !head-of-chain for the linked list of particles inside
+                         !the (i,j,k) coarse grid cell
+           do !go over all particles in this grid cell
+              if (pp==0) exit
+              if(dens(pp)==1)then !particle does not yet belong to a peak
+                 flag=0
+                 !go over all particles inside this one and all the neighboring coarse grid cells
+                 !
+                 !Note: some work might be saved here by a more complex code (by looking
+                 !for particles only in the cells that have overlap with search volume
+                 do k1 = k-1, k+1
+                    do j1 = j-1, j+1
+                       do i1 = i-1, i+1
+                          pp1=hoc(i1,j1,k1) !first particle in linked list
+                          do
+                             if (pp1==0) exit
+                             !xv(1:3,pp1)=particle coordinates
+                             dx=xv(1:3,pp1)-xv(1:3,pp)
+                             r=sqrt(dx(1)**2+dx(2)**2+dx(3)**2) !distance between the two particles
+                             if(r<r_soft_peak)then !this particle is within search radius
+                                if(flag==0)then !peak is not yet counted
+                                   if (ic > max_maxima -2) then
+                                      write(*,*) 'too many halos'
+                                      exit
+                                   endif
+                                   ic=ic+1
+                                   flag=1 !makes sure we do not count this peak twice
+                                end if
+                                dens(pp)=dens(pp)+1
+                                dens(pp1)=0 !mark particle, so it is not considered as a halo center
+                             end if
+                             pp1 = ll(pp1)!go to next particle
+                          end do
+                       end do
+                    end do
+                 end do
+                 ipeak(:,ic)=(/i,j,k/)!which cell is the peak in?
+                 den_peak(ic)=dens(pp) !what is the value of the peak?
+                 peak_pointer(ic)=pp !this will tell us which particle marks the peak
+                 !
+                 pp = ll(pp)!go to next particle
+              else
+                 pp = ll(pp) !just go to next particle
+              end if
+           end do
+        enddo
+     enddo
+  enddo
+
+!how all particles with dens>1 are local peaks, locations are still rough
+
+#else !find peaks based on the mesh density, as in the original algorithm
+
 !! calculate fine mesh density for tile
 
     do k = cic_l(3), cic_h(3)
       do j = cic_l(2), cic_h(2)
         do i = cic_l(1), cic_h(1)
           pp=hoc(i,j,k)
-#ifdef NGPH    !NGP/CIC used only for halo finding 
+#ifdef NGPH    !NGP/CIC used only for halo finding
           call fine_ngp_mass(pp,tile,thread)
 #else
           call fine_cic_mass(pp,tile,thread)
@@ -460,7 +530,29 @@
       enddo
     enddo
 
+    do k = cic_l(3), cic_h(3)
+      do j = cic_l(2), cic_h(2)
+        do i = cic_l(1), cic_h(1)
+          pp=hoc(i,j,k)
+#ifdef NGPH    !NGP/CIC used only for halo finding
+          call fine_ngp_mass_halos(pp,tile)
+#else
+          call fine_cic_mass_halos(pp,tile,thread)
+#endif
+        enddo
+      enddo
+    enddo
 
+!    print*,'check fine densities',sum(rho_f),sum(rho_f_halos)
+!    do i=1,20
+!       j=10
+!       k=10
+!       if (rank == 0) &
+!            print*, 'check values',i,j,k,rho_f(i,j,k,thread), &
+!            sum(rho_f_halos(finer_halo_grid*(i-1)+1:finer_halo_grid*i,&
+!            finer_halo_grid*(j-1)+1:finer_halo_grid*j,&
+!            finer_halo_grid*(k-1)+1:finer_halo_grid*k))
+!    end do
 
 !! calculate clumping factor before halo extraction
 !! Find density maxima
@@ -516,6 +608,8 @@
       enddo
     enddo
 
+#endif
+
 !! sort density maxima 
 
     isortpeak(:ic)=(/ (i,i=1,ic) /)
@@ -523,26 +617,38 @@
     ipeak(:,:ic)=ipeak(:,isortpeak(:ic))
     peak_pos(:,:ic)=peak_pos(:,isortpeak(:ic))
 
+! on finer grid
+
+    peak_pos_fine(:,:ic)=finer_halo_grid*peak_pos(:,:ic)
+    ipeak_fine(:,:ic)=floor(peak_pos_fine(:,:ic))+1
+
+!    do j=1,20
+!       if(rank == 0) print*,'check peak positions',ic,peak_pos(:,j),&
+!            peak_pos_fine(:,j),ipeak(:,j),ipeak_fine(:,j)
+!    end do
+    
 !! find mass in each halo
 
     do iloc=ic,1,-1
-      ix0=ipeak(1,iloc)
-      iy0=ipeak(2,iloc)
-      iz0=ipeak(3,iloc)
+      ix0=ipeak_fine(1,iloc)
+      iy0=ipeak_fine(2,iloc)
+      iz0=ipeak_fine(3,iloc)
       amtot=0
       do i=1,irtot
         ix=ix0+idist(1,i)
-        if (ix < 5 .or. ix > nf_tile-4) cycle
+        if (ix < 5 .or. ix > nf_tile_halos-4) cycle
         iy=iy0+idist(2,i)
-        if (iy < 5 .or. iy > nf_tile-4) cycle
+        if (iy < 5 .or. iy > nf_tile_halos-4) cycle
         iz=iz0+idist(3,i)
-        if (iz < 5 .or. iz > nf_tile-4) cycle
-        amass=rho_f(ix,iy,iz,thread)
-        rho_f(ix,iy,iz,thread)=0.0
+        if (iz < 5 .or. iz > nf_tile_halos-4) cycle
+        amass=rho_f_halos(ix,iy,iz)
+        rho_f_halos(ix,iy,iz)=0.0
+!        amass=rho_f(ix,iy,iz,thread)
+!        rho_f(ix,iy,iz,thread)=0.0
         amtot=amtot+amass
         if (complete_shell.and.rdist(i)==rdist(i+1)) cycle 
-        if (i > 18 .and. amtot/(real(i)) < halo_odc) then
-           actual_odc=amtot/(real(i))!remember what the actual overdensity inside the found halo is
+        if (i > 18 .and.(amtot/(real(i)))*finer_halo_grid**3 < halo_odc) then
+           actual_odc=(amtot/(real(i)))*finer_halo_grid**3!remember what the actual overdensity inside the found halo is
            if (amtot >= min_halo_particles*mass_p) then
               nhalo=nhalo+1
               if (nhalo > max_maxima) then

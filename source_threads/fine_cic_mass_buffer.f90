@@ -9,7 +9,7 @@
     integer(4), dimension(3) :: i1, i2
     real(4), dimension(3) :: x, offset, dx1, dx2
 
-    offset(:)= - tile(:) * nf_physical_tile_dim + nf_buf - 0.5
+    offset(:)= - tile(:) * nf_physical_tile_dim + nf_buf !- 0.5 
 
     do
       if (pp == 0) exit

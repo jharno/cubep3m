@@ -8,7 +8,11 @@
     include 'cubepm.fh'
 
     integer(4) :: i,j,k,i0,j0,i1,j1,k1
-    integer(4) :: slab_slice,num_elements,tag,rtag
+!    integer(4) :: slab_slice,num_elements,tag,rtag
+    integer(4) :: slab_slice,tag,rtag
+    integer(4) :: num_elements !possibly should be double so as not to 
+                               !overflow for large runs, but integer*8 
+                               !might be unsupported by MPI
 
     integer(4), dimension(2*nodes_dim**2) :: requests
     integer(4), dimension(MPI_STATUS_SIZE,2*nodes_dim**2) :: wait_status
@@ -120,9 +124,9 @@
 
     if (firstfftw) then
       call rfftw3d_f77_mpi_create_plan(plan,mpi_comm_world,nc_dim, &
-            nc_dim,nc_dim, FFTW_REAL_TO_COMPLEX, FFTW_MEASURE)
+            nc_dim,nc_dim, FFTW_REAL_TO_COMPLEX, FFTW_ESTIMATE) !_MEASURE)
       call rfftw3d_f77_mpi_create_plan(iplan,mpi_comm_world,nc_dim, &
-            nc_dim,nc_dim, FFTW_COMPLEX_TO_REAL, FFTW_MEASURE)
+            nc_dim,nc_dim, FFTW_COMPLEX_TO_REAL, FFTW_ESTIMATE) !_MEASURE)
 #ifdef DEBUG_LOW
       print *,'finished initialization of fftw',rank
 #endif
@@ -154,7 +158,7 @@
       call rfftwnd_f77_mpi(plan,1,slab,slab_work,1,order)
     else
       call rfftwnd_f77_mpi(iplan,1,slab,slab_work,1,order)
-      slab=slab/real(nc_dim*nc_dim*nc_dim)
+      slab=slab/(real(nc_dim)*real(nc_dim)*real(nc_dim))
     endif
 
 #ifdef DEBUG_LOW

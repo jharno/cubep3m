@@ -9,9 +9,10 @@
     integer(4) :: thread
     real(4) :: f_force_max_node
     real(4) :: pp_force_max_node
+#ifdef DOPENMP
     integer(4) :: omp_get_thread_num
     external omp_get_thread_num
-
+#endif
 ! these are for fine mesh
     integer(4) :: pp,ii,im,i3
     integer(4), dimension(3) :: cic_l, cic_h 
@@ -68,8 +69,13 @@
     !$omp private(cur_tile,i,j,k,tile,thread,pp,ii,im,i3,cic_l,cic_h,i1,x, &
     !$              offset,dx1,dx2,dVc,i2,jm,km,ip,jp,kp,force_mag,pp1,pp2,ipl,& 
     !$              sep,force_pp,rmag,pp_force_mag,v_init)
+!!$    !$omp private(cur_tile,i,j,k,tile,thread,pp,ii,im,i3,cic_l,cic_h,i1,x,offset) &
+!!$    !$omp private(dx1,dx2,dVc,i2,jm,km,ip,jp,kp,force_mag,pp1,pp2,ipl,sep,force_pp)&
+!!$    !$omp private(rmag,pp_force_mag,v_init)  !for tests on the laptop only!
     thread=1
+#ifdef DOPENMP
     thread = omp_get_thread_num() + 1
+#endif    
     f_mesh_mass(thread)=0.0
     f_force_max(thread)=0.0
 #ifdef PPINT

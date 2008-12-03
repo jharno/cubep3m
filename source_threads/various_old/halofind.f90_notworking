@@ -40,6 +40,9 @@
       tile(2) = (j-1) /  tiles_node_dim
       j = j - tile(2) * tiles_node_dim
       tile(1) = j - 1
+
+!      print*,'index check',rank,i,j,tiles_node_dim,tiles_node
+!      print*,'tile check 0',tile
       call find_halos(tile)
     enddo
 
@@ -65,8 +68,6 @@
       write(*,*) 'rank',rank,'file:',ofile
       stop
     endif
-
-#ifdef CLUMPING
 
 !! calculate clumping factor on fine mesh 
 
@@ -104,15 +105,10 @@
     write(72) fine_clumping 
     close(72)
 
-#endif
-
-#ifdef COARSE_DENS
-
 !! construct coarse density and velocity field
 
-   rho_c=0.0 !Have to fill it with zeros first?
-   velocity_field=0.0
-
+    rho_c=0.0 !Have to fill it with zeros first?
+    velocity_field=0.0
 
     do k = 0, nc_node_dim + 1
       do j = 0, nc_node_dim + 1
@@ -152,10 +148,7 @@
     do i=1,n_coarsest
        do j=1,n_coarsest
           do k=1,n_coarsest
-             density_field_coarsest(i,j,k)=&
-                  sum(rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                  coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                  coarsest_scale*k-coarsest_scale+1:coarsest_scale*k))
+             density_field_coarsest(i,j,k)=sum(rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,coarsest_scale*k-coarsest_scale+1:coarsest_scale*k))
           end do
        end do
     end do
@@ -182,22 +175,16 @@
     do i=1,n_coarsest
        do j=1,n_coarsest
           do k=1,n_coarsest
-             fine_clumping_coarsest(i,j,k)=&
-                  sum(fine_clumping(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                  coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                  coarsest_scale*k-coarsest_scale+1:coarsest_scale*k)&
-                  *rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                  coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                  coarsest_scale*k-coarsest_scale+1:coarsest_scale*k)**2)/coarsest_scale**3
+             fine_clumping_coarsest(i,j,k)=sum(fine_clumping(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,coarsest_scale*k-coarsest_scale+1:coarsest_scale*k)*rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,coarsest_scale*k-coarsest_scale+1:coarsest_scale*k)**2)/coarsest_scale**3
              fine_clumping_coarsest(i,j,k)=fine_clumping_coarsest(i,j,k)/&
                   (density_field_coarsest(i,j,k)/coarsest_scale**3)**2
-
+                  
 !clumping3(i,j,k)=sum(1.0d0*clumping2(2*i-1:2*i,2*j-1:2*j,2*k-1:2*k)*rho2(2*i-1:2*i,2*j-1:2*j,2*k-1:2*k)**2)/8.
 !              clumping3(i,j,k)=clumping3(i,j,k)/(rho3(i,j,k)/8.)**2
           end do
        end do
     end do
-
+    
 
     ofile=output_path//z_s(1:len_trim(z_s))//'fc_coarsest'//  &
           r_s(1:len_trim(r_s))//'.dat'
@@ -242,7 +229,7 @@
     do i=1,nc_node_dim
        do j=1,nc_node_dim
           do k=1,nc_node_dim
-             !note: the 8 is to convert grid masses to particle masses
+             !note: the 8 is to convert grid masses to particle masses, fixed for now
              velocity_field(1,i,j,k) = velocity_field(1,i,j,k)/(rho_c(i,j,k)/8.)
              velocity_field(2,i,j,k) = velocity_field(2,i,j,k)/(rho_c(i,j,k)/8.)
              velocity_field(3,i,j,k) = velocity_field(3,i,j,k)/(rho_c(i,j,k)/8.)
@@ -250,46 +237,22 @@
        end do
     end do
     
-
     !! Write out velocity field on the coarsened grid (for RT)
     
     ! redistribute data to coarsest grid
     do i=1,n_coarsest
        do j=1,n_coarsest
           do k=1,n_coarsest
-             if(sum(rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                  coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                  coarsest_scale*k-coarsest_scale+1:coarsest_scale*k)).gt.0.0d0)then
+             if(sum(rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,coarsest_scale*k-coarsest_scale+1:coarsest_scale*k)).gt.0.0d0)then
                 velocity_field_coarsest(1,i,j,k)= &
-                     sum(velocity_field(1,coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                     coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                     coarsest_scale*k-coarsest_scale+1:coarsest_scale*k)&
-                     *rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                     coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                     coarsest_scale*k-coarsest_scale+1:coarsest_scale*k))/&
-                     sum(rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                     coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                     coarsest_scale*k-coarsest_scale+1:coarsest_scale*k))!mean bulk velocity per coarsest cell
+                     sum(velocity_field(1,coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,coarsest_scale*k-coarsest_scale+1:coarsest_scale*k)*rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,coarsest_scale*k-coarsest_scale+1:coarsest_scale*k))/&
+                     sum(rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,coarsest_scale*k-coarsest_scale+1:coarsest_scale*k))!mean bulk velocity per coarsest cell
                 velocity_field_coarsest(2,i,j,k)= &
-                     sum(velocity_field(2,coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                     coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                     coarsest_scale*k-coarsest_scale+1:coarsest_scale*k)&
-                     *rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                     coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                     coarsest_scale*k-coarsest_scale+1:coarsest_scale*k))/&
-                     sum(rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                     coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                     coarsest_scale*k-coarsest_scale+1:coarsest_scale*k))!mean bulk velocity per coarsest cell
+                     sum(velocity_field(2,coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,coarsest_scale*k-coarsest_scale+1:coarsest_scale*k)*rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,coarsest_scale*k-coarsest_scale+1:coarsest_scale*k))/&
+                     sum(rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,coarsest_scale*k-coarsest_scale+1:coarsest_scale*k))!mean bulk velocity per coarsest cell
                 velocity_field_coarsest(3,i,j,k)= &
-                     sum(velocity_field(3,coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                     coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                     coarsest_scale*k-coarsest_scale+1:coarsest_scale*k)&
-                     *rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                     coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                     coarsest_scale*k-coarsest_scale+1:coarsest_scale*k))/&
-                     sum(rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                     coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                     coarsest_scale*k-coarsest_scale+1:coarsest_scale*k))!mean bulk velocity per coarsest cell
+                     sum(velocity_field(3,coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,coarsest_scale*k-coarsest_scale+1:coarsest_scale*k)*rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,coarsest_scale*k-coarsest_scale+1:coarsest_scale*k))/&
+                     sum(rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,coarsest_scale*k-coarsest_scale+1:coarsest_scale*k))!mean bulk velocity per coarsest cell
               else
                  velocity_field_coarsest(1,i,j,k)=0.0d0
                  velocity_field_coarsest(2,i,j,k)=0.0d0
@@ -316,13 +279,8 @@
     close(72)
 
 #endif
-#endif
 
 #endif
-
-
-
-
 
 !! Do halo analysis, dump to file
 
@@ -416,7 +374,7 @@
 
 !!  Halo finding variables
 
-    integer(4), dimension(3) :: offset
+    integer(4), dimension(3) :: offset, offset_fine
     integer(4), dimension(3) :: cic_l,cic_h,tile
 
     integer(4) :: i,j,k,pp,ix,iy,iz,ix0,iy0,iz0,k1,j1,i1
@@ -429,14 +387,19 @@
     real(4) :: para_inter 
     external para_inter 
 
+!    print*,'tile check 1',tile,thread
+
+
 !! calculate offsets for tile in local coords
 
     offset=tile*nf_physical_tile_dim-nf_buf
+    offset_fine=tile*nf_physical_tile_dim_halos-nf_buf_halos
  
 !! initialize density 
 
     thread=1
 
+    rho_f_halos(:,:,:)=0.0
     rho_f(:,:,:,thread)=0.0
 
 !! limits for mass assignment.  Ignore outmost buffer
@@ -452,15 +415,15 @@
         do i = cic_l(1), cic_h(1)
           pp=hoc(i,j,k)
 #ifdef NGPH    !NGP/CIC used only for halo finding 
+          call fine_ngp_mass_halos(pp,tile)
           call fine_ngp_mass(pp,tile,thread)
 #else
+          call fine_cic_mass_halos(pp,tile)
           call fine_cic_mass(pp,tile,thread)
 #endif
         enddo
       enddo
     enddo
-
-
 
 !! calculate clumping factor before halo extraction
 !! Find density maxima
@@ -472,6 +435,8 @@
           cftmass=cftmass+rho_f(i,j,k,thread)
           cftmass2=cftmass2+rho_f(i,j,k,thread)**2
           denmax=maxval(rho_f(i-1:i+1,j-1:j+1,k-1:k+1,thread))
+!          denmax=maxval(rho_f_halos(i-finer_halo_grid:i+finer_halo_grid,&
+!               j-finer_halo_grid:j+finer_halo_grid,k-finer_halo_grid:k+finer_halo_grid))
           if (denmax == rho_f(i,j,k,thread) .and. denmax > den_peak_cutoff) then
             if (ic > max_maxima -2) then
               write(*,*) 'too many halos'
@@ -523,6 +488,11 @@
     ipeak(:,:ic)=ipeak(:,isortpeak(:ic))
     peak_pos(:,:ic)=peak_pos(:,isortpeak(:ic))
 
+! on finer grid
+
+    peak_pos(:,:ic)=finer_halo_grid*peak_pos(:,:ic)
+    ipeak(:,:ic)=floor(peak_pos(:,:ic))+1
+
 !! find mass in each halo
 
     do iloc=ic,1,-1
@@ -532,17 +502,20 @@
       amtot=0
       do i=1,irtot
         ix=ix0+idist(1,i)
-        if (ix < 5 .or. ix > nf_tile-4) cycle
+        if (ix < 5 .or. ix > nf_tile_halos-4) cycle
         iy=iy0+idist(2,i)
-        if (iy < 5 .or. iy > nf_tile-4) cycle
+        if (iy < 5 .or. iy > nf_tile_halos-4) cycle
         iz=iz0+idist(3,i)
-        if (iz < 5 .or. iz > nf_tile-4) cycle
-        amass=rho_f(ix,iy,iz,thread)
-        rho_f(ix,iy,iz,thread)=0.0
+        if (iz < 5 .or. iz > nf_tile_halos-4) cycle
+        amass=rho_f_halos(ix,iy,iz)
+        rho_f_halos(ix,iy,iz)=0.0
+        !rho_f_halos is in grid masses,
+        !but cells are finer, so there are finer_halo_grid**3 more cells!
         amtot=amtot+amass
-        if (complete_shell.and.rdist(i)==rdist(i+1)) cycle 
-        if (i > 18 .and. amtot/(real(i)) < halo_odc) then
-           actual_odc=amtot/(real(i))!remember what the actual overdensity inside the found halo is
+        if (complete_shell.and.rdist(i)==rdist(i+1)) cycle
+        if (i > 18 .and. (amtot/(real(i)))*finer_halo_grid**3 < halo_odc) then
+           actual_odc=amtot/(real(i))*finer_halo_grid**3
+           !remember what the actual overdensity inside the found halo is
            if (amtot >= min_halo_particles*mass_p) then
               nhalo=nhalo+1
               if (nhalo > max_maxima) then
@@ -560,8 +533,12 @@
       endif
 
       if (nhalo > 0) then
-        halo_pos(:,nhalo)=peak_pos(:,iloc)+offset !(/os_x,os_y,os_z/)
+!        halo_pos(:,nhalo)=peak_pos(:,iloc)+offset !(/os_x,os_y,os_z/)
+         halo_pos(:,nhalo)=(peak_pos(:,iloc)+offset_fine)/finer_halo_grid !(/os_x,os_y,os_z/)
+        
         halo_mass1(nhalo)=amtot
+!        halo_mass(nhalo)=amtot
+!        if(halo_mass(nhalo)<=0)print*,'problem',amtot,actual_odc,nhalo
 !        write(*,*) 'check mass rescaling 0',overdens(5),mass_rescaling(5)
 !        write(*,*) 'check mass rescaling 1',amtot,halo_nondim_mass,actual_odc
         do iii=1,9999
@@ -586,30 +563,30 @@
 
 !! clumping factor calculation  
 
-    do k=1+nf_buf,nf_buf+nf_physical_tile_dim
-      do j=1+nf_buf,nf_buf+nf_physical_tile_dim
-        do i=1+nf_buf,nf_buf+nf_physical_tile_dim
-          cfmass=cfmass+rho_f(i,j,k,thread)
-          cfmass2=cfmass2+rho_f(i,j,k,thread)**2
+    do k=1+nf_buf_halos,nf_buf_halos+nf_physical_tile_dim_halos
+      do j=1+nf_buf_halos,nf_buf_halos+nf_physical_tile_dim_halos
+        do i=1+nf_buf_halos,nf_buf_halos+nf_physical_tile_dim_halos
+          cfmass=cfmass+rho_f_halos(i,j,k)
+          cfmass2=cfmass2+rho_f_halos(i,j,k)**2
         enddo
       enddo
     enddo
 
 !! fine clumping factor
 
-    do k=1+nf_buf,nf_buf+nf_physical_tile_dim,fine_clumping_scale
-      iz=(k-nf_buf+tile(3)*nf_physical_tile_dim)/fine_clumping_scale+1
-      do j=1+nf_buf,nf_buf+nf_physical_tile_dim,fine_clumping_scale
-        iy=(j-nf_buf+tile(2)*nf_physical_tile_dim)/fine_clumping_scale+1
-        do i=1+nf_buf,nf_buf+nf_physical_tile_dim,fine_clumping_scale
-          ix=(i-nf_buf+tile(1)*nf_physical_tile_dim)/fine_clumping_scale+1
+    do k=1+nf_buf_halos,nf_buf_halos+nf_physical_tile_dim_halos,fine_clumping_scale
+      iz=(k-nf_buf_halos+tile(3)*nf_physical_tile_dim_halos)/fine_clumping_scale+1
+      do j=1+nf_buf_halos,nf_buf_halos+nf_physical_tile_dim_halos,fine_clumping_scale
+        iy=(j-nf_buf_halos+tile(2)*nf_physical_tile_dim_halos)/fine_clumping_scale+1
+        do i=1+nf_buf_halos,nf_buf_halos+nf_physical_tile_dim_halos,fine_clumping_scale
+          ix=(i-nf_buf_halos+tile(1)*nf_physical_tile_dim_halos)/fine_clumping_scale+1
           fcf=0.0
           fcf2=0.0
           do k1=0,fine_clumping_scale-1
             do j1=0,fine_clumping_scale-1
               do i1=0,fine_clumping_scale-1
-                fcf=fcf+rho_f(i+i1,j+j1,k+k1,thread)
-                fcf2=fcf2+(rho_f(i+i1,j+j1,k+k1,thread))**2
+                fcf=fcf+rho_f_halos(i+i1,j+j1,k+k1)
+                fcf2=fcf2+(rho_f_halos(i+i1,j+j1,k+k1))**2
               enddo
             enddo
           enddo
@@ -706,7 +683,7 @@
 
     include 'cubep3m.fh'
 
-    integer(4), parameter :: CV=fine_clumping_scale/mesh_scale
+    integer(4), parameter :: CV=coarsened_velocity_scale/mesh_scale
     integer(4) :: pp
     integer(4), dimension(3) :: i1,i2
     real(4), dimension(3) :: x,dx1,dx2,vx1,vx2
@@ -776,7 +753,7 @@
 
     include 'cubep3m.fh'
 
-    integer(4), parameter :: CV=fine_clumping_scale/mesh_scale
+    integer(4), parameter :: CV=coarsened_velocity_scale/mesh_scale
     integer(4) :: pp
     integer(4), dimension(3) :: i1,i2
     real(4), dimension(3) :: x,dx1,dx2, vx1,vx2

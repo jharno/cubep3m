@@ -33,13 +33,11 @@ program cubep3m
 
   if (rank == 0) write(*,*) 'finished variable init',t_elapsed(wc_counter)
 
+#ifdef DOPENMP
   !$ call omp_set_num_threads(cores)
-
-if (rank == 0) write(*,*) 'finished omp call',t_elapsed(wc_counter)
+#endif
 
   call coarse_kernel
-if (rank == 0) write(*,*) 'finished coarse kernel init',t_elapsed(wc_counter)
-
   call fine_kernel
 if (rank == 0) write(*,*) 'finished kernel init',t_elapsed(wc_counter)
 

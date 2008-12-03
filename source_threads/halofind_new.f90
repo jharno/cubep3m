@@ -66,53 +66,14 @@
       stop
     endif
 
-#ifdef CLUMPING
-
 !! calculate clumping factor on fine mesh 
 
-    cfmassl=0.0 
-    cfmassl2=0.0 
-    call mpi_reduce(cfmass,cfmassl,1,mpi_double_precision,mpi_sum,0,mpi_comm_world,ierr)
-    call mpi_reduce(cfmass2,cfmassl2,1,mpi_double_precision,mpi_sum,0,mpi_comm_world,ierr)
-    cftmassl=0.0 
-    cftmassl2=0.0 
-    call mpi_reduce(cftmass,cftmassl,1,mpi_double_precision,mpi_sum,0,mpi_comm_world,ierr)
-    call mpi_reduce(cftmass2,cftmassl2,1,mpi_double_precision,mpi_sum,0,mpi_comm_world,ierr)
-    if (rank==0) then
-      cfmass=(cfmassl2*nf_physical_dim**3)/cfmassl**2
-      cftmass=(cftmassl2*nf_physical_dim**3)/cftmassl**2
-      ofile=output_path//"fine_structure.dat"
-      open(124,file=ofile,access='append',form='formatted')
-      write(124,*) cftmass,cfmass,z_write
-      close(124)
-    endif
-
-!! Write out fine clumping
-
-    ofile=output_path//z_s(1:len_trim(z_s))//'fc'//  &
-          r_s(1:len_trim(r_s))//'.dat'
-#ifdef BINARY
-    open (unit=72,file=ofile,status='replace',iostat=fstat,form='binary')
-#else
-    open (unit=72,file=ofile,status='replace',iostat=fstat,form='unformatted')
-#endif
-    if (fstat /= 0) then
-      write(*,*) 'error opening fine clumping file for write'
-      write(*,*) 'rank',rank,'file:',ofile
-      stop
-    endif
-    write(72) fine_clumping 
-    close(72)
-
-#endif
-
-#ifdef COARSE_DENS
+! now gone!!
 
 !! construct coarse density and velocity field
 
    rho_c=0.0 !Have to fill it with zeros first?
    velocity_field=0.0
-
 
     do k = 0, nc_node_dim + 1
       do j = 0, nc_node_dim + 1
@@ -177,43 +138,6 @@
     close(72)
 
 !! Write out fine clumping on the coarsened grid (for RT)
-
-    ! redistribute data to coarsest grid
-    do i=1,n_coarsest
-       do j=1,n_coarsest
-          do k=1,n_coarsest
-             fine_clumping_coarsest(i,j,k)=&
-                  sum(fine_clumping(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                  coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                  coarsest_scale*k-coarsest_scale+1:coarsest_scale*k)&
-                  *rho_c(coarsest_scale*i-coarsest_scale+1:coarsest_scale*i,&
-                  coarsest_scale*j-coarsest_scale+1:coarsest_scale*j,&
-                  coarsest_scale*k-coarsest_scale+1:coarsest_scale*k)**2)/coarsest_scale**3
-             fine_clumping_coarsest(i,j,k)=fine_clumping_coarsest(i,j,k)/&
-                  (density_field_coarsest(i,j,k)/coarsest_scale**3)**2
-
-!clumping3(i,j,k)=sum(1.0d0*clumping2(2*i-1:2*i,2*j-1:2*j,2*k-1:2*k)*rho2(2*i-1:2*i,2*j-1:2*j,2*k-1:2*k)**2)/8.
-!              clumping3(i,j,k)=clumping3(i,j,k)/(rho3(i,j,k)/8.)**2
-          end do
-       end do
-    end do
-
-
-    ofile=output_path//z_s(1:len_trim(z_s))//'fc_coarsest'//  &
-          r_s(1:len_trim(r_s))//'.dat'
-#ifdef BINARY
-    open (unit=72,file=ofile,status='replace',iostat=fstat,form='binary')
-#else
-    open (unit=72,file=ofile,status='replace',iostat=fstat,form='unformatted')
-#endif
-    if (fstat /= 0) then
-      write(*,*) 'error opening coarsened fine clumping file for write'
-      write(*,*) 'rank',rank,'file:',ofile
-      stop
-    endif
-    write(72) fine_clumping_coarsest
-    close(72)
-#endif
 
 #ifdef HALO_VEL_FIELD
 
@@ -318,20 +242,398 @@
 #endif
 #endif
 
-#endif
+!!$!! Do halo analysis, dump to file
+!!$
+!!$    write(12) nhalo
+!!$
+!!$    do hi=1,nhalo     
+!!$       radius_calc=(halo_mass(hi)/halo_odc/(4.0*pi/3.0))**(1.0/3.0)
+!!$       search_limit(:,1)=int(1.0/real(mesh_scale)*halo_pos(:,hi)-1.0 &
+!!$            /real(mesh_scale)*radius_calc-1.0)
+!!$       search_limit(:,2)=int(1.0/real(mesh_scale)*halo_pos(:,hi)+1.0 &
+!!$            /real(mesh_scale)*radius_calc+1.0)
+!!$       imass=0
+!!$       x_mean=0.0
+!!$       v_mean=0.0
+!!$       v2_mean=0.0
+!!$       l=0.0
+!!$      do k=search_limit(3,1),search_limit(3,2)
+!!$        if (k < hoc_nc_l .or. k > hoc_nc_h) then
+!!$          print *,'halo analysis out of bounds in z dimension',k
+!!$          cycle
+!!$        endif
+!!$        do j=search_limit(2,1),search_limit(2,2)
+!!$          if (j < hoc_nc_l .or. j > hoc_nc_h) then
+!!$            print *,'halo analysis out of bounds in y dimension',j
+!!$            cycle
+!!$          endif
+!!$          do i=search_limit(1,1),search_limit(1,2)
+!!$            if (i < hoc_nc_l .or. i > hoc_nc_h) then
+!!$              print *,'halo analysis out of bounds in x dimension',i
+!!$              cycle
+!!$            endif
+!!$            pp=hoc(i,j,k)
+!!$            mass_cell=0
+!!$            do
+!!$              if (pp==0) exit
+!!$              dx=halo_pos(:,hi)-xv(:3,pp)
+!!$              r=sqrt(dx(1)**2+dx(2)**2+dx(3)**2)
+!!$              if(r<radius_calc)then
+!!$                 mass_cell=mass_cell+1
+!!$                 imass=imass+1
+!!$                 x_mean=x_mean+xv(:3,pp)
+!!$                 v_mean=v_mean+xv(4:,pp)
+!!$                 v2_mean=v2_mean+xv(4:,pp)*xv(4:,pp)
+!!$                 l(1)=l(1)+(dx(3)*xv(5,pp)-dx(2)*xv(6,pp))
+!!$                 l(2)=l(2)+(dx(1)*xv(6,pp)-dx(3)*xv(4,pp))
+!!$                 l(3)=l(3)+(dx(2)*xv(4,pp)-dx(1)*xv(5,pp))
+!!$              end if
+!!$              pp=ll(pp)
+!!$           enddo
+!!$!            halo_particle_count ????
+!!$          enddo
+!!$        enddo
+!!$      enddo
+!!$
+!!$         halo_pos(:,hi)=halo_pos(:,hi)+offset 
+!!$         x_mean=x_mean/real(imass)+offset
+!!$         v_mean=v_mean/real(imass)
+!!$         v2_mean=v2_mean/real(imass)
+!!$         l=l/real(imass)
+!!$         v_disp=sqrt(v2_mean(1)+v2_mean(2)+v2_mean(3))
+!!$         !!      write stuff to file or store in common arrays for Ifront 
+!!$         !!      to store in common block arrays, each array should be
+!!$         !!      max_maxima in size
+!!$         if (halo_write .and. imass>0 .and. halo_mass(hi)>160) &
+!!$              write(12) halo_pos(:,hi),x_mean,v_mean,l,v_disp,radius_calc,&
+!!$              halo_mass(hi),imass*mass_p,halo_mass1(hi)
+!!$         !! these plus nhalo should be passed to C^2Ray for each iteration
+!!$         halo_x_mean(:,hi)=x_mean
+!!$         halo_v_mean(:,hi)=v_mean
+!!$         halo_l(:,hi)=l
+!!$         halo_v_disp(hi)=v_disp
+!!$         halo_radius_calc(hi)=radius_calc
+!!$         halo_imass(hi)=imass*mass_p
+!!$    enddo         
+!!$
+!!$!! close halo catalog
+!!$
+!!$    close(12)
+
+    write(*,*) 'Finished halofind:',rank
+
+!! Increment halofind counter 
+
+    cur_halofind=cur_halofind+1
+
+    halofind_step =.false.
+
+  end subroutine halofind 
+
+!-----------------------------------------------------------------------------!
+
+  subroutine find_halos(tile)
+    implicit none
+    include 'cubep3m.fh'
+
+!!  Halo finding variables
+
+    integer(4), dimension(3) :: offset
+    integer(4), dimension(3) :: cic_l,cic_h,tile
+
+    integer(4) :: i,j,k,pp,ix,iy,iz,ix0,iy0,iz0,k1,j1,i1,pp1
+    integer(4) :: ic,iloc,ilcic,jlcic,klcic,thread
+
+    real(4)    :: denmax,r,amass,amtot,fcf,fcf2
+
+    real(4),dimension(3) :: x,fx,x0,dx
+
+    real(4) :: para_inter 
+    external para_inter 
+
+!! calculate offsets for tile in local coords
+
+    offset=tile*nf_physical_tile_dim-nf_buf
+!    offset_fine=tile*nf_physical_tile_dim_halos-nf_buf_halos
+ 
+!! initialize density 
+
+    thread=1
+
+!! limits for particle search.  
+!! Ignore outmost buffer cells (4 fine cells). (is this still necessary?)
+
+    cic_l(:) = nc_tile_dim * tile(:) + 2 - nc_buf
+    cic_h(:) = nc_tile_dim * (tile(:) + 1) + nc_buf - 1
+
+!#ifdef SO_NEW    ! if defined use the new Spherical Overdensity halo 
+                 ! finding algorithm, based on Tinker et al. 2008
+
+!! calculate density associated with each particle in the
+!! local volume
+ 
+!    is_in_halo=.false. !initially no particles are yet in halos
+    dens=1 !initially no particles are yet in halos, set density to 1
+           !dens=0 will indicate that this particle is inside a halo 
+           !dens>1 means it is a local peak
+
+    ic=0 !will contain (local for this cuboid) number of peaks
+
+    do k = cic_l(3), cic_h(3)
+      do j = cic_l(2), cic_h(2)
+        do i = cic_l(1), cic_h(1)
+           !start with the first particle in the chain for this coarse grid cell
+           pp=hoc(i,j,k) !head-of-chain for the linked list of particles inside
+                         !the (i,j,k) coarse grid cell
+           do
+              if (pp==0) exit
+              if(dens(pp)==1)then !particle does not yet belong to a halo 
+                 flag=0
+                 !go over all particles inside this and neighboring coarse grid cells
+                 !
+                 !Note: some work might be saved here by a more complex code (by looking
+                 !for particles only in the cells that have overlap with search volume
+                 do k1 = k-1, k+1
+                    do j1 = j-1, j+1
+                       do i1 = i-1, i+1
+                          pp1=hoc(i1,j1,k1) !first particle in linked list
+                          do
+                             if (pp1==0) exit
+                             !xv(1:3,pp1)=particle coordinates
+                             dx=xv(1:3,pp1)-xv(1:3,pp)
+                             r=sqrt(dx(1)**2+dx(2)**2+dx(3)**2) !distance between the two particles
+                             if(r<r_soft_peak)then
+                                if(flag==0)then !peak is not yet counted
+                                   if (ic > max_maxima -2) then
+                                      write(*,*) 'too many halos'
+                                      exit
+                                   endif
+                                   ic=ic+1
+                                   flag=1 !makes sure we do not count this peak twice
+                                end if
+                                dens(pp)=dens(pp)+1
+                                dens(pp1)=0 !mark particle, so it is not considered as a halo center
+                             end if
+                             pp1 = ll(pp1)!go to next particle
+                          end do
+                       end do
+                    end do
+                 end do
+                 ipeak(:,ic)=(/i,j,k/)!which cell is the peak in?
+                 den_peak(ic)=dens(pp) !what is the value of the peak?
+                 peak_pointer(ic)=pp !this will tell us which particle marks the peak
+                 !
+                 pp = ll(pp)!go to next particle
+              else
+                 pp = ll(pp) !just go to next particle
+              end if
+           end do
+        enddo
+     enddo
+  enddo
+
+!how all particles with dens>1 are local peaks, locations are still rough
+
+!! sort density maxima 
+
+    isortpeak(:ic)=(/ (i,i=1,ic) /)
+    call indexedsort(ic,den_peak(:),isortpeak(:))
+    ipeak(:,:ic)=ipeak(:,isortpeak(:ic))
+    peak_pointer(1:ic)=peak_pointer(isortpeak(1:ic))
+    peak_pos(:,:ic)=peak_pos(:,isortpeak(:ic))
+
+!#endif 
+
+!! find mass in each halo
+
+    nhalo=0 !halo number counter
+
+    do iloc=ic,1,-1 !loop over peaks in decreasing density order
+      ix0=ipeak(1,iloc)
+      iy0=ipeak(2,iloc)
+      iz0=ipeak(3,iloc)
+      amtot=0
+
+      ! WE ASSUME NO HALOS HAVE A RADIUS < nf_buf
+      !(i.e. 24 cells) - usually a fine assumption,
+      !but could be violated for largest halos in small boxes at late times
+
+      do i=1,irtot !loop over cells at increasing distance from the one 
+                   !containing the halo center and add particles into radial mass bins
+        ix=ix0+idist(1,i)
+        if (ix < 5 .or. ix > nf_tile_halos-4) cycle
+        iy=iy0+idist(2,i)
+        if (iy < 5 .or. iy > nf_tile_halos-4) cycle
+        iz=iz0+idist(3,i)
+        if (iz < 5 .or. iz > nf_tile_halos-4) cycle
+        !we are in cell (ix,iy,iz) going outwards
+
+        pp=hoc(ix,iy,iz)
+        do   !loop over all particles in this cell
+           if (pp==0) exit
+           dx=xv(1:3,peak_pointer(iloc))-xv(1:3,pp)           
+           r=sqrt(dx(1)**2+dx(2)**2+dx(3)**2) !distance between the two particles
+
+           mass_bins(floor(r*real(max_bins)/real(nf_buf))) = mass_bins(floor(r*real(max_bins)/real(nf_buf)))+1
+
+           pp = ll(pp)
+        end do
+     enddo
+
+     if (i>irtot) then
+        i=irtot
+        write(*,*) 'ran out of irtot'
+     endif
+     
+     ! Check the overdensity criterion
+     
+     do ii=2,max_bins
+        !here binned mass becomes cumulative and once divided by volume - overdensity
+        mass_bins(ii)=(mass_bins(ii)+mass_bins(ii-1))
+        if((8.*mass_bins(ii-1)/(4.*pi/3.*rad_bins(ii)**3)-halo_odc)* &
+             (8.*mass_bins(ii)/(4.*pi/3.*rad_bins(ii)**3)-halo_odc)<0.)then
+           !the overdensity threshold is reached. 
+           !The 8 is to convert the mass from particles to grid masses.
+           nhalo=nhalo+1
+           halo_pos(:,nhalo)=peak_pos(:,iloc)+offset !(/os_x,os_y,os_z/)
+           halo_mass(nhalo)=mass_bins(ii)
+           halo_radius(nhalo)=rad_bins(ii)
+           exit
+        end if
+     end do
+     
+     !refine the position of the halo center
+
+     rad_current = halo_radius(nhalo)/3. !start from 1/3 of the halo radius
+
+22   halo_x_mean(1:3,nhalo)=0.0
+     num_particles=0
+     diff=0.0d0
+
+     !first converge on center-of-mass within R_Delta/3
+     do while(diff > rsoft) !iterate to convergence. IS THIS CONDITION TOO STRINGENT?
+        
+        center_of_mass=0.0d0
+        
+        do i=1,irtot !loop over cells at increasing distance from the one 
+           !containing the halo center and add particles into radial mass bins
+           ix=ix0+idist(1,i)
+           if (ix < 5 .or. ix > nf_tile_halos-4) cycle
+           iy=iy0+idist(2,i)
+           if (iy < 5 .or. iy > nf_tile_halos-4) cycle
+           iz=iz0+idist(3,i)
+           if (iz < 5 .or. iz > nf_tile_halos-4) cycle
+           !we are in cell (ix,iy,iz) going outwards
+           
+           pp=hoc(ix,iy,iz)
+           do   !loop over all particles in this cell
+              if (pp==0) exit
+              dx=xv(1:3,peak_pointer(iloc))-xv(1:3,pp)           
+              r=sqrt(dx(1)**2+dx(2)**2+dx(3)**2) !distance between the two particles
+              
+              if(r<rad_current)then
+                 center_of_mass = center_of_mass + xv(:,peak_pointer(iloc))
+                 num_particles=num_particles+1
+              end do
+              pp = ll(pp)
+           end do
+        enddo
+        
+        !center of mass position for particles inside R_Delta/3
+        halo_x_mean(:,nhalo) = center_of_mass(:)/num_particles
+        
+        diff = sqrt((halo_x_mean(1,nhalo)-ix0)**2+ &
+             (halo_x_mean(2,nhalo)-iy0)**2+ &
+             (halo_x_mean(3,nhalo)-iz0)**2)
+        
+        ix0 = halo_x_mean(1,nhalo)
+        iy0 = halo_x_mean(2,nhalo) 
+        iz0 = halo_x_mean(3,nhalo) 
+     end do
+
+     !the center of mass is now converged 
+
+     !Now refine halo center position
+
+     if(num_particles>20 .and. rad_current > R_Delta/15.)then !reduce the radius and find center-of-mass again
+        rad_current=0.99*rad_current
+        go to 22
+     end if
+
+     ! Now, re-grow the sphere around the newly-found, converged center of mass
+
+           do i=1,irtot !loop over cells at increasing distance from the one 
+                   !containing the halo center and add particles into radial mass bins
+        ix=ix0+idist(1,i)
+        if (ix < 5 .or. ix > nf_tile_halos-4) cycle
+        iy=iy0+idist(2,i)
+        if (iy < 5 .or. iy > nf_tile_halos-4) cycle
+        iz=iz0+idist(3,i)
+        if (iz < 5 .or. iz > nf_tile_halos-4) cycle
+        !we are in cell (ix,iy,iz) going outwards
+
+        pp=hoc(ix,iy,iz)
+        do   !loop over all particles in this cell
+           if (pp==0) exit
+           dx=xv(1:3,peak_pointer(iloc))-xv(1:3,pp)           
+           r=sqrt(dx(1)**2+dx(2)**2+dx(3)**2) !distance between the two particles
+
+           mass_bins(floor(r*real(max_bins)/real(nf_buf))) = mass_bins(floor(r*real(max_bins)/real(nf_buf)))+1
+
+           pp = ll(pp)
+        end do
+     enddo
+
+     if (i>irtot) then
+        i=irtot
+        write(*,*) 'ran out of irtot'
+     endif
+     
+     ! Check the overdensity criterion
+     
+     do ii=2,max_bins
+        !here binned mass becomes cumulative and once divided by volume - overdensity
+        mass_bins(ii)=(mass_bins(ii)+mass_bins(ii-1))
+        if((8.*mass_bins(ii-1)/(4.*pi/3.*rad_bins(ii)**3)-halo_odc)* &
+             (8.*mass_bins(ii)/(4.*pi/3.*rad_bins(ii)**3)-halo_odc)<0.)then
+           !the overdensity threshold is reached. 
+           !The 8 is to convert the mass from particles to grid masses.
+           halo_mass(nhalo)=mass_bins(ii)
+           halo_radius(nhalo)=rad_bins(ii)
+           exit
+        end if
+     end do
+
+! HERE WE SHOULD CHECK FOR A HALO CENTER BEING INSIDE ANOTHER HALO'S RADIUS
 
 
 
 
+      if (nhalo > 0) then
+        halo_pos(:,nhalo)=peak_pos(:,iloc)+offset !(/os_x,os_y,os_z/)
+        halo_mass1(nhalo)=amtot
+!        write(*,*) 'check mass rescaling 0',overdens(5),mass_rescaling(5)
+!        write(*,*) 'check mass rescaling 1',amtot,halo_nondim_mass,actual_odc
+        do iii=1,9999
+           if((overdens(iii)-actual_odc)*(overdens(iii+1)-actual_odc)<0)then
+              halo_mass(nhalo)=amtot*(halo_nondim_mass/mass_rescaling(iii+1))
+!              write(*,*) 'check mass rescaling 2',iii,amtot,halo_mass(nhalo),mass_rescaling(iii+1)
+!              write(*,*) 'check mass rescaling 3',actual_odc,overdens(iii),overdens(iii+1)
+              exit
+           end if
+        end do
+      endif
 
-!! Do halo analysis, dump to file
+!! Do halo analysis, dump to file. Moved here from main halofind code. FIX
 
     write(12) nhalo
 
     do hi=1,nhalo     
        radius_calc=(halo_mass(hi)/halo_odc/(4.0*pi/3.0))**(1.0/3.0)
-       search_limit(:,1)=int(1.0/real(mesh_scale)*halo_pos(:,hi)-1.0/real(mesh_scale)*radius_calc-1.0)
-       search_limit(:,2)=int(1.0/real(mesh_scale)*halo_pos(:,hi)+1.0/real(mesh_scale)*radius_calc+1.0)
+       search_limit(:,1)=int(1.0/real(mesh_scale)*halo_pos(:,hi)-1.0 &
+            /real(mesh_scale)*radius_calc-1.0)
+       search_limit(:,2)=int(1.0/real(mesh_scale)*halo_pos(:,hi)+1.0 &
+            /real(mesh_scale)*radius_calc+1.0)
        imass=0
        x_mean=0.0
        v_mean=0.0
@@ -384,7 +686,9 @@
          !!      write stuff to file or store in common arrays for Ifront 
          !!      to store in common block arrays, each array should be
          !!      max_maxima in size
-         if (halo_write .and. imass>0 .and. halo_mass(hi)>160) write(12) halo_pos(:,hi),x_mean,v_mean,l,v_disp,radius_calc,halo_mass(hi),imass*mass_p,halo_mass1(hi)
+         if (halo_write .and. imass>0 .and. halo_mass(hi)>160) &
+              write(12) halo_pos(:,hi),x_mean,v_mean,l,v_disp,radius_calc,&
+              halo_mass(hi),imass*mass_p,halo_mass1(hi)
          !! these plus nhalo should be passed to C^2Ray for each iteration
          halo_x_mean(:,hi)=x_mean
          halo_v_mean(:,hi)=v_mean
@@ -398,181 +702,6 @@
 
     close(12)
 
-    write(*,*) 'Finished halofind:',rank
-
-!! Increment halofind counter 
-
-    cur_halofind=cur_halofind+1
-
-    halofind_step =.false.
-
-  end subroutine halofind 
-
-!-----------------------------------------------------------------------------!
-
-  subroutine find_halos(tile)
-    implicit none
-    include 'cubep3m.fh'
-
-!!  Halo finding variables
-
-    integer(4), dimension(3) :: offset
-    integer(4), dimension(3) :: cic_l,cic_h,tile
-
-    integer(4) :: i,j,k,pp,ix,iy,iz,ix0,iy0,iz0,k1,j1,i1
-    integer(4) :: ic,iloc,ilcic,jlcic,klcic,thread
-
-    real(4)    :: denmax,r,amass,amtot,fcf,fcf2
-
-    real(4),dimension(3) :: x,fx,x0
-
-    real(4) :: para_inter 
-    external para_inter 
-
-!! calculate offsets for tile in local coords
-
-    offset=tile*nf_physical_tile_dim-nf_buf
- 
-!! initialize density 
-
-    thread=1
-
-    rho_f(:,:,:,thread)=0.0
-
-!! limits for mass assignment.  Ignore outmost buffer
-!! cells (4 fine cells).
-
-    cic_l(:) = nc_tile_dim * tile(:) + 2 - nc_buf
-    cic_h(:) = nc_tile_dim * (tile(:) + 1) + nc_buf - 1
-
-!! calculate fine mesh density for tile
-
-    do k = cic_l(3), cic_h(3)
-      do j = cic_l(2), cic_h(2)
-        do i = cic_l(1), cic_h(1)
-          pp=hoc(i,j,k)
-#ifdef NGPH    !NGP/CIC used only for halo finding 
-          call fine_ngp_mass(pp,tile,thread)
-#else
-          call fine_cic_mass(pp,tile,thread)
-#endif
-        enddo
-      enddo
-    enddo
-
-
-
-!! calculate clumping factor before halo extraction
-!! Find density maxima
-
-    ic=0
-    do k=1+nf_buf,nf_buf+nf_physical_tile_dim
-      do j=1+nf_buf,nf_buf+nf_physical_tile_dim
-        do i=1+nf_buf,nf_buf+nf_physical_tile_dim
-          cftmass=cftmass+rho_f(i,j,k,thread)
-          cftmass2=cftmass2+rho_f(i,j,k,thread)**2
-          denmax=maxval(rho_f(i-1:i+1,j-1:j+1,k-1:k+1,thread))
-          if (denmax == rho_f(i,j,k,thread) .and. denmax > den_peak_cutoff) then
-            if (ic > max_maxima -2) then
-              write(*,*) 'too many halos'
-              exit
-            endif
-            ic=ic+1
-
-            ipeak(:,ic)=(/i,j,k/)
-            den_peak(ic)=denmax
-
-!parabolic interpolation for finding the peak position/halo center
-            if (para_inter_hc) then
-              x(1)=real(i-1)-0.5
-              x(2)=real(i)-0.5
-              x(3)=real(i+1)-0.5
-              fx(1)=rho_f(i-1,j,k,thread)
-              fx(2)=rho_f(i,j,k,thread)
-              fx(3)=rho_f(i+1,j,k,thread)
-              peak_pos(1,ic) = para_inter(x,fx)
-              x(1)=real(j-1)-0.5
-              x(2)=real(j)-0.5
-              x(3)=real(j+1)-0.5
-              fx(1)=rho_f(i,j-1,k,thread)
-              fx(2)=rho_f(i,j,k,thread)
-              fx(3)=rho_f(i,j+1,k,thread)
-              peak_pos(2,ic) = para_inter(x,fx)
-              x(1)=real(k-1)-0.5
-              x(2)=real(k)-0.5
-              x(3)=real(k+1)-0.5
-              fx(1)=rho_f(i,j,k-1,thread)
-              fx(2)=rho_f(i,j,k,thread)
-              fx(3)=rho_f(i,j,k+1,thread)
-              peak_pos(3,ic) = para_inter(x,fx)
-            else
-              peak_pos(1,ic) = real(i)-0.5
-              peak_pos(2,ic) = real(j)-0.5
-              peak_pos(3,ic) = real(k)-0.5
-            endif
-
-         endif
-        enddo
-      enddo
-    enddo
-
-!! sort density maxima 
-
-    isortpeak(:ic)=(/ (i,i=1,ic) /)
-    call indexedsort(ic,den_peak(:),isortpeak(:))
-    ipeak(:,:ic)=ipeak(:,isortpeak(:ic))
-    peak_pos(:,:ic)=peak_pos(:,isortpeak(:ic))
-
-!! find mass in each halo
-
-    do iloc=ic,1,-1
-      ix0=ipeak(1,iloc)
-      iy0=ipeak(2,iloc)
-      iz0=ipeak(3,iloc)
-      amtot=0
-      do i=1,irtot
-        ix=ix0+idist(1,i)
-        if (ix < 5 .or. ix > nf_tile-4) cycle
-        iy=iy0+idist(2,i)
-        if (iy < 5 .or. iy > nf_tile-4) cycle
-        iz=iz0+idist(3,i)
-        if (iz < 5 .or. iz > nf_tile-4) cycle
-        amass=rho_f(ix,iy,iz,thread)
-        rho_f(ix,iy,iz,thread)=0.0
-        amtot=amtot+amass
-        if (complete_shell.and.rdist(i)==rdist(i+1)) cycle 
-        if (i > 18 .and. amtot/(real(i)) < halo_odc) then
-           actual_odc=amtot/(real(i))!remember what the actual overdensity inside the found halo is
-           if (amtot >= min_halo_particles*mass_p) then
-              nhalo=nhalo+1
-              if (nhalo > max_maxima) then
-                 print *,'too many halos to store',rank,nhalo,max_maxima
-                 stop
-              endif
-           endif
-           exit
-        endif
-     enddo
-
-      if (i>irtot) then
-        i=irtot
-        write(*,*) 'ran out of irtot'
-      endif
-
-      if (nhalo > 0) then
-        halo_pos(:,nhalo)=peak_pos(:,iloc)+offset !(/os_x,os_y,os_z/)
-        halo_mass1(nhalo)=amtot
-!        write(*,*) 'check mass rescaling 0',overdens(5),mass_rescaling(5)
-!        write(*,*) 'check mass rescaling 1',amtot,halo_nondim_mass,actual_odc
-        do iii=1,9999
-           if((overdens(iii)-actual_odc)*(overdens(iii+1)-actual_odc)<0)then
-              halo_mass(nhalo)=amtot*(halo_nondim_mass/mass_rescaling(iii+1))
-!              write(*,*) 'check mass rescaling 2',iii,amtot,halo_mass(nhalo),mass_rescaling(iii+1)
-!              write(*,*) 'check mass rescaling 3',actual_odc,overdens(iii),overdens(iii+1)
-              exit
-           end if
-        end do
-      endif
 
 !halo_peak(nhalo)=den_peak(iloc)
 !halo_radius(nhalo)=rdist(i)
@@ -586,37 +715,7 @@
 
 !! clumping factor calculation  
 
-    do k=1+nf_buf,nf_buf+nf_physical_tile_dim
-      do j=1+nf_buf,nf_buf+nf_physical_tile_dim
-        do i=1+nf_buf,nf_buf+nf_physical_tile_dim
-          cfmass=cfmass+rho_f(i,j,k,thread)
-          cfmass2=cfmass2+rho_f(i,j,k,thread)**2
-        enddo
-      enddo
-    enddo
-
-!! fine clumping factor
-
-    do k=1+nf_buf,nf_buf+nf_physical_tile_dim,fine_clumping_scale
-      iz=(k-nf_buf+tile(3)*nf_physical_tile_dim)/fine_clumping_scale+1
-      do j=1+nf_buf,nf_buf+nf_physical_tile_dim,fine_clumping_scale
-        iy=(j-nf_buf+tile(2)*nf_physical_tile_dim)/fine_clumping_scale+1
-        do i=1+nf_buf,nf_buf+nf_physical_tile_dim,fine_clumping_scale
-          ix=(i-nf_buf+tile(1)*nf_physical_tile_dim)/fine_clumping_scale+1
-          fcf=0.0
-          fcf2=0.0
-          do k1=0,fine_clumping_scale-1
-            do j1=0,fine_clumping_scale-1
-              do i1=0,fine_clumping_scale-1
-                fcf=fcf+rho_f(i+i1,j+j1,k+k1,thread)
-                fcf2=fcf2+(rho_f(i+i1,j+j1,k+k1,thread))**2
-              enddo
-            enddo
-          enddo
-          fine_clumping(ix,iy,iz)=(fcf2*real(fine_clumping_scale)**3)/fcf**2
-        enddo
-      enddo
-    enddo
+! now gone!!
 
   end subroutine find_halos 
 
@@ -691,10 +790,17 @@
 !          write(*,*) 'table check',mass_rescaling(iii),overdens(iii)
        enddo
 81     close(11)
+    
     end if
     
     call mpi_bcast(mass_rescaling,10000,mpi_real,0,mpi_comm_world,ierr)
     call mpi_bcast(overdens,10000,mpi_real,0,mpi_comm_world,ierr)
+
+    do i=1,max_bins !set radial bins for mass binning around each density peak
+       rad_bins(i)=real(i)*real(nf_buf)/real(max_bins) !WE ASSUME NO HALOS HAVE A RADIUS < nf_buf
+    end do
+
+
     
   end subroutine initialize_halofind
 

@@ -11,13 +11,14 @@
 
     integer(4), parameter :: hc=nc_dim/2
     integer(4) :: i,j,k,kg
-    real(4) :: kz,ky,kx,kr,k1,k2,w1,w2,pow
+    integer(4) :: k1, k2
+    real(4) :: kz,ky,kx,kr,w1,w2,pow
     character(len=7) :: z_s
     integer(4) :: fstat
     character(len=max_path) :: ofile
-    real(4) :: rho_c_mean,sum_od 
+    real(4) :: rho_c_mean, sum_od 
 
-    rho_c_mean=(nf_physical_dim/2)**3*mass_p/nc_dim**3
+    rho_c_mean=(real(nf_physical_dim/2))**3*mass_p/(real(nc_dim))**3
 
     !print *,'rank',rank,'rho_c_mean',rho_c_mean
 
@@ -58,7 +59,7 @@
             k2=k1+1
             w1=k1-kr
             w2=1-w1
-            pow=(slab(i,j,k)/nc_dim**3)**2+(slab(i+1,j,k)/nc_dim**3)**2
+            pow=(slab(i,j,k)/(real(nc_dim))**3)**2+(slab(i+1,j,k)/(real(nc_dim))**3)**2
             ps_c(1,k1)=ps_c(1,k1)+w1
             ps_c(2,k1)=ps_c(2,k1)+w1*pow
             ps_c(1,k2)=ps_c(1,k2)+w2
@@ -78,8 +79,8 @@
     if (rank == 0) then
       do k=1,nc_dim
         if (ps_c_sum(1,k) /= 0) then
-          ps_c_sum(2,k)=4.0*pi*((k-1)**3)*ps_c_sum(2,k)/ps_c_sum(1,k)
-          ps_c_sum(1,k)=2.0*pi*(k-1)/box
+          ps_c_sum(2,k)=4.0*pi*((real(k)-1)**3)*ps_c_sum(2,k)/ps_c_sum(1,k)
+          ps_c_sum(1,k)=2.0*pi*(real(k)-1)/box
         endif
       enddo
 

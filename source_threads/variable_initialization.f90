@@ -54,9 +54,54 @@
     final_step=.false.
     shake_offset=0.0
 
-!! read in when to store checkpoints
 
     if (rank == 0) then
+
+!! read in when to store projections
+
+      open(11,file=projections, status='old', iostat=fstat)
+      if (fstat /= 0) then
+        write(*,*) 'error opening projection list file'
+        write(*,*) 'rank',rank,'file:',projections
+        call mpi_abort(mpi_comm_world,ierr,ierr)
+      endif 
+      do num_projections=1,max_input
+        read(unit=11,err=61,end=71,fmt='(f20.10)') z_projection(num_projections)
+        print*, 'projections ',z_projection(num_projections)
+      enddo
+    71  num_projections=num_projections-1
+    61  close(11)
+
+      if (num_projections.eq.max_input) then
+        write(*,*) 'too many projections to store > ',max_input
+        call mpi_abort(mpi_comm_world,i,ierr)
+      endif
+
+      print*,num_projections,' projections to do'
+      if (num_projections.eq.1) then
+        write(*,*) 'problem reading projections '
+        call mpi_abort(mpi_comm_world,i,ierr)
+      endif
+
+
+      do i=1,num_projections
+        a_projection(i)=1.0/(1.0+z_projection(i))
+      enddo
+
+      if (.not. pairwise_ic) then
+        if (num_projections > 0) then
+          write(*,*) 'Projections performed at:'
+          write(*,*) 'z        a'
+          do i=1,num_projections
+            write(*,'(f8.4,2x,f6.4)') z_projection(i),a_projection(i)
+          enddo
+        else
+          a_projection(1)=100.0
+          write(*,*) 'no projections to be stored'
+        endif
+      endif
+
+!! read in when to store checkpoints
 
       open(11,file=checkpoints,status='old',iostat=fstat)
       if (fstat /= 0) then
@@ -66,9 +111,21 @@
       endif 
       do num_checkpoints=1,max_input
         read(unit=11,err=51,end=41,fmt='(f20.10)') z_checkpoint(num_checkpoints)
+        print*,'checkoints', z_checkpoint(num_checkpoints)
       enddo
     41  num_checkpoints=num_checkpoints-1
     51  close(11)
+
+      print*,num_checkpoints,' checkpoints to do'
+      if (num_checkpoints.eq.1) then
+        write(*,*) 'problem reading checkpoints '
+        call mpi_abort(mpi_comm_world,i,ierr)
+      endif
+
+!! temporary rig
+
+!      z_checkpoint=z_projection
+!      num_checkpoints=num_projections
 
       if (num_checkpoints.eq.max_input) then
         write(*,*) 'too many checkpoints to store > ',max_input
@@ -102,42 +159,6 @@
         endif
       endif
 
-!! read in when to store projections
-
-      open(11,file=projections, status='old', iostat=fstat)
-      if (fstat /= 0) then
-        write(*,*) 'error opening projection list file'
-        write(*,*) 'rank',rank,'file:',projections
-        call mpi_abort(mpi_comm_world,ierr,ierr)
-      endif 
-      do num_projections=1,max_input
-        read(unit=11,err=61,end=71,fmt='(f20.10)') z_projection(num_projections)
-      enddo
-    71  num_projections=num_projections-1
-    61  close(11)
-
-      if (num_projections.eq.max_input) then
-        write(*,*) 'too many projections to store > ',max_input
-        call mpi_abort(mpi_comm_world,i,ierr)
-      endif
-
-      do i=1,num_projections
-        a_projection(i)=1.0/(1.0+z_projection(i))
-      enddo
-
-      if (.not. pairwise_ic) then
-        if (num_projections > 0) then
-          write(*,*) 'Projections performed at:'
-          write(*,*) 'z        a'
-          do i=1,num_projections
-            write(*,'(f8.4,2x,f6.4)') z_projection(i),a_projection(i)
-          enddo
-        else
-          a_projection(1)=100.0
-          write(*,*) 'no projections to be stored'
-        endif
-      endif
-
 !! read in when to store halo catalogs
 
       open(11,file=halofinds, status='old', iostat=fstat)
@@ -148,6 +169,7 @@
       endif
       do num_halofinds=1,max_input
         read(unit=11,err=81,end=91,fmt='(f20.10)') z_halofind(num_halofinds)
+        print*,'check halofinds ', z_halofind(num_halofinds)
       enddo
     91  num_halofinds=num_halofinds-1
     81  close(11)
@@ -156,6 +178,13 @@
         write(*,*) 'too many halo catalogs to store > ',max_input
         call mpi_abort(mpi_comm_world,i,ierr)
       endif
+
+        print*,num_halofinds,' halofinds to do'
+        if (num_halofinds.eq.1) then
+        write(*,*) 'problem reading halofinds '
+        call mpi_abort(mpi_comm_world,i,ierr)
+      endif
+
 
       do i=1,num_halofinds
         a_halofind(i)=1.0/(1.0+z_halofind(i))
@@ -173,7 +202,7 @@
           write(*,*) 'no halo catalogs to be stored'
         endif
       endif
-    endif
+   endif
 
     cur_halofind=1
     cur_projection=1

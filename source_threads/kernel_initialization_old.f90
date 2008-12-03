@@ -1,10 +1,9 @@
 !! construct fine mesh force kernel
   subroutine fine_kernel
-    implicit none 
+    implicit none
 
     include 'mpif.h'
-    include './cubep3m.fh'
-  
+    include 'cubepm.fh'
     integer(kind=4) :: i,j,k,temp(3)
     integer(kind=4) :: errcode,fstat
     real(kind=4) :: rtemp(2)
@@ -188,8 +187,6 @@
       real(kind=4) :: ck_table(3,4,4,4)
       integer(4) :: k1,j1,i1
 
-      if (rank==0) print *,'inside coarse kernel init'
-
       hc1=nc_dim/2+1
       ck=0.0
 
@@ -240,8 +237,6 @@
          enddo
        enddo
 
-      if (rank==0) print *,'finished coarse kernel'
-
 !! Read in kernel for 2-level matching
 
 !        open(unit=11,file=kernel_path//'wfxyzc.ascii',status='old',iostat=fstat)
@@ -262,8 +257,6 @@
           enddo
         enddo
         close(11)
-
-      if (rank==0) print *,'finished kernel 2-level matching'
 
 !! copy corrections to other octants of the kernel
 !! assuming nc_node_dim > 8 
@@ -361,109 +354,135 @@
         endif
       endif
 
-      if (rank==0) print *,'finished octants'
-
 !! transform and save imaginary result in kern_c
-
-!! For the analytically matched kernel we have to apply an additional correction
 
 #ifdef LRCKCORR
 
-!! Copy corrected kernel to force_c for later use
-
-      do k=1,nc_node_dim
-        do j=1,nc_node_dim
-          do i=1,nc_node_dim
-            force_c(:,i,j,k)=ck(:,i,j,k)
-          enddo
-        enddo
-      enddo
-
-!! construct uncorrected force kernel in ck
+!! For the analytically matched kernel we have to apply an additional correction
+!! This code WILL NOT WORK since `ck` has been changed to reduce the memory footprint
 
       do k=kl,kh
-         k1=k-kl+1
-         if (k .lt. nc_dim/2+2) then
-             z=k-1
-         else
-             z=k-1-nc_dim
-         endif
-         z=mesh_scale*z
-         do j=jl,jh
-           j1=j-jl+1
-           if (j .lt. nc_dim/2+2) then
-             y=j-1
-           else
-             y=j-1-nc_dim
-           endif
-           y=mesh_scale*y
-            do i=il,ih
-             i1=i-il+1
-             if (i .lt. nc_dim/2+2) then
-               x=i-1
-             else
-               x=i-1-nc_dim
-             endif
-             x=mesh_scale*x
-             r=sqrt(x*x+y*y+z*z)
-             if (r.eq.0.0) then
-               ck(:,i1,j1,k1)=0.0
-             else
-               ck(1,i1,j1,k1)=-x/r**3
-               ck(2,i1,j1,k1)=-y/r**3
-               ck(3,i1,j1,k1)=-z/r**3
-             endif
-           enddo
-         enddo
-       enddo
-
-      if (rank==0) print *,'finished uncorrected force kernel'
-
-!! transform un-corrected kernel, store in tmp_kern_c
-
-      rho_c=ck(1,:,:,:)
-      call cubepm_fftw(1)
-      do k=1,nc_slab
-        do j=1,nc_dim
-          do i=1,nc_dim+2
-            tmp_kern_c(1,i,j,k)=slab(i,j,k)
-          enddo
-        enddo
-      enddo
-      
-      if (rank==0) print *,'finished transforming uncorrected kernel'
-
-      rho_c=ck(2,:,:,:)
-      call cubepm_fftw(1)
-      do k=1,nc_slab
-        do j=1,nc_dim
-          do i=1,nc_dim+2
-            tmp_kern_c(2,i,j,k)=slab(i,j,k)
-          enddo
-        enddo
-      enddo
-      
-      if (rank==0) print *,'finished second transform'
-
-      rho_c=ck(3,:,:,:)
-      call cubepm_fftw(1)
-      do k=1,nc_slab
-        do j=1,nc_dim
-          do i=1,nc_dim+2
-            tmp_kern_c(3,i,j,k)=slab(i,j,k)
+        k0=k-kl+1
+        do j=jl,jh
+          j0=j-jl+1
+          do i=il,ih
+            i0=i-il+1
+            force_c(:,i0,j0,k0)=ck(:,i,j,k)
           enddo
         enddo
       enddo
 
-      if (rank==0) print *,'finished third transform'
+!! Overwrite ck with uncorrected force kernel
 
+      do k=1,hc1 !-1
+        z=mesh_scale*(k-1)
+        do j=1,hc1 !-1
+          y=mesh_scale*(j-1)
+          do i=1,hc1 !-1
+            x=mesh_scale*(i-1)
+            r=sqrt(x*x+y*y+z*z)
+            if (r.eq.0.0) then
+              ck(:,i,j,k)=0.0
+            else
+              ck(1,i,j,k)=-x/r**3
+              ck(2,i,j,k)=-y/r**3
+              ck(3,i,j,k)=-z/r**3
+            endif
+          enddo
+        enddo
+      enddo
+
+!! Reflect in y plane
+      do j=2,nc_dim/2
+        ck(1,1:hc1,nc_dim-j+2,1:hc1)=ck(1,1:hc1,j,1:hc1)
+        ck(2,1:hc1,nc_dim-j+2,1:hc1)=-ck(2,1:hc1,j,1:hc1)
+        ck(3,1:hc1,nc_dim-j+2,1:hc1)=ck(3,1:hc1,j,1:hc1)
+      enddo
+
+!! Reflect in x plane
+
+      do i=2,nc_dim/2
+        ck(1,nc_dim-i+2,1:nc_dim,1:hc1)=-ck(1,i,1:nc_dim,1:hc1)
+        ck(2:3,nc_dim-i+2,1:nc_dim,1:hc1)=ck(2:3,i,1:nc_dim,1:hc1)
+      enddo
+
+!! Reflect in z plane
+
+      do k=2,nc_dim/2
+        ck(1:2,1:nc_dim,1:nc_dim,nc_dim-k+2)=ck(1:2,1:nc_dim,1:nc_dim,k)
+        ck(3,1:nc_dim,1:nc_dim,nc_dim-k+2)=-ck(3,1:nc_dim,1:nc_dim,k)
+      enddo
+
+!! transform un-corrected kernel
+
+      do k=kl,kh
+        k0=k-kl+1
+        do j=jl,jh
+          j0=j-jl+1
+          do i=il,ih
+            i0=i-il+1
+            rho_c(i0,j0,k0)=ck(1,i,j,k)
+          enddo
+        enddo
+      enddo
+
+      call cubepm_fftw(1)
+
+      do k=1,nc_slab
+        do j=1,nc_dim
+          do i=1,nc_dim+2
+            ck(1,i,j,k)=slab(i,j,k)
+          enddo
+        enddo
+      enddo
+
+      do k=kl,kh
+        k0=k-kl+1
+        do j=jl,jh
+          j0=j-jl+1
+          do i=il,ih
+            i0=i-il+1
+            rho_c(i0,j0,k0)=ck(2,i,j,k)
+          enddo
+        enddo
+      enddo
+
+      call cubepm_fftw(1)
+
+      do k=1,nc_slab
+        do j=1,nc_dim
+          do i=1,nc_dim+2
+            ck(2,i,j,k)=slab(i,j,k)
+          enddo
+        enddo
+      enddo
+
+      do k=kl,kh
+        k0=k-kl+1
+        do j=jl,jh
+          j0=j-jl+1
+          do i=il,ih
+            i0=i-il+1
+            rho_c(i0,j0,k0)=ck(3,i,j,k)
+          enddo
+        enddo
+      enddo
+
+      call cubepm_fftw(1)
+
+      do k=1,nc_slab
+        do j=1,nc_dim
+          do i=1,nc_dim+2
+            ck(3,i,j,k)=slab(i,j,k)
+          enddo
+        enddo
+      enddo
+         
 !! transform corrected kernel and apply long range correction
-
-! x
 
       rho_c=force_c(1,1:nc_node_dim,1:nc_node_dim,1:nc_node_dim) 
       call cubepm_fftw(1)
-
+  
       do k=1,nc_slab
         k0=k+rank*nc_slab 
         if (k0 < nc_dim/2+2) then
@@ -480,14 +499,14 @@
           do i=1,nc_dim+2,2
             kx=(i-1)/2
             kr=sqrt(real(kx**2+ky**2+kz**2))
-            if (kr <= 8.) then
+            if (kr <= 8) then
               ka=2*sin(pi*kx/real(nc_dim))
               kb=2*sin(pi*ky/real(nc_dim))
               kc=2*sin(pi*kz/real(nc_dim))
               if (kx /= 0) then
                 wa=slab(i+1,j,k)
-                wb=tmp_kern_c(1,i+1,j,k)
-                wc=4.*pi*ka/(ka**2+kb**2+kc**2)/16.
+                wb=ck(1,i+1,j,k)
+                wc=4*pi*ka/(ka**2+kb**2+kc**2)/16
                 slab(i+1,j,k)=wa*(wc/wb)
               endif
             endif
@@ -503,15 +522,12 @@
         enddo
       enddo
 
-! y
-
       rho_c=force_c(2,1:nc_node_dim,1:nc_node_dim,1:nc_node_dim)
       call cubepm_fftw(1)
 
       do k=1,nc_slab
         k0=k+rank*nc_slab
-        if (k0 < nc_dim/2+2) then 
-          kz=k0-1
+        if (k0 < nc_dim/2+2) then kz=k0-1
         else
           kz=k0-1-nc_dim
         endif
@@ -524,14 +540,14 @@
           do i=1,nc_dim+2,2
             kx=(i-1)/2
             kr=sqrt(real(kx**2+ky**2+kz**2))
-            if (kr <= 8.) then
+            if (kr <= 8) then
               ka=2*sin(pi*kx/real(nc_dim))
               kb=2*sin(pi*ky/real(nc_dim))
               kc=2*sin(pi*kz/real(nc_dim))
               if (ky /= 0) then
                 wa=slab(i+1,j,k)
-                wb=tmp_kern_c(2,i+1,j,k)
-                wc=4.*pi*kb/(ka**2+kb**2+kc**2)/16.
+                wb=ck(2,i+1,j,k)
+                wc=4*pi*kb/(ka**2+kb**2+kc**2)/16
                 slab(i+1,j,k)=wa*(wc/wb)
               endif
             endif
@@ -547,9 +563,7 @@
         enddo
       enddo
 
-! z 
-
-      rho_c=force_c(3,1:nc_node_dim,1:nc_node_dim,1:nc_node_dim)
+      rho_c=force_c(2,1:nc_node_dim,1:nc_node_dim,1:nc_node_dim)
       call cubepm_fftw(1)
 
       do k=1,nc_slab
@@ -568,14 +582,14 @@
           do i=1,nc_dim+2,2
             kx=(i-1)/2
             kr=sqrt(real(kx**2+ky**2+kz**2))
-            if (kr <= 8.) then
+            if (kr <= 8) then
               ka=2*sin(pi*kx/real(nc_dim))
               kb=2*sin(pi*ky/real(nc_dim))
               kc=2*sin(pi*kz/real(nc_dim))
               if (kz /= 0) then
                 wa=slab(i+1,j,k)
-                wb=tmp_kern_c(3,i+1,j,k)
-                wc=4.*pi*kc/(ka**2+kb**2+kc**2)/16.
+                wb=ck(3,i+1,j,k)
+                wc=4*pi*kc/(ka**2+kb**2+kc**2)/16
                 slab(i+1,j,k)=wa*(wc/wb)
               endif
             endif
@@ -590,10 +604,6 @@
           enddo
         enddo
       enddo
-
-      if (rank==0) print *,'finished x y z'
-
-! This is the non-LRCKCORR case:
 
 #else
 
@@ -632,6 +642,5 @@
       print *,'coarse kernel',rank,'min',minval(kern_c),'max',maxval(kern_c)
 #endif
 
-      if (rank==0) print *,'finished coarse kernel' 
-
+ 
   end subroutine coarse_kernel

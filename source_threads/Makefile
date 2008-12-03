@@ -1,10 +1,10 @@
 SHELL = /bin/sh
 
-FC=mpif77
+FC=mpif90
 
-#Mckenzie	
-FFTWLIB=$(MCKENZIE_FFTW_LIB) #/home/merz/lib/fftw-2.1.5_intel8/lib
-FFTWINC=$(MCKENZIE_FFTW_INC) #/home/merz/lib/fftw-2.1.5_intel8/include
+#TACC Lonestar	
+FFTWLIB=$(TACC_FFTW2_LIB) #/home/merz/lib/fftw-2.1.5_intel8/lib
+FFTWINC=$(TACC_FFTW2_INC) #/home/merz/lib/fftw-2.1.5_intel8/include
 
 #Mckenzie	
 LDLIBS= -lsrfftw_mpi -lsrfftw -lsfftw_mpi -lsfftw -lm -ldl
@@ -14,11 +14,11 @@ FFLAGS=-fpp -g -w -O3 -axN -DDIAG #-DNGP -DMHD #-check bounds -DDEBUG #-DDEBUG_L
 
 #OPTIONAL FLAGS :: -DMHD -DDEBUG_CCIC -DDEBUG_CRHO -DDEBUG_RHOC -DPOINTSRC ##-DBFTEST
 
-OBJS= mpi_tvd_mhd.o gas_density_buffer.o fine_gas_mass.o checkpoint.o coarse_cic_mass.o coarse_cic_mass_buffer.o coarse_force.o coarse_force_buffer.o coarse_mass.o coarse_max_dt.o coarse_mesh.o coarse_power.o coarse_velocity.o cubepm.o delete_particles.o fftw3ds.o fine_cic_mass.o fine_cic_mass_buffer.o fine_mesh.o fine_ngp_mass.o fine_velocity.o halofind.o fftw2.o kernel_initialization.o link_list.o mpi_initialization.o particle_initialization.o particle_mesh.o particle_pass.o projection.o report_pair.o set_pair.o indexedsort.o timers.o timestep.o update_position.o variable_initialization.o 
+OBJS= mpi_tvd_mhd.o gas_density_buffer.o fine_gas_mass.o checkpoint.o coarse_cic_mass.o coarse_cic_mass_buffer.o coarse_force.o coarse_force_buffer.o coarse_mass.o coarse_max_dt.o coarse_mesh.o coarse_power.o coarse_velocity.o cubepm.o delete_particles.o fftw3ds.o fine_cic_mass.o fine_cic_mass_buffer.o fine_mesh.o fine_ngp_mass.o fine_ngp_mass_halos.o fine_velocity.o halofind.o fftw2.o kernel_initialization.o link_list.o mpi_initialization.o particle_initialization.o particle_mesh.o particle_pass.o projection.o report_pair.o set_pair.o indexedsort.o timers.o timestep.o update_position.o variable_initialization.o 
 
-run: cubepm
+run: cubep3m
 
-cubepm: $(OBJS)
+cubep3m: $(OBJS)
 	$(FC) $(FFLAGS) $^ -o $@ -L$(FFTWLIB) $(LDLIBS) 
 
 mpi_tvd_mhd.o: mpi_tvd_mhd.f90
@@ -81,6 +81,9 @@ fine_mesh.o: fine_mesh.f90 mpi_tvd_mhd.o
 fine_ngp_mass.o: fine_ngp_mass.f90
 	$(FC) $(FFLAGS) -c $<
 
+fine_ngp_mass_halos.o: fine_ngp_mass_halos.f90
+	$(FC) $(FFLAGS) -c $<
+
 fine_velocity.o: fine_velocity.f90 mpi_tvd_mhd.o
 	$(FC) $(FFLAGS) -c $<
 
@@ -133,7 +136,7 @@ variable_initialization.o: variable_initialization.f90
 	$(FC) $(FFLAGS) -c $<
 
 clean:
-	rm -f *.o *.pc cubepm mpi_tvd_mhd.mod
+	rm -f *.o *.pc cubep3m mpi_tvd_mhd.mod
 
 tar:
 	tar -cvjf cubepm.tar.bz2 *.c *.par *.fh *.f90 Makefile kernels
