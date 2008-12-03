@@ -7,7 +7,9 @@ module load fftw #/2.1.5-intel10
 
 module list
 
-./init_p5m_threads.csh
-#./init_pp_threads.csh
+#./init_p5m_threads.csh
+source ./init_pp_threads.csh
+
+cd ../batch/
 
 echo "Ready to run" 

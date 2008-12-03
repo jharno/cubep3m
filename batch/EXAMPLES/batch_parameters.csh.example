@@ -1,5 +1,5 @@
 # set this to be nodes_dim**3
-set NUM_NODE_COMPILED = '1'
+set NUM_NODE_COMPILED = '8'
 
 # meaningful tag for current run
 set RUN_SUFFIX = '_threads_1_96_200Mpc_070515'
@@ -9,4 +9,4 @@ set RUN_SUFFIX = '_threads_1_96_200Mpc_070515'
 #set ARCHIVAL_PATH = '/uber-scratch/'$USER'/cubep3m'$RUN_SUFFIX
 
 # where local I/O will take place during the job
-set LOCAL_SCRATCH_PATH = '/scratch/'$USER'/cubep3m_threads'
+set LOCAL_SCRATCH_PATH = '~/cubep3m_new_V1/batch/'

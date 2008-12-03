@@ -1,0 +1,14 @@
+rm cic_init_power cic_power cubep3m dist_init gas_power mem_usage pgm_proj PSvsSim slice_sample parameters
+
+ln -s ../parameters parameters
+ln -s /home/utexas/as/ilievit/cubep3m_threads_modified/utils/dist_init/CAMB_BAO_Tf_CAMB_BAO.dat .
+ln -s ../utils/cic_power/cic_init_power .
+ln -s ../utils/cic_power/cic_power .
+ln -s ../source_threads/cubep3m .
+ln -s ../utils/dist_init/dist_init .
+ln -s ../utils/gas_power/gas_power .
+ln -s ../utils/halo_merge/halo_merge .
+ln -s ../utils/mem_usage .
+ln -s ../utils/pgm_proj/pgm_proj .
+ln -s  ../utils/PSvsSim/PSvsSim .
+ln -s ../utils/dm_slice_sample/slice_sample .

@@ -1,15 +1,15 @@
 #!/bin/csh 
-#PBS -l nodes=27:ppn=8
+#PBS -l nodes=8:ppn=8
+#PBS -l other=scratch-2week
 #PBS -q workq 
 #PBS -r n
-#PBS -l walltime=48:00:00
+#PBS -l walltime=03:30:00
 #PBS -N cubep3m
 
 cd $PBS_O_WORKDIR
 
 source batch_parameters.csh
 
-lamboot
 
 # clean scratch path
 #lamexec N rm -rf $LOCAL_SCRATCH_PATH 
@@ -22,15 +22,17 @@ mkdir -p $LOCAL_SCRATCH_PATH
 # log nodes used
 cat $PBS_NODEFILE > nodes$RUN_SUFFIX
 
+lamboot
+
 # list of programs to run
 #mpirun n0-26 -np $NUM_NODE_COMPILED dist_init >& dist_init$RUN_SUFFIX
 #mpirun n0-26 -np $NUM_NODE_COMPILED cic_init_power >& cic_init_power$RUN_SUFFIX
 #mpirun n0-26 -np $NUM_NODE_COMPILED cubep3m >& cubep3m$RUN_SUFFIX
 #mpirun n0-26 -np $NUM_NODE_COMPILED halo_merge >& halo_merge$RUN_SUFFIX
-mpirun n0-26 -np $NUM_NODE_COMPILED dist_init >& dist_init$RUN_SUFFIX
-mpirun n0-26 -np $NUM_NODE_COMPILED cic_init_power >& cic_init_power$RUN_SUFFIX
-mpirun n0-26 -np $NUM_NODE_COMPILED cubep3m >& cubep3m$RUN_SUFFIX
-mpirun n0-26 -np $NUM_NODE_COMPILED halo_merge >& halo_merge$RUN_SUFFIX
+mpirun n0-7 -np $NUM_NODE_COMPILED dist_init >& dist_init$RUN_SUFFIX
+#mpirun n0-7 -np $NUM_NODE_COMPILED cic_init_power >& cic_init_power$RUN_SUFFIX
+mpirun n0-7 -np $NUM_NODE_COMPILED cubep3m >& cubep3m$RUN_SUFFIX
+mpirun n0-7 -np $NUM_NODE_COMPILED halo_merge >& halo_merge$RUN_SUFFIX
 
 #mpirun -np $NUM_NODE_COMPILED cic_power >& cic_power$RUN_SUFFIX
 # Might not need these

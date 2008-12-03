@@ -1,0 +1,55 @@
+#!/bin/bash
+
+MODE=`/share/sge/default/pe_scripts/getmode_affinity.sh`
+
+# First determine "wayness" of PE
+myway=`echo $PE | sed s/way//`
+
+# Determine local compute node rank number
+if [ x"$MODE" == "xmvapich2_mpd" ]; then
+# Note, bug in MVAPICH2 uses PMI_RANK rather than MPI_RANK
+  export MV2_USE_AFFINITY=0
+  export MV2_ENABLE_AFFINITY=0
+  my_rank=$PMI_RANK 
+elif [ x"$MODE" == "xmvapich2_ssh" ]; then
+  export MV2_USE_AFFINITY=0
+  export MV2_ENABLE_AFFINITY=0
+  my_rank=$MPISPAWN_MPIRUN_RANK_0
+elif [ x"$MODE" == "xmvapich1_ssh" ]; then
+  export VIADEV_USE_AFFINITY=0
+  export VIADEV_ENABLE_AFFINITY=0
+  my_rank=$MPIRUN_RANK
+elif [ x"$MODE" == "xmvapich1_devel_ssh" ]; then
+  export VIADEV_USE_AFFINITY=0
+  export VIADEV_ENABLE_AFFINITY=0
+  my_rank=$MPIRUN_RANK
+elif [ x"$MODE" == "xopenmpi_1.3_ssh" ]; then
+  my_rank=$OMPI_COMM_WORLD_RANK
+elif [ x"$MODE" == "xopenmpi_ssh" ]; then
+  my_rank=$OMPI_MCA_ns_nds_vpid
+else
+  echo "TACC: Could not determine MPI stack. Exiting!"
+  exit 1
+fi  
+
+local_rank=$(( $my_rank % $myway ))
+
+# Based on "wayness" determine socket layout on local node
+# if less than 4-way, offset to skip socket 0
+if [ $myway -lt 4 ]; then
+    numnode=$(( $local_rank + 1 ))
+# if 4-way to 12-way, spread processes equally on sockets
+elif [ $myway -lt 13 ]; then
+    numnode=$(( $local_rank / ( $myway / 4 ) ))
+# if 16-way, spread processes equally on sockets
+elif [ $myway -eq 16 ]; then
+    numnode=$(( $local_rank / ( $myway / 4 ) ))
+# Offset to not use 4 processes on socket 0
+else
+    numnode=$(( ($local_rank + 1) / 4 ))
+fi
+
+#echo "TACC: Running $my_rank on socket $numnode"
+
+#numactl -c $numnode -m $numnode $*
+numactl -N $numnode -m $numnode $*
