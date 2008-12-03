@@ -10,9 +10,10 @@ character(len=*),parameter :: halofinds =cubepm_root//'input/halofinds'
 
 integer, parameter :: nn=nodes_dim**3 !! number of nodes total
 integer, parameter :: max_input=100 !! maximum number of catalogs to merge 
-integer, parameter :: max_halos=128**3 !!maximum number of halos / catalog
+integer, parameter :: max_halos=10*128**3 !!maximum number of halos / catalog
 
-integer, parameter :: nhv=16  !! number of halo quantities in each catalog entry
+!integer, parameter :: nhv=16  !! number of halo quantities in each catalog entry
+integer, parameter :: nhv=17  !! number of halo quantities in each catalog entry
 
 real(4), dimension(nhv) :: halo_input_buffer
 real(4), dimension(nhv,max_halos) :: halo_list,halo_list_out
@@ -93,6 +94,7 @@ do cur_halofind=1,num_halofinds
   write(z_s,'(f7.3)') z_write
   z_s=adjustl(z_s)
 
+  print*,'rank=',rank
   write(rank_s,'(i5)') rank
   rank_s=adjustl(rank_s)
 
@@ -164,7 +166,7 @@ do cur_halofind=1,num_halofinds
     print *,'finished mass'
     isorthalo(:nh_sum)=(/ (k,k=1,nh_sum) /)
     print *,'finished isort_init'
-    call indexedsort(nh_sum,mass,isorthalo)
+!    call indexedsort(nh_sum,mass,isorthalo)
     print *,'finished isort'
     halo_list_out(:,:nh_sum)=halo_list(:,isorthalo(:nh_sum))
     print *,'finished shuffle'
@@ -176,7 +178,7 @@ do cur_halofind=1,num_halofinds
       call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
     do j=nh_sum,1,-1
-      write(31,'(16f20.10)') halo_list_out(:,j)
+      write(31,'(17f20.10)') halo_list_out(:,j)
     enddo
     close(31)
     print *,'finished write'

@@ -12,12 +12,12 @@ program main
   !! nt is the number of threads
   !! dir is the directory for data files
   integer, parameter :: nt=4
-  integer, parameter :: nout=2 !how many redshifts
+  integer, parameter :: nout=9
   character(*), parameter :: dir=''
   real(4), dimension(nout) :: zout
 
   !! nc is the number of cells per length
-  integer, parameter :: nc=2048 !320 ! full size of fine grid?
+  integer, parameter :: nc=320
   integer, parameter :: hc=nc/2
 
 

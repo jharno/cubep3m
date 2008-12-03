@@ -7,12 +7,19 @@ implicit none
 include '../../parameters'
 
 ! list of redshift to recompose (same as in cubepm.par)
-character(len=*),parameter :: checkpoints =cubepm_root//'input/halopoints' 
+!character(len=*),parameter :: checkpoints =cubepm_root//'input/halopoints' 
+character(len=*),parameter :: checkpoints =cubepm_root//'input/halofinds' 
 character(len=*),parameter :: serial_output_path=output_path
 real, parameter    :: rnc = nc
 integer, parameter :: max_input=100 !! maximum number of checkpoints
 integer, parameter :: nn=nodes_dim**3  !! number of nodes total
-real, parameter    :: ncc=nc/nodes_dim !! number of cells / cubic 
+integer(4), parameter    :: ncc=nc/nodes_dim !! number of cells / cubic 
+!integer(4), parameter :: nc_node_dim = ncc
+!integer(4), parameter   :: nc_dim = nc
+integer(4), parameter :: nc_dim = nc/4
+integer(4), parameter :: nc_node_dim = nc_dim / nodes_dim
+
+
 integer, parameter :: hc=nc/2       !! half-grid length
 
 integer :: node_coords(3,0:nn-1)           !! coordinates of node in cube	
@@ -68,7 +75,8 @@ enddo
 51  close(11)
   write(*,*) 'checkpoints to recompose:'
   do i=1,num_checkpoints
-    write(*,'(f5.1)') z_checkpoint(i)
+!    write(*,'(f5.1)') z_checkpoint(i)
+    write(*,'(f5.2)') z_checkpoint(i)
   enddo
 
 do cur_checkpoint=1,num_checkpoints
@@ -103,6 +111,7 @@ do cur_checkpoint=1,num_checkpoints
 
 ! now time to do gas, lets first read in dimensions
 
+!  print*,'nc_node_dim=',nc_node_dim
   allocate(rarr(nc_node_dim))
 
 
@@ -145,6 +154,8 @@ do cur_checkpoint=1,num_checkpoints
   enddo
 
   deallocate(rarr)
+
+#ifdef HALO_VEL_FIELD
 
 !! next do velocity field
 !  real(4), dimension(3,nc_node_dim*mesh_scale/fine_clumping_scale,nc_node_dim*mesh_scale/fine_clumping_scale, &
@@ -212,6 +223,7 @@ do cur_checkpoint=1,num_checkpoints
 
   deallocate(varr)
 
+#endif
 
 !! next do the fine clumping array 
 !  real(4), dimension(3,nc_node_dim*mesh_scale/fine_clumping_scale,nc_node_dim*mesh_scale/fine_clumping_scale, &

@@ -3,9 +3,6 @@
 !! Updated Jun 2 2006 -- minimal memory usage, DM only !!
 !!-----------------------------------------------------!!
 !! Compile with: mpif77 -fpp -g -w -O3 -axN dist_init.f90 -o dist_init  -L$MCKENZIE_FFTW_LIB_PATH -I$MCKENZIE_FFTW_INC_PATH -lsrfftw_mpi -lsrfftw -lsfftw_mpi -lsfftw -lm -ldl
-!! On Ranger compile with:
-!! mpif90 -Wl,-rpath, -L$TACC_MKL_LIB -I$TACC_MKL_INC -fpp -g -O2 -xW -shared-intel -DBINARY dist_init_dm.f90 -o dist_init -L$TACC_MKL_LIB -lmkl_em64t -openmp
-
 
 program dist_init 
   implicit none
@@ -17,11 +14,8 @@ program dist_init
   logical, parameter :: correct_kernel=.true.
 
   !! Cosmo parameters - wmap3+
-!  real, parameter :: ns=0.96 
-!  real, parameter :: s8=0.8 
-  !! Cosmo parameters - wmap5
   real, parameter :: ns=0.96 
-  real, parameter :: s8=0.817 
+  real, parameter :: s8=0.8 
   real, parameter :: omegal=omega_l 
   real, parameter :: omegam=1.0-omegal 
 
@@ -32,11 +26,8 @@ program dist_init
 !  integer, parameter      :: nk=408 
 !  character(*), parameter :: fntf='cmbfast.lcdm'
 
-!  integer, parameter      :: nk=437
-!  character(*), parameter :: fntf='CAMB_BAO_Tf_CAMB_BAO.dat'
-
-  integer, parameter      :: nk=922
-  character(*), parameter :: fntf='camb_WMAP5_transfer_z0.dat'
+  integer, parameter      :: nk=437
+  character(*), parameter :: fntf='CAMB_BAO_Tf_CAMB_BAO.dat'
 
   !! IOform should be 'binary' or 'unformatted'
 #ifdef BINARY
@@ -186,7 +177,7 @@ contains
 
 #ifdef DEBUG_LOW
   do i=0,nodes-1
-    if (i==rank) write(*,'(8i5)') rank,cart_rank,cart_neighbor
+    if (i==rank) write(*,'(8i4)') rank,cart_rank,cart_neighbor
     call mpi_barrier(mpi_comm_world,ierr)
   enddo
 #endif
@@ -214,7 +205,7 @@ contains
         slab_slice = i + j * nodes_dim
         tag = rank**2
         rtag= slab_neighbor(i,j)**2
-        call mpi_isend(cube(1,1,slab_slice*nc_slab + 1), num_elements, &
+        call mpi_issend(cube(1,1,slab_slice*nc_slab + 1), num_elements, &
                        mpi_real, slab_neighbor(i,j), tag, mpi_comm_world, &
                        requests(slab_slice+1),ierr)
         call mpi_irecv(recv_cube(1,1,1,slab_slice), &
@@ -274,7 +265,7 @@ contains
         slab_slice = i + j * nodes_dim
         tag  = rank**2
         rtag = slab_neighbor(i,j)**2
-        call mpi_isend(recv_cube(1,1,1,slab_slice), num_elements, &
+        call mpi_issend(recv_cube(1,1,1,slab_slice), num_elements, &
                        mpi_real, slab_neighbor(i,j), tag, mpi_comm_world, &
                        requests(slab_slice+1),ierr)
         call mpi_irecv(cube(1,1,slab_slice * nc_slab +1), &
@@ -736,8 +727,8 @@ contains
     call mpi_reduce(dmax,dmaxt,1,mpi_real,mpi_max,0,mpi_comm_world,ierr)
 
     if (rank==0) then
-      dsum=dsumt/real(nc)**3
-      dvar=sqrt(dvart/real(ncr)**3)
+      dsum=dsumt/nc**3
+      dvar=sqrt(dvart/ncr**3)
       write(*,*)
       write(*,*) 'Delta min    ',dmint
       write(*,*) 'Delta max    ',dmaxt
@@ -1106,7 +1097,7 @@ contains
         else
           pk(:,k)=pktsum(1:2,k)/pktsum(3,k)
           pk(2,k)=sqrt(abs((pk(2,k)-pk(1,k)**2)/(pktsum(3,k)-1)))
-          pk(1:2,k)=4.*pi*(real(k)-1.)**3*pk(1:2,k)
+          pk(1:2,k)=4*pi*(k-1)**3*pk(1:2,k)
        endif
       enddo
     endif

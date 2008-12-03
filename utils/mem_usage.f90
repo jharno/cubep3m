@@ -24,6 +24,10 @@ if (nf<2*nf_buf) then
    print *,' should be at least 4 times as large as the fine mesh buffer ( =',2*nf_buf,' )'
    print *,'increase cells / coarse slab or decrease fine mesh tiles / node'
 endif
+if ( (nf+2)*nf*nf*cores < 3*(nc+2)*nc*nc_slab ) then
+  print *,'reverse equivalence for cmplx_rho_f and tmp_kern_c!'
+endif
+
 
 print *,'number fine cells / tile =',nf 
 print *,'total simulation volume =',(nf-nf_buf)*tiles*nodes_dim
@@ -44,5 +48,10 @@ print *,'size of particle list=',(28.*max_np)/mb
 
 print *,'size of density projections=',((nf-nf_buf)*tiles*nodes_dim)**2*3.*4./mb
 print *,'size of gas and magnetic field=', 32.0*real((nf-nf_buf)*tiles+6)**3/mb
+
+if ( (nf+2)*nf*nf*cores < 3*(nc+2)*nc*nc_slab ) then
+  print *,'reverse equivalence for cmplx_rho_f and tmp_kern_c!'
+endif
+
 
 end

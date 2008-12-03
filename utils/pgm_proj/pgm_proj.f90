@@ -28,7 +28,8 @@ integer(4) :: num_projections,cur_projection
 integer(4) :: i,dim
 integer(4) :: fstat
 real(4) :: a
-real(4), dimension(n,n) :: den 
+!real(4), dimension(n,n) :: den 
+real(8), dimension(n,n) :: den 
 integer(1), dimension(n,n) :: map
 
 !! Read in projections to recompose

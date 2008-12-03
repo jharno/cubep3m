@@ -181,7 +181,7 @@ contains
     
     real z_write,np_total
     integer j,fstat
-    character*60 :: fn
+    character*512 :: fn
     character(len=6) :: rank_s
 #ifdef DEBUG
     integer :: i,pe
@@ -214,7 +214,7 @@ contains
 !! tally up total number of particles
     call mpi_reduce(real(np_local,kind=4),np_total,1,mpi_real, &
                          mpi_sum,0,mpi_comm_world,ierr)
-    if (rank == 0) write(*,*) 'number of particles =', int(np_total,4)
+    if (rank == 0) write(*,*) 'number of particles =', int(np_total,8)
 
 #ifdef DEBUG
     xva=0.
@@ -404,7 +404,7 @@ contains
       call rfftwnd_f77_mpi(plan,1,slab,slab_work,1,order)
     else
       call rfftwnd_f77_mpi(iplan,1,slab,slab_work,1,order)
-      slab=slab/real(nc*nc*nc)
+      slab=slab/real(nc)*real(nc)*real(nc)
     endif
 
 #ifdef DEBUG_LOW
@@ -458,7 +458,7 @@ contains
     integer :: kp
 #endif
     real         :: kr
-    character*80 :: fn
+    character*512 :: fn
     character*7  :: z_write
     real time1,time2
     call cpu_time(time1)
@@ -555,8 +555,8 @@ contains
     call mpi_reduce(dmax,dmaxt,1,mpi_real,mpi_max,0,mpi_comm_world,ierr)
 
     if (rank==0) then
-      dsum=dsumt/nc**3
-      dvar=sqrt(dvart/nc**3)
+      dsum=dsumt/real(nc)**3
+      dvar=sqrt(dvart/real(nc)**3)
       write(*,*)
       write(*,*) 'DM min    ',dmint
       write(*,*) 'DM max    ',dmaxt
@@ -582,7 +582,8 @@ contains
   subroutine pass_particles
     implicit none
 
-    integer i,pp,np_buf,np_exit,np_final,npo,npi
+    integer i,pp,np_buf,np_exit,npo,npi
+    integer*8 np_final
     real x(3),lb,ub
     integer, dimension(mpi_status_size) :: status,sstatus,rstatus
     integer :: tag,srequest,rrequest,sierr,rierr
@@ -978,8 +979,8 @@ contains
                     mpi_comm_world,ierr)
 
     if (rank == 0) then
-      print *,'total particles =',np_final
-      if (np_final /= np**3) then
+      print *,'total particles =',int(np_final,8)
+      if (np_final /= (int(np,8))**3) then
         print *,'ERROR: total number of particles incorrect after passing'
       endif
     endif
@@ -1078,7 +1079,7 @@ contains
                 k2=k1+1
                 w1=k1-kr
                 w2=1-w1
-                pow=sum((slab(i:i+1,j,k)/ncr**3)**2)
+                pow=sum((slab(i:i+1,j,k)/(real(ncr))**3)**2)
                 pktsum(1,k1)=pktsum(1,k1)+w1*pow
                 pktsum(2,k1)=pktsum(2,k1)+w1*pow**2
                 pktsum(3,k1)=pktsum(3,k1)+w1
@@ -1103,7 +1104,7 @@ contains
         else
           pkdm(:,k)=pksum(1:2,k)/pksum(3,k)
           pkdm(2,k)=sqrt(abs((pkdm(2,k)-pkdm(1,k)**2)/(pksum(3,k)-1)))
-          pkdm(1:2,k)=4*pi*(k-1)**3*pkdm(1:2,k)
+          pkdm(1:2,k)=4*pi*(real(k)-1.)**3*pkdm(1:2,k)
        endif
       enddo
     endif

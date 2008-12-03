@@ -19,9 +19,9 @@ program dist_init
   logical, parameter :: correct_kernel=.true.
 
 
-  !! Cosmo parameters - wmap3
-  real, parameter :: ns=0.95 
-  real, parameter :: s8=0.74 
+  !! Cosmo parameters - wmap3+
+  real, parameter :: ns=0.96 
+  real, parameter :: s8=0.8 
   real, parameter :: omegal=omega_l 
   real, parameter :: omegam=1.0-omegal 
   real, parameter :: omegab=omega_b
@@ -30,8 +30,10 @@ program dist_init
   real, parameter :: scalefactor=1/(1+redshift)
 
   !! nk is the length of the initial power spectrum file
-  integer, parameter      :: nk=408 
-  character(*), parameter :: fntf='cmbfast.lcdm'
+!  integer, parameter      :: nk=408 
+!  character(*), parameter :: fntf='cmbfast.lcdm'
+  integer, parameter      :: nk=437 
+  character(*), parameter :: fntf='CAMB_BAO_Tf_CAMB_BAO.dat'
 
   !! dir is the directory for files
   !! IOform should be 'binary' or 'unformatted'
