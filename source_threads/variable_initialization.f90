@@ -23,6 +23,9 @@
     dt_c_acc=1000.0
 #ifdef PPINT
     dt_pp_acc=1000.0
+#ifdef PP_EXT
+    dt_pp_ext_acc=1000.0
+#endif
 #endif
 
 !! zero everything else 

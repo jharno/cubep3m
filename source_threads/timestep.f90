@@ -92,13 +92,21 @@
 
 #ifdef MHD
 #ifdef PPINT
+#ifdef PP_EXT
+        dt = min(dt_e,dt_f_acc,dt_pp_acc,dt_pp_ext_acc,dt_c_acc,dta,dtc)
+#else
         dt = min(dt_e,dt_f_acc,dt_pp_acc,dt_c_acc,dta,dtc)
+#endif
 #else
         dt = min(dt_e,dt_f_acc,dt_c_acc,dta,dtc)
 #endif
 #else
 #ifdef PPINT
+#ifdef PP_EXT
+        dt = min(dt_e,dt_f_acc,dt_pp_acc,dt_pp_ext_acc,dt_c_acc)
+#else
         dt = min(dt_e,dt_f_acc,dt_pp_acc,dt_c_acc)
+#endif
 #else
         dt = min(dt_e,dt_f_acc,dt_c_acc)
 #endif
@@ -169,7 +177,11 @@
 #endif
 #else
 #ifdef PPINT
+#ifdef PP_EXT
+        write(*,*) 'Time step   : ',dt,dt_e,dt_f_acc,dt_pp_acc,dt_pp_ext_acc,dt_c_acc
+#else
         write(*,*) 'Time step   : ',dt,dt_e,dt_f_acc,dt_pp_acc,dt_c_acc
+#endif
 #else
         write(*,*) 'Time step   : ',dt,dt_e,dt_f_acc,dt_c_acc
 #endif
@@ -179,7 +191,7 @@
         t=t+dt
         a=a+da
 
-      else
+      else ! cosmo
    
         a = 1.0
         a_mid = a
@@ -189,7 +201,11 @@
 !          dt = min(0.1/sqrt(G*mass_p/cur_sep**2),dt_f_acc,dt_pp_acc,dt_c_acc,dt_max_v)
           dt = min(0.05/sqrt(G*mass_p/cur_sep**2),dt_f_acc,dt_pp_acc,dt_c_acc)
         else
-          dt = min(1.0,dt_f_acc,dt_pp_acc,dt_c_acc)
+#ifdef PP_EXT
+           dt = min(1.0,dt_f_acc,dt_pp_acc,dt_pp_ext_acc,dt_c_acc)
+#else
+           dt = min(1.0,dt_f_acc,dt_pp_acc,dt_c_acc)
+#endif
         endif
 #else
         dt = min(1.0,dt_f_acc,dt_c_acc)
@@ -197,7 +213,7 @@
         if (pairwise_ic) dt=1.0
         if (shake_test_ic) dt=1.0
         t = t + dt
-        if (rank == 0) write(*,*) 'nts=',nts,'t=',t,'dt=',dt,dt_f_acc,dt_pp_acc,dt_c_acc,dt_max_v,0.1/sqrt(G*mass_p/cur_sep**2)
+        if (rank == 0) write(*,*) 'nts=',nts,'t=',t,'dt=',dt,dt_f_acc,dt_pp_acc, dt_pp_ext_acc,dt_c_acc,dt_max_v,0.1/sqrt(G*mass_p/cur_sep**2)
   
       endif
 

@@ -4,17 +4,20 @@
     include 'mpif.h'
     include 'cubepm.fh'
 
-    integer(4) :: i,j,k,dd,cur_tile
+    integer(4) :: i,j,k,dd,cur_tile, np_tile, np_tile_buf, n_pairs
     integer(4), dimension(3) :: tile
     integer(4) :: thread
     real(4) :: f_force_max_node
     real(4) :: pp_force_max_node
+    real(4) :: pp_ext_force_max_node
     integer(4) :: omp_get_thread_num
     external omp_get_thread_num
 
 ! these are for fine mesh
     integer(4) :: pp,ii,im,i3
     integer(4), dimension(3) :: cic_l, cic_h 
+    integer(4), dimension(3,cores) :: cic_fine_l, cic_fine_h
+
 ! these are for fine ngp mass
     integer(4), dimension(3) :: i1
     real(4),    dimension(3) :: x, offset
@@ -22,7 +25,7 @@
     real(4), dimension(3) :: dx1, dx2
     real(4) :: dVc
     integer(4), dimension(3) :: i2
-    integer(4) :: jm,km,ip,jp,kp
+    integer(4) :: jm,km,ip,jp,kp, ip_min, jp_min, kp_min,ip_max, jp_max, kp_max
     real(4) :: force_mag
 #ifdef PPINT
     integer pp1,pp2,ipl(mesh_scale,mesh_scale,mesh_scale)
@@ -67,7 +70,8 @@
     !$omp parallel default(shared) &
     !$omp private(cur_tile,i,j,k,tile,thread,pp,ii,im,i3,cic_l,cic_h,i1,x, &
     !$              offset,dx1,dx2,dVc,i2,jm,km,ip,jp,kp,force_mag,pp1,pp2,ipl,& 
-    !$              sep,force_pp,rmag,pp_force_mag,v_init)
+    !$              sep,force_pp,rmag,pp_force_mag,v_init, np_tile, &
+    !$              ip_min, jp_min, kp_min,ip_max, jp_max, kp_max, n_pairs)
     thread=1
     thread = omp_get_thread_num() + 1
     f_mesh_mass(thread)=0.0
@@ -314,10 +318,217 @@
       enddo
 ! end fine velocity
 
-    enddo
-    !$omp end do
-    !$omp end parallel
 
+
+
+#ifdef PP_EXT
+
+!**********************************
+! 1-Create link list on fine mesh *
+!**********************************
+
+#ifdef DEBUG_PP_EXT
+      write(*,*) 'Calling link_list_fine on :'
+      write(*,*) 'tile',tile, 'thread', thread
+#endif
+      
+      hoc_fine(:,:,:,thread)=0
+      np_tile=0
+ 
+      ! Get physical coordinate of boundaries of tiles in fine mesh units
+      cic_fine_l(:,thread) = tile(:)*nf_physical_tile_dim + 1
+      cic_fine_h(:,thread) = (tile(:) + 1)*nf_physical_tile_dim
+      
+      ! Include pp_range
+      cic_fine_l(:,thread) = cic_fine_l(:,thread) - pp_range 
+      cic_fine_h(:,thread) = cic_fine_h(:,thread) + pp_range 
+      
+#ifdef DEBUG_PP_EXT
+      write(*,*) 'cic_fine_l =', cic_fine_l(:,thread) 
+      write(*,*) 'cic_fine_h =', cic_fine_h(:,thread) 
+#endif
+      
+      
+      pp=1
+      do
+         !94 continue
+         if (pp > np_local) exit
+         i=floor(xv(1,pp))+1
+         j=floor(xv(2,pp))+1
+         k=floor(xv(3,pp))+1       
+         
+         if (i < cic_fine_l(1,thread) .or. i > cic_fine_h(1,thread) .or. &
+              j < cic_fine_l(2,thread) .or. j > cic_fine_h(2,thread) .or. &
+              k < cic_fine_l(3,thread) .or. k > cic_fine_h(3,thread)) then
+            !         !write (*,*) 'PARTICLE NOT IN CURRENT TILE',xv(:,pp) 
+            np_tile_buf=np_tile_buf+1
+            !         goto 94
+            !cycle
+         else
+            !ll_fine(pp,thread) = hoc_fine(i-cic_fine_l(1,thread)+1, j-cic_fine_l(2,thread)+1, k-cic_fine_l(3,thread)+1,thread)
+            hoc_fine(i-cic_fine_l(1,thread)+1, j-cic_fine_l(2,thread)+1, k-cic_fine_l(3,thread)+1,thread)=pp
+            ll_fine(pp,thread) = hoc_fine(i-cic_fine_l(1,thread)+1, j-cic_fine_l(2,thread)+1, k-cic_fine_l(3,thread)+1,thread)
+            !hoc_fine(i-cic_fine_l(1,thread)+1, j-cic_fine_l(2,thread)+1, k-cic_fine_l(3,thread)+1)=pp
+            
+            !write(*,*)'hoc_fine(',i,j,k,thread,')= ',hoc_fine(i-cic_fine_l(1,thread)+1, j-cic_fine_l(2,thread)+1, k-cic_fine_l(3,thread)+1,thread)
+            !write(*,*) 'pp =', pp
+            !pause
+            
+            np_tile=np_tile+1
+            
+         endif
+         pp=pp+1
+      enddo
+      
+#ifdef DEBUG_LINK_LIST_FINE
+
+      write(*,*) 'np_tile =', np_tile
+      
+      write(*,*) 'hoc_fine(1,1,1,',thread,') =',hoc_fine(1,1,1,thread) 
+      write(*,*) 'hoc_fine(2,1,1,',thread,') =',hoc_fine(2,1,1,thread) 
+      write(*,*) 'hoc_fine(3,1,1,',thread,') =',hoc_fine(3,1,1,thread) 
+      write(*,*) 'hoc_fine(1,2,1,',thread,') =',hoc_fine(1,2,1,thread) 
+      write(*,*) 'hoc_fine(2,2,1,',thread,') =',hoc_fine(2,2,1,thread) 
+      write(*,*) 'hoc_fine(3,2,1,',thread,') =',hoc_fine(3,2,1,thread) 
+      write(*,*) 'hoc_fine(1,3,1,',thread,') =',hoc_fine(1,3,1,thread) 
+      write(*,*) 'hoc_fine(2,3,1,',thread,') =',hoc_fine(2,3,1,thread) 
+      write(*,*) 'hoc_fine(3,3,1,',thread,') =',hoc_fine(3,3,1,thread) 
+      write(*,*) 'hoc_fine(1,1,2,',thread,') =',hoc_fine(1,1,2,thread) 
+      write(*,*) 'hoc_fine(2,1,2,',thread,') =',hoc_fine(2,1,2,thread) 
+      write(*,*) 'hoc_fine(3,1,2,',thread,') =',hoc_fine(3,1,2,thread) 
+      write(*,*) 'hoc_fine(1,2,2,',thread,') =',hoc_fine(1,2,2,thread) 
+      write(*,*) 'hoc_fine(2,2,2,',thread,') =',hoc_fine(2,2,2,thread) 
+      write(*,*) 'hoc_fine(3,2,2,',thread,') =',hoc_fine(3,2,2,thread) 
+      write(*,*) 'hoc_fine(1,3,2,',thread,') =',hoc_fine(1,3,2,thread) 
+      write(*,*) 'hoc_fine(2,3,2,',thread,') =',hoc_fine(2,3,2,thread) 
+      write(*,*) 'hoc_fine(3,3,2,',thread,') =',hoc_fine(3,3,2,thread) 
+      write(*,*) 'hoc_fine(1,1,3,',thread,') =',hoc_fine(1,1,3,thread) 
+      write(*,*) 'hoc_fine(2,1,3,',thread,') =',hoc_fine(2,1,3,thread) 
+      write(*,*) 'hoc_fine(3,1,3,',thread,') =',hoc_fine(3,1,3,thread) 
+      write(*,*) 'hoc_fine(1,2,3,',thread,') =',hoc_fine(1,2,3,thread) 
+      write(*,*) 'hoc_fine(2,2,3,',thread,') =',hoc_fine(2,2,3,thread) 
+      write(*,*) 'hoc_fine(3,2,3,',thread,') =',hoc_fine(3,2,3,thread) 
+      write(*,*) 'hoc_fine(1,3,3,',thread,') =',hoc_fine(1,3,3,thread) 
+      write(*,*) 'hoc_fine(2,3,3,',thread,') =',hoc_fine(2,3,3,thread) 
+      write(*,*) 'hoc_fine(3,3,3,',thread,') =',hoc_fine(3,3,3,thread) 
+      
+            
+      ! loop over fine cells in the tile, including the pp_range
+      do k=1,nf_physical_tile_dim+2*pp_range
+         do j=1,nf_physical_tile_dim+2*pp_range
+            do i=1,nf_physical_tile_dim+2*pp_range
+               
+               write(*,*) 'hoc_fine(',i,j,k,thread,') = ',hoc_fine(i,j,k,thread) 
+               pause
+               
+            enddo
+         enddo
+      enddo
+      
+#endif
+
+!*******************************************************
+! 2-Loop over pp in present and neighbouring fine cells*
+!*******************************************************
+ 
+      pp_ext_force_accum(:,:,thread) = 0 
+      n_pairs = 0
+
+      do k=1,nf_physical_tile_dim+pp_range ! We never loop towards smaller z
+         do j=1,nf_physical_tile_dim+2*pp_range
+            do i=1,nf_physical_tile_dim+2*pp_range
+               
+               pp1 = hoc_fine(i,j,k,thread) 
+               if(pp1 == 0) cycle 
+ 
+               kp_min = k
+               kp_max = k+pp_range
+               do kp = kp_min,kp_max
+                  if(kp==k)then
+                     jp_min = j
+                  else
+                     jp_min = j-pp_range
+                     if(jp_min <=0) jp_min = 1
+                  endif
+                  jp_max = j+pp_range
+                  if(jp_max > nf_physical_tile_dim+2*pp_range) jp_max = nf_physical_tile_dim+2*pp_range
+                  do jp = jp_min,jp_max 
+                     if((kp==k .and. jp==j))then
+                        ip_min = i+1
+                     else
+                        ip_min = i-pp_range
+                        if(ip_min <=0) ip_min = 1
+                     endif
+                     ip_max = i+pp_range
+                     if(ip_max > nf_physical_tile_dim+2*pp_range) ip_max = nf_physical_tile_dim+2*pp_range
+                     do ip=ip_min,ip_max 
+                        
+                        !write(*,*) '(i,j,k)= ', i,j,k
+                        !write(*,*) '(ip,jp,kp)  =',  ip,jp,kp
+                        !pause
+
+                        pp2 = hoc_fine(ip,jp,kp,thread) 
+                        if(pp2 == 0) cycle 
+                        
+#ifdef DEBUG_PP_EXT
+                        write(*,*) 'Found a pair with sep :',ip-i,jp-j,kp-k,'on thread', thread
+                        write(*,*) 'at position (i,j,k)=',i,j,k
+                        write(*,*) 'on tile :',tile
+                        write(*,*) 'with hoc_fine:', pp1, pp2
+                        !pause
+                        
+#endif
+                        n_pairs = n_pairs+1
+
+                        sep = xv(:3,pp1) - xv(:3,pp2)
+                        rmag=sqrt(sep(1)*sep(1)+sep(2)*sep(2)+sep(3)*sep(3))
+                        if (rmag>rsoft) then
+                           force_pp=mass_p*(sep/(rmag*pp_bias)**3)  !mass_p divides out below
+                           pp_ext_force_accum(:,pp1,thread)=pp_ext_force_accum(:,pp1,thread)-force_pp
+                           pp_ext_force_accum(:,pp2,thread)=pp_ext_force_accum(:,pp2,thread)+force_pp
+                           if (pp_ext_force_flag) then
+                              
+                              ! Update only particles in physical space
+                              if((pp_range<i).and.(i<=nf_physical_tile_dim+pp_range) .and.&
+                                  (pp_range<j).and.(j<=nf_physical_tile_dim+pp_range).and.&
+                                  (pp_range<k).and.(k<=nf_physical_tile_dim+pp_range)) then 
+
+                                 xv(4:,pp1)=xv(4:,pp1)-force_pp*a_mid*G*dt
+                              endif
+
+                              if((pp_range<ip).and.(ip<=nf_physical_tile_dim+pp_range) .and.&
+                                  (pp_range<jp).and.(jp<=nf_physical_tile_dim+pp_range).and.&
+                                  (pp_range<kp).and.(kp<=nf_physical_tile_dim+pp_range)) then 
+
+                                 xv(4:,pp2)=xv(4:,pp2)+force_pp*a_mid*G*dt
+                              endif
+                           endif
+                        endif
+                         
+
+
+                     enddo
+                  enddo
+               enddo
+
+            enddo
+         enddo
+      enddo
+
+      
+      pp_ext_force_max(thread) = maxval(sqrt(pp_ext_force_accum(1,:,thread)**2 + pp_ext_force_accum(2,:,thread)**2 + pp_ext_force_accum(3,:,thread)**2))
+
+
+#ifdef DEBUG_PP_EXT
+      write(*,*) 'pp_ext_force_max(',thread,') =', pp_ext_force_max(thread),'n_pairs =', n_pairs
+#endif
+      
+#endif
+      
+   enddo
+   !$omp end do
+   !$omp end parallel
+   
 #ifdef MHD
     cmaxl=cmax
     nerrl=nerr
@@ -366,6 +577,22 @@
         print *,i,xv(:,i)
       enddo 
     endif
+
+#endif
+
+#ifdef PP_EXT
+
+    pp_ext_force_max_node=maxval(pp_ext_force_max)
+
+    call mpi_reduce(pp_ext_force_max_node,dt_pp_ext_acc,1,mpi_real,mpi_max,0, &
+                    mpi_comm_world,ierr)
+
+    if (rank == 0) then
+      dt_pp_ext_acc=sqrt(dt_pp_scale*rsoft)/max(sqrt(dt_pp_ext_acc*a_mid*G),1e-3)
+      write(*,*) 'maximum timestep from pp ext force=',dt_pp_ext_acc
+    endif
+   
+    call mpi_bcast(dt_pp_ext_acc,1,mpi_real,0,mpi_comm_world,ierr)
 
 #endif
 

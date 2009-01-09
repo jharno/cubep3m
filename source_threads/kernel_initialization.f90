@@ -35,6 +35,24 @@
       end do
     end do
            
+#ifdef PP_EXT
+
+    if (pp_ext_force_flag) then
+       write(*,*) 'Using fine mesh kernel modified for extended pp'
+       !! Set the kernel to 0 for immediate neighbors
+       do k=1,pp_range+1
+          do j=1,pp_range+1
+             do i=1,pp_range+1
+                rho_f(i,j,k,1) = 0
+             enddo
+          enddo
+       enddo
+    else
+       write(*,*) 'NOT using modified fine mesh kernel (flag set to .false.)'
+    endif
+
+#endif
+
 !! Reflect accross y/2 plane
              
       do j=2,nf_cutoff
@@ -84,6 +102,24 @@
         end do
       end do
     end do
+
+#ifdef PP_EXT
+
+    if (pp_ext_force_flag) then
+       !write(*,*) 'Using modified fine mesh kernel'
+       !! Set the kernel to 0 for immediate neighbors
+       do k=1,pp_range+1
+          do j=1,pp_range+1
+             do i=1,pp_range+1
+                rho_f(i,j,k,1) = 0
+             enddo
+          enddo
+       enddo
+    else
+       !write(*,*) 'NOT using modified fine mesh kernel (flag set to .false.)'
+    endif
+
+#endif
 
 !! Reflect accross y/2 plane
 
@@ -135,6 +171,24 @@
       end do
     end do
       
+#ifdef PP_EXT
+
+    if (pp_ext_force_flag) then
+       !write(*,*) 'Using modified fine mesh kernel'
+       !! Set the kernel to 0 for immediate neighbors
+       do k=1,pp_range+1
+          do j=1,pp_range+1
+             do i=1,pp_range+1
+                rho_f(i,j,k,1) = 0
+             enddo
+          enddo
+       enddo
+    else
+       !write(*,*) 'NOT using modified fine mesh kernel (flag set to .false.)'
+    endif
+
+#endif
+
 !! Reflect accross y/2 plane
   
       do j=2,nf_cutoff

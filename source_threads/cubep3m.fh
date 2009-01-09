@@ -18,7 +18,7 @@ logical, dimension(cores) :: firstfftw2
 
 integer(4) :: wc_counter, count_i,count_f,count_r,nts, np_local
 real(4) :: a, a_mid, t, tau, dt, dt_old, dt_gas, mass_p, dt_f_acc, da, dt_c_acc, freeze
-real(4) :: shake_offset(3), cur_sep, dt_pp_acc,dt_max_v
+real(4) :: shake_offset(3), cur_sep, dt_pp_acc,dt_pp_ext_acc, dt_max_v
 
 ! :: checkpoint and projection variables
 
@@ -36,7 +36,7 @@ real(4), dimension(3,nf_tile/2+1,nf_tile,nf_tile) 			:: kern_f
 real(4), dimension(3,nf_buf-1:nf_tile-nf_buf+1, &
           nf_buf-1:nf_tile-nf_buf+1,nf_buf-1:nf_tile-nf_buf+1,cores)   	:: force_f
 real(4)									:: f_force_max(cores)
-real(4)									:: pp_force_max(cores)
+real(4)									:: pp_force_max(cores), pp_ext_force_max(cores)
 real(8)									:: f_mesh_mass(cores)
 
 ! :: pp arrays
@@ -44,6 +44,10 @@ real(8)									:: f_mesh_mass(cores)
 integer(4), dimension(max_llf,mesh_scale,mesh_scale,mesh_scale,cores) :: llf
 !real(4), dimension(3,max_llf,mesh_scale,mesh_scale,mesh_scale,cores) :: vel_state
 real(4), dimension(3,max_llf,cores) :: pp_force_accum
+real(4), dimension(3,max_np,cores) :: pp_ext_force_accum
+
+integer(4), dimension(max_np,cores) :: ll_fine
+integer(4), dimension(nf_physical_tile_dim+2*pp_range,nf_physical_tile_dim+2*pp_range,nf_physical_tile_dim+2*pp_range,cores) :: hoc_fine
 
 ! :: coarse mesh arrays
 
@@ -151,7 +155,7 @@ common / ivar / slab_rank, num_projections, num_checkpoints, &
 
 common / rvar / a, a_mid, t, tau, dt, dt_old, dt_gas, mass_p, rho_f, kern_f,force_f, &
                 kern_c, slab,send_buf,recv_buf, xv, f_force_max, pp_force_max, &
-                dt_f_acc, dt_pp_acc, da, dt_c_acc, a_projection, z_projection, a_checkpoint, &
+                dt_f_acc, dt_pp_acc, dt_pp_ext_acc, da, dt_c_acc, a_projection, z_projection, a_checkpoint, &
                 z_checkpoint, a_halofind, z_halofind, ps_c, ps_c_sum, freeze, &
                 den_peak,rdist,cmplx_rho_c, &
                 shake_offset,cur_sep,dt_max_v,velocity_field,fine_clumping,pp_force_accum, &

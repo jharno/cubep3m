@@ -1,0 +1,61 @@
+#!/bin/csh 
+#PBS -l nodes=8:ppn=8
+#PBS -l other=scratch-2week
+#PBS -q workq 
+#PBS -r n
+#PBS -l walltime=00:30:00
+#PBS -N cubep3m
+
+cd $PBS_O_WORKDIR
+
+#source batch_parameters.csh
+
+
+# set this to be nodes_dim**3
+set NUM_NODE_COMPILED = '8'
+
+
+module unload fftw
+module load fftw
+
+lamboot
+
+set Version = '1'
+
+while($Version <= 10)
+    
+    echo Version $Version
+
+    # meaningful tag for current run
+    set RUN_SUFFIX = '_threads_1_96_200Mpc_070515_V'$Version
+    # where local I/O will take place during the job
+    set LOCAL_SCRATCH_PATH = '/cita/d/scratch-2week/jharno/cubep3m_new_V'$Version'/out/'
+    mkdir -p $LOCAL_SCRATCH_PATH 
+
+    #mpirun n0-7 -np $NUM_NODE_COMPILED ../utils/dist_init/dist_init_V$Version  dist_init >& dist_init$RUN_SUFFIX
+    #mpirun n0-7 -np $NUM_NODE_COMPILED cic_init_power >& cic_init_power$RUN_SUFFIX
+    #mpirun n0-7 -np $NUM_NODE_COMPILED ../source_threads/cubep3m_V$Version >& cubep3m$RUN_SUFFIX
+
+    mpirun n0-7 -np $NUM_NODE_COMPILED ../utils/halo_merge/halo_merge_V$Version >& halo_merge$RUN_SUFFIX
+    #mpirun n0-7 -np $NUM_NODE_COMPILED ../utils/cic_power/cic_power_V$Version >& cic_power$RUN_SUFFIX
+
+    #mpirun -np $NUM_NODE_COMPILED cic_power >& cic_power$RUN_SUFFIX
+    # Might not need these
+    #mpirun -np $NUM_NODE_COMPILED gas_power >& gas_power$RUN_SUFFIX
+    #mpirun -np $NUM_NODE_COMPILED recompose >& recompose$RUN_SUFFIX
+
+    @ Version = ($Version + 1)
+
+end
+
+
+# shutdown lamds
+lamhalt
+
+# put logs in archive directory
+#mv *$RUN_SUFFIX $ARCHIVAL_PATH 
+
+unset RUN_SUFFIX
+unset NUM_NODE_COMPILED
+#unset ARCHIVAL_PATH
+unset LOCAL_SCRATCH_PATH
