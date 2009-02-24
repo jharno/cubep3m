@@ -31,6 +31,16 @@
            k < hoc_nc_l .or. k > hoc_nc_h) then
          write (*,*) 'PARTICLE DELETED',xv(:,pp) 
          xv(:,pp)=xv(:,np_local)
+
+#ifdef PID_FLAG
+         PID(pp)=PID(np_local)
+
+#ifdef DEBUG_PID         
+         write(*,*) 'Moved particle', pp, 'with PID', PID(pp),'to the end'  
+         !pause
+#endif
+
+#endif
          np_local=np_local-1
          np_buf=np_buf+1
 !         goto 94

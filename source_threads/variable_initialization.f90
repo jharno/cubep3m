@@ -56,8 +56,12 @@
     np_buf=0
     final_step=.false.
     shake_offset=0.0
-
-
+#ifdef PID_FLAG 
+    PID=0
+    send_buf_PID=0.0
+    recv_buf_PID=0.0
+#endif
+    
     if (rank == 0) then
 
 !! read in when to store projections

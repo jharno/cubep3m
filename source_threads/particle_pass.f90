@@ -6,7 +6,7 @@
     include 'cubepm.fh'
 
     real(4), parameter :: rnf_buf = nf_buf
-#ifdef DEBUG
+#ifdef DEBUG_PID
     real(4) :: np_total
     integer(4) :: np_local_i
 #endif
@@ -21,7 +21,8 @@
 
     call system_clock(count=count_i)
 
-#ifdef DEBUG
+
+#ifdef DEBUG_PID
     np_local_i=np_local
     do i=0,nodes-1
       if (i == rank) print *, rank,'number of particles before pass=',np_local
@@ -31,16 +32,19 @@
                            mpi_sum,0,mpi_comm_world,ierr)
     if (rank == 0) write(*,*) 'total number of particles before pass=', int(np_total,8)
     j=0
+
     do i=1,np_local
-      if (xv(1,i) >= nf_physical_node_dim .or. xv(1,i) < 0.0 .or. &
-          xv(2,i) >= nf_physical_node_dim .or. xv(2,i) < 0.0 .or. &
-          xv(3,i) >= nf_physical_node_dim .or. xv(3,i) < 0.0) then
-!        print '(6f10.4)', xv(:,i)
-        j=j+1
-      endif
-      if (xv(2,i) < 0.00001 .and. xv(2,i) > -0.00001) print *, i,rank,xv(:,i) 
-!    0.0000   12.2546   -0.0540   -0.1137   -0.0829
-    enddo 
+       if (xv(1,i) >= (nf_physical_node_dim - rnf_buf) .or. xv(1,i) < rnf_buf .or. &
+            xv(2,i) >= (nf_physical_node_dim - rnf_buf) .or. xv(2,i) < rnf_buf .or. &
+            xv(3,i) >= (nf_physical_node_dim - rnf_buf) .or. xv(3,i) < rnf_buf) then
+          !        print '(6f10.4)', xv(:,i)
+          j=j+1
+          !else
+          !print '(6f10.4)', xv(:,i)
+       endif
+       if (xv(2,i) < 0.00001 .and. xv(2,i) > -0.00001) print *, i,rank,xv(:,i)            
+       !    0.0000   12.2546   -0.0540   -0.1137   -0.0829
+    enddo
     call mpi_reduce(j,k,1,mpi_integer, &
                            mpi_sum,0,mpi_comm_world,ierr)
     do i=0,nodes-1
@@ -67,6 +71,9 @@
             if (xv(1,pp) >= nf_physical_node_dim - rnf_buf) then
               np_buf = np_buf + 1
               send_buf((np_buf-1)*6+1:np_buf*6)=xv(:,pp)
+#ifdef PID_FLAG
+              send_buf_PID(np_buf)=PID(pp)
+#endif
             endif
             pp = ll(pp)
           enddo
@@ -75,23 +82,31 @@
     enddo
 
     if (np_buf*6 > max_buf) then
-      write(*,*) 'rank:',rank,'not enough buffer space in pass',np_buf*6,max_buf
-      call mpi_abort(mpi_comm_world,ierr,ierr)
+       write(*,*) 'rank:',rank,'not enough buffer space in pass',np_buf*6,max_buf
+       call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
 
     nppx = np_buf
 
-#ifdef DEBUG
+#ifdef DEBUG_PID
+     write(*,*) 'Before nppx exchange'
     do i=0,nodes-1
-      if (i==rank) write(*,*) 'rank',rank,'np_out=',nppx,'+x'
-      call mpi_barrier(mpi_comm_world,ierr)
+       if (i==rank) write(*,*) 'rank',rank,'np_out=',nppx,'+x'
+       call mpi_barrier(mpi_comm_world,ierr)
+    enddo
+#endif
+
+#ifdef DEBUG_PID_INTENSE
+    do i=1,nppx
+       write(*,*) i,'send_buf_PID=',send_buf_PID(i), 'send_buf=', send_buf((i-1)*6+1:i*6 - 3)
     enddo
 #endif
 
     call mpi_sendrecv_replace(nppx,1,mpi_integer,cart_neighbor(6), &
                                tag,cart_neighbor(5),tag,mpi_comm_world, &
                                status,ierr)
-#ifdef DEBUG
+#ifdef DEBUG_PID
+    write(*,*) 'After nppx exchange'
     do i=0,nodes-1
       if (rank==i) write(*,*) 'rank',rank,'nppx=',nppx
       call mpi_barrier(mpi_comm_world,ierr)
@@ -107,15 +122,33 @@
                    tag,mpi_comm_world,srequest,sierr)
     call mpi_irecv(recv_buf,nppx*6,mpi_real,cart_neighbor(5), &
                    tag,mpi_comm_world,rrequest,rierr)
+#ifdef PID_FLAG
+    call mpi_isend(send_buf_PID,np_buf,mpi_double_precision,cart_neighbor(6), &
+         tag,mpi_comm_world,srequest,sierr)
+    call mpi_irecv(recv_buf_PID,nppx,mpi_double_precision,cart_neighbor(5), &
+         tag,mpi_comm_world,rrequest,rierr)
+#endif
+
     call mpi_wait(srequest,sstatus,sierr)
     call mpi_wait(rrequest,rstatus,rierr)
 
+ 
     do i=1,nppx
       xv(:,np_local+i)=recv_buf((i-1)*6+1:(i-1)*6+6)
       xv(1,np_local+i)=max(xv(1,np_local+i)-nf_physical_node_dim,-rnf_buf)
+#ifdef PID_FLAG
+      PID(np_local+i)=recv_buf_PID(i)
+#endif
     enddo
 
     np_local=np_local+nppx
+
+#ifdef DEBUG_PID_INTENSE
+    write(*,*) 'After x+ pass :' 
+    do i = np_local-nppx+1,np_local
+       write(*,*) i,'PID', PID(i),'xv',xv(1:3,i)
+    enddo
+#endif
 
 ! pass -x
 
@@ -128,6 +161,9 @@
             if (xv(1,pp) < rnf_buf) then
               np_buf = np_buf + 1
               send_buf((np_buf-1)*6+1:np_buf*6)=xv(:,pp)
+#ifdef PID_FLAG
+              send_buf_PID(np_buf)=PID(pp)
+#endif
             endif
             pp = ll(pp)
           enddo
@@ -169,11 +205,22 @@
                    tag,mpi_comm_world,srequest,sierr)
     call mpi_irecv(recv_buf,npmx*6,mpi_real,cart_neighbor(6), &
                    tag,mpi_comm_world,rrequest,rierr)
+#ifdef PID_FLAG
+    call mpi_isend(send_buf_PID,np_buf,mpi_double_precision,cart_neighbor(5), &
+         tag,mpi_comm_world,srequest,sierr)
+    call mpi_irecv(recv_buf_PID,npmx,mpi_double_precision,cart_neighbor(6), &
+         tag,mpi_comm_world,rrequest,rierr)
+#endif
+    
     call mpi_wait(srequest,sstatus,sierr)
     call mpi_wait(rrequest,rstatus,rierr)
 
+
     do i=1,npmx
       xv(:,np_local+i)=recv_buf((i-1)*6+1:(i-1)*6+6)
+#ifdef PID_FLAG
+      PID(np_local+i)=recv_buf_PID(i)
+#endif
       if (abs(xv(1,np_local+i)).lt.eps) then
         if (xv(1,np_local+i) < 0.0) then
           xv(1,np_local+i)=-eps
@@ -186,6 +233,7 @@
     enddo
 
     np_local=np_local+npmx
+
 
 ! add additional particles to linked list
 !! should add/subtract offsets here!
@@ -204,6 +252,9 @@
         write(*,*) 'x-pass particle out of link list range - deleted'
         write(*,*) rank,xv(:,pp),pp,i,j,k,hoc_nc_l,hoc_nc_h
         xv(:,pp)=xv(:,np_local)
+#ifdef PID_FLAG
+        PID(pp)=PID(np_local)
+#endif
         np_local=np_local-1
         goto 91
       endif
@@ -224,6 +275,9 @@
             if (xv(2,pp) < rnf_buf) then
               np_buf = np_buf + 1
               send_buf((np_buf-1)*6+1:np_buf*6)=xv(:,pp)
+#ifdef PID_FLAG
+              send_buf_PID(np_buf)=PID(pp)
+#endif
             endif
             pp = ll(pp)
           enddo
@@ -272,6 +326,13 @@
                    tag,mpi_comm_world,srequest,sierr)
     call mpi_irecv(recv_buf,npmy*6,mpi_real,cart_neighbor(4), &
                    tag,mpi_comm_world,rrequest,rierr)
+#ifdef PID_FLAG
+    call mpi_isend(send_buf_PID,np_buf,mpi_double_precision,cart_neighbor(3), &
+         tag,mpi_comm_world,srequest,sierr)
+    call mpi_irecv(recv_buf_PID,npmy,mpi_double_precision,cart_neighbor(4), &
+         tag,mpi_comm_world,rrequest,rierr)
+#endif
+
     call mpi_wait(srequest,sstatus,sierr)
     call mpi_wait(rrequest,rstatus,rierr)
 
@@ -284,6 +345,9 @@
 
     do i=1,npmy
       xv(:,np_local+i)=recv_buf((i-1)*6+1:(i-1)*6+6)
+#ifdef PID_FLAG
+      PID(np_local+i)=recv_buf_PID(i)
+#endif
       if (abs(xv(2,np_local+i)).lt.eps) then
         if (xv(2,np_local+i) < 0.0) then
           xv(2,np_local+i)=-eps
@@ -295,6 +359,7 @@
                        nf_physical_node_dim+rnf_buf-eps)
     enddo
     np_local=np_local+npmy
+
 
 ! pass +y
 
@@ -308,6 +373,9 @@
             if (xv(2,pp) >= nf_physical_node_dim - rnf_buf) then
               np_buf = np_buf + 1
               send_buf((np_buf-1)*6+1:np_buf*6)=xv(:,pp)
+#ifdef PID_FLAG
+              send_buf_PID(np_buf)=PID(pp)
+#endif  
             endif
             pp = ll(pp)
           enddo
@@ -348,14 +416,27 @@
                    tag,mpi_comm_world,srequest,sierr)
     call mpi_irecv(recv_buf,nppy*6,mpi_real,cart_neighbor(3), &
                    tag,mpi_comm_world,rrequest,rierr)
+#ifdef PID_FLAG
+    call mpi_isend(send_buf_PID,np_buf,mpi_double_precision,cart_neighbor(4), &
+         tag,mpi_comm_world,srequest,sierr)
+    call mpi_irecv(recv_buf_PID,nppy,mpi_double_precision,cart_neighbor(3), &
+         tag,mpi_comm_world,rrequest,rierr)
+#endif
+
     call mpi_wait(srequest,sstatus,sierr)
     call mpi_wait(rrequest,rstatus,rierr)
+
 
     do i=1,nppy
       xv(:,np_local+i)=recv_buf((i-1)*6+1:(i-1)*6+6)
       xv(2,np_local+i)=max(xv(2,np_local+i)-nf_physical_node_dim,-rnf_buf)
+#ifdef PID_FLAG 
+      PID(np_local+i)=recv_buf_PID(i)
+#endif
     enddo
     np_local=np_local+nppy
+
+
 
 ! add additional particles to linked list
 
@@ -373,6 +454,9 @@
         write(*,*) 'y-pass particle out of link list range - deleted'
         write(*,*) rank,xv(:,pp),pp,i,j,k,hoc_nc_l,hoc_nc_h
         xv(:,pp)=xv(:,np_local)
+#ifdef PID_FLAG 
+        PID(pp)=PID(np_local)
+#endif
         np_local=np_local-1
         goto 92
       endif
@@ -394,6 +478,9 @@
             if (xv(3,pp) >= nf_physical_node_dim - rnf_buf) then
               np_buf = np_buf + 1
               send_buf((np_buf-1)*6+1:np_buf*6)=xv(:,pp)
+#ifdef PID_FLAG
+              send_buf_PID(np_buf)=PID(pp)
+#endif
             endif
             pp = ll(pp)
           enddo
@@ -435,12 +522,23 @@
                    tag,mpi_comm_world,srequest,sierr)
     call mpi_irecv(recv_buf,nppz*6,mpi_real,cart_neighbor(1), &
                    tag,mpi_comm_world,rrequest,rierr)
+#ifdef PID_FLAG
+    call mpi_isend(send_buf_PID,np_buf,mpi_double_precision,cart_neighbor(2), &
+         tag,mpi_comm_world,srequest,sierr)
+    call mpi_irecv(recv_buf_PID,nppz,mpi_double_precision,cart_neighbor(1), &
+         tag,mpi_comm_world,rrequest,rierr)
+#endif
+
     call mpi_wait(srequest,sstatus,sierr)
     call mpi_wait(rrequest,rstatus,rierr)
+
 
     do i=1,nppz
       xv(:,np_local+i)=recv_buf((i-1)*6+1:(i-1)*6+6)
       xv(3,np_local+i)=max(xv(3,np_local+i)-nf_physical_node_dim,-rnf_buf)
+#ifdef PID_FLAG
+      PID(np_local+i)=recv_buf_PID(i)
+#endif
     enddo
 
     np_local=np_local+nppz
@@ -456,6 +554,9 @@
             if (xv(3,pp) < rnf_buf) then
               np_buf = np_buf + 1
               send_buf((np_buf-1)*6+1:np_buf*6)=xv(:,pp)
+#ifdef PID_FLAG 
+              send_buf_PID(np_buf)=PID(pp)
+#endif
             endif
             pp = ll(pp)
           enddo
@@ -497,11 +598,22 @@
                    tag,mpi_comm_world,srequest,sierr)
     call mpi_irecv(recv_buf,npmz*6,mpi_real,cart_neighbor(2), &
                    tag,mpi_comm_world,rrequest,rierr)
+#ifdef PID_FLAG
+    call mpi_isend(send_buf_PID,np_buf,mpi_double_precision,cart_neighbor(1), &
+         tag,mpi_comm_world,srequest,sierr)
+    call mpi_irecv(recv_buf_PID,npmz,mpi_double_precision,cart_neighbor(2), &
+         tag,mpi_comm_world,rrequest,rierr)
+#endif
+
     call mpi_wait(srequest,sstatus,sierr)
     call mpi_wait(rrequest,rstatus,rierr)
 
+
     do i=1,npmz
       xv(:,np_local+i)=recv_buf((i-1)*6+1:(i-1)*6+6)
+#ifdef PID_FLAG
+      PID(np_local+i)=recv_buf_PID(i)
+#endif
       if (abs(xv(3,np_local+i)).lt.eps) then
         if (xv(3,np_local+i) < 0.0) then
           xv(3,np_local+i)=-eps
@@ -514,6 +626,7 @@
     enddo
 
     np_local=np_local+npmz
+
 
 ! add additional particles to linked list
 
@@ -531,6 +644,9 @@
         write(*,*) 'z-pass particle out of link list range - deleted'
         write(*,*) rank,xv(:,pp),pp,i,j,k,hoc_nc_l,hoc_nc_h
         xv(:,pp)=xv(:,np_local)
+#ifdef PID_FLAG
+        PID(pp)=PID(np_local)
+#endif
         np_local=np_local-1
         goto 93
       endif

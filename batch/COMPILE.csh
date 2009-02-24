@@ -8,8 +8,8 @@ module load fftw #/2.1.5-intel10
 
 module list
 
-./init_pp_threads.csh
-#source ./init_pp_threads_minimal.csh
+#source ./init_pp_threads.csh
+source ./init_pp_threads_minimal.csh
 
 cd ../batch/
 

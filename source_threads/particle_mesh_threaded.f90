@@ -434,90 +434,99 @@
       pp_ext_force_accum(:,:,thread) = 0 
       n_pairs = 0
 
-      do k=1,nf_physical_tile_dim+pp_range ! We never loop towards smaller z
-         do j=1,nf_physical_tile_dim+2*pp_range
-            do i=1,nf_physical_tile_dim+2*pp_range
+      if(pp_range .ne. 0)then
+
+         do k=1,nf_physical_tile_dim+pp_range ! We never loop towards smaller z
+            do j=1,nf_physical_tile_dim+2*pp_range
+               do i=1,nf_physical_tile_dim+2*pp_range
                
-               pp1 = hoc_fine(i,j,k,thread) 
-               if(pp1 == 0) cycle 
+                  pp1 = hoc_fine(i,j,k,thread) 
+                  if(pp1 == 0) cycle 
  
-               kp_min = k
-               kp_max = k+pp_range
-               do kp = kp_min,kp_max
-                  if(kp==k)then
-                     jp_min = j
-                  else
-                     jp_min = j-pp_range
-                     if(jp_min <=0) jp_min = 1
-                  endif
-                  jp_max = j+pp_range
-                  if(jp_max > nf_physical_tile_dim+2*pp_range) jp_max = nf_physical_tile_dim+2*pp_range
-                  do jp = jp_min,jp_max 
-                     if((kp==k .and. jp==j))then
-                        ip_min = i+1
+                  kp_min = k
+                  kp_max = k+pp_range
+                  do kp = kp_min,kp_max
+                     if(kp==k)then
+                        jp_min = j
                      else
-                        ip_min = i-pp_range
-                        if(ip_min <=0) ip_min = 1
+                        jp_min = j-pp_range
+                        if(jp_min <=0) jp_min = 1
                      endif
-                     ip_max = i+pp_range
-                     if(ip_max > nf_physical_tile_dim+2*pp_range) ip_max = nf_physical_tile_dim+2*pp_range
-                     do ip=ip_min,ip_max 
-                        
-                        !write(*,*) '(i,j,k)= ', i,j,k
-                        !write(*,*) '(ip,jp,kp)  =',  ip,jp,kp
-                        !pause
-
-                        pp2 = hoc_fine(ip,jp,kp,thread) 
-                        if(pp2 == 0) cycle 
-                        
+                     jp_max = j+pp_range
+                     if(jp_max > nf_physical_tile_dim+2*pp_range) jp_max = nf_physical_tile_dim+2*pp_range
+                     do jp = jp_min,jp_max 
+                        if((kp==k .and. jp==j))then
+                           ip_min = i+1
+                        else
+                           ip_min = i-pp_range
+                           if(ip_min <=0) ip_min = 1
+                        endif
+                        ip_max = i+pp_range
+                        if(ip_max > nf_physical_tile_dim+2*pp_range) ip_max = nf_physical_tile_dim+2*pp_range
+                        do ip=ip_min,ip_max 
+                           
+                           !write(*,*) '(i,j,k)= ', i,j,k
+                           !write(*,*) '(ip,jp,kp)  =',  ip,jp,kp
+                           !pause
+                           
+                           pp2 = hoc_fine(ip,jp,kp,thread) 
+                           if(pp2 == 0) cycle 
+                           
 #ifdef DEBUG_PP_EXT
-                        write(*,*) 'Found a pair with sep :',ip-i,jp-j,kp-k,'on thread', thread
-                        write(*,*) 'at position (i,j,k)=',i,j,k
-                        write(*,*) 'on tile :',tile
-                        write(*,*) 'with hoc_fine:', pp1, pp2
-                        !pause
-                        
+                           write(*,*) 'Found a pair with sep :',ip-i,jp-j,kp-k,'on thread', thread
+                           write(*,*) 'at position (i,j,k)=',i,j,k
+                           write(*,*) 'on tile :',tile
+                           write(*,*) 'with hoc_fine:', pp1, pp2
+                           !pause
+                           
 #endif
-                        n_pairs = n_pairs+1
-
-                        sep = xv(:3,pp1) - xv(:3,pp2)
-                        rmag=sqrt(sep(1)*sep(1)+sep(2)*sep(2)+sep(3)*sep(3))
-                        if (rmag>rsoft) then
-                           force_pp=mass_p*(sep/(rmag*pp_bias)**3)  !mass_p divides out below
-                           pp_ext_force_accum(:,pp1,thread)=pp_ext_force_accum(:,pp1,thread)-force_pp
-                           pp_ext_force_accum(:,pp2,thread)=pp_ext_force_accum(:,pp2,thread)+force_pp
-                           if (pp_ext_force_flag) then
-                              
-                              ! Update only particles in physical space
-                              if((pp_range<i).and.(i<=nf_physical_tile_dim+pp_range) .and.&
-                                  (pp_range<j).and.(j<=nf_physical_tile_dim+pp_range).and.&
-                                  (pp_range<k).and.(k<=nf_physical_tile_dim+pp_range)) then 
-
-                                 xv(4:,pp1)=xv(4:,pp1)-force_pp*a_mid*G*dt
+                           n_pairs = n_pairs+1
+                           
+                           sep = xv(:3,pp1) - xv(:3,pp2)
+                           rmag=sqrt(sep(1)*sep(1)+sep(2)*sep(2)+sep(3)*sep(3))
+                           if (rmag>rsoft) then
+                              if(rmag>real(nf_cutoff)+sqrt(3.0))then
+                                 force_pp=mass_p*(sep/(rmag*pp_bias)**3)
+                              else
+                                 force_pp=mass_p*(sep/(rmag*pp_bias)**3)*(1 - (7.0/4.0)*(rmag*pp_bias/(nf_cutoff))**3 + &
+                                      (3.0/4.0)*(rmag*pp_bias/(nf_cutoff))**5)  !mass_p divides out below
                               endif
-
-                              if((pp_range<ip).and.(ip<=nf_physical_tile_dim+pp_range) .and.&
-                                  (pp_range<jp).and.(jp<=nf_physical_tile_dim+pp_range).and.&
-                                  (pp_range<kp).and.(kp<=nf_physical_tile_dim+pp_range)) then 
-
-                                 xv(4:,pp2)=xv(4:,pp2)+force_pp*a_mid*G*dt
+                              !force_pp = force_pp - mass_p*( -7*rmag/(4*nf_cutoff**3) + 3*rmag**3/(4*nf_cutoff**5))
+                              !force_pp = force_pp + sep*mass_p*(7/(4*nf_cutoff**3) - 3*rmag**2/(4*nf_cutoff**5))
+                              pp_ext_force_accum(:,pp1,thread)=pp_ext_force_accum(:,pp1,thread)-force_pp
+                              pp_ext_force_accum(:,pp2,thread)=pp_ext_force_accum(:,pp2,thread)+force_pp
+                              if (pp_ext_force_flag) then
+                                 
+                                 ! Update only particles in physical space
+                                 if((pp_range<i).and.(i<=nf_physical_tile_dim+pp_range) .and.&
+                                      (pp_range<j).and.(j<=nf_physical_tile_dim+pp_range).and.&
+                                      (pp_range<k).and.(k<=nf_physical_tile_dim+pp_range)) then 
+                                    
+                                    xv(4:,pp1)=xv(4:,pp1)-force_pp*a_mid*G*dt
+                                 endif
+                                 
+                                 if((pp_range<ip).and.(ip<=nf_physical_tile_dim+pp_range) .and.&
+                                      (pp_range<jp).and.(jp<=nf_physical_tile_dim+pp_range).and.&
+                                      (pp_range<kp).and.(kp<=nf_physical_tile_dim+pp_range)) then 
+                                    
+                                    xv(4:,pp2)=xv(4:,pp2)+force_pp*a_mid*G*dt
+                                 endif
                               endif
                            endif
-                        endif
-                         
-
-
+                           
+                           
+                           
+                        enddo
                      enddo
                   enddo
+                  
                enddo
-
             enddo
          enddo
-      enddo
-
+      endif
       
       pp_ext_force_max(thread) = maxval(sqrt(pp_ext_force_accum(1,:,thread)**2 + pp_ext_force_accum(2,:,thread)**2 + pp_ext_force_accum(3,:,thread)**2))
-
+      
 
 #ifdef DEBUG_PP_EXT
       write(*,*) 'pp_ext_force_max(',thread,') =', pp_ext_force_max(thread),'n_pairs =', n_pairs
@@ -570,6 +579,7 @@
       write(*,*) 'maximum timestep from pp force=',dt_pp_acc
     endif
    
+
     call mpi_bcast(dt_pp_acc,1,mpi_real,0,mpi_comm_world,ierr)
 
     if (pp_test) then
@@ -588,6 +598,7 @@
                     mpi_comm_world,ierr)
 
     if (rank == 0) then
+      !write(*,*) dt_pp_scale, rsoft,dt_pp_ext_acc,a_mid,G, max(sqrt(dt_pp_ext_acc*a_mid*G),1e-3)
       dt_pp_ext_acc=sqrt(dt_pp_scale*rsoft)/max(sqrt(dt_pp_ext_acc*a_mid*G),1e-3)
       write(*,*) 'maximum timestep from pp ext force=',dt_pp_ext_acc
     endif

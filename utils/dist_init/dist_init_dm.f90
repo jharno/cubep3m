@@ -17,8 +17,8 @@ program dist_init
   logical, parameter :: correct_kernel=.true.
 
   !! Cosmo parameters - wmap3+
-!  real, parameter :: ns=0.96 
-!  real, parameter :: s8=0.8 
+  !real, parameter :: ns=0.95 
+  !real, parameter :: s8=0.74 
   !! Cosmo parameters - wmap5
   real, parameter :: ns=0.96 
   real, parameter :: s8=0.817 

@@ -1,13 +1,18 @@
+
+!! NEED TOO MUCH MEMORY ! DON'T RUN IT ON RICKY/BUBBLES !
+!! modified a bit on Ilian's code
+
 program serial_halo_merge
   !! This is the serial cubepm halo catalog merging routine.
   !! Accumulates distributed distributed halo catalogs into monolithic file 
-  !! compile with: ifort -O3 -fpic -xW -shared-intel indexedsort.f90 serial_halo_merge.f90 -o s_halo_merge
+  !! compile with: ifort indexedsort.f90 serial_halo_merge.f90 -o s_halo_merge
   
   implicit none
-  include '/scratch/00506/ilievit/cubepm_080828_2_256_93Mpc/code/parameters'
+!  include '/smaug/data/theorie/iliev/cubep3m_threads_largerun/parameters'
+  include '/cita/d/scratch-2week/jharno/workdir/parameters'
   
-  character(len=*),parameter :: halofinds =cubepm_root//'input/halofinds' 
-  character(len=*),parameter :: serial_output_path='/scratch/00506/ilievit/cubepm_080828_2_256_93Mpc/results/'
+  character(len=*),parameter :: halofinds ='/cita/d/scratch-2week/jharno/workdir/input/halofinds' 
+  character(len=*),parameter :: serial_output_path=output_path !'/cita/d/scratch-2week/jharno/cubep3m_new_V1/out/RUN-1/' !halo_data/'
   integer, parameter :: nn=nodes_dim**3 !! number of nodes total
   integer, parameter :: max_input=100 !! maximum number of catalogs to merge 
   integer, parameter :: max_halos=10*128**3 !!maximum number of halos / catalog
@@ -22,7 +27,7 @@ program serial_halo_merge
   integer(4), dimension(max_halos) :: isorthalo
   real(4), dimension(max_halos) :: mass
   
-  character(len=80) ofile 
+  character(len=180) ofile 
   character(len=5) rank_s
   character(len=7) z_s
   integer i,j,k,m
@@ -156,8 +161,12 @@ program serial_halo_merge
 !     mass(:nh_sum)=halo_list(4,:nh_sum)
      mass(:nh_sum)=halo_list(15,:nh_sum)
      isorthalo(:nh_sum)=(/ (k,k=1,nh_sum) /)
+     print*,'calling sort'
      call indexedsort(nh_sum,mass,isorthalo)
-     halo_list(:,:nh_sum)=halo_list(:,isorthalo(:nh_sum))
+     print*,'finished sort'
+     print*,'starting halo list',nh_sum
+!     halo_list(:,:nh_sum)=halo_list(:,isorthalo(:nh_sum))
+     print*,'done halo list',nh_sum
      ofile=serial_output_path//z_s(1:len_trim(z_s))//'halo.dat'
      open(unit=31,file=ofile,status='replace',iostat=fstat,form='formatted')
      if (fstat /= 0) then
@@ -172,7 +181,7 @@ program serial_halo_merge
         if(halo_list(16,j)>0)        write(31,'(17f20.10)') halo_list(:,j)
 !        print*,'check',halo_list(:,j)
      enddo
-     pause
+!     pause
      close(31)
      !  endif
      

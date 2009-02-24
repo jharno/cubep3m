@@ -64,6 +64,7 @@
         np_local=0
       endif
 
+
     elseif (pp_test) then
 
       if (rank==0) then
@@ -146,26 +147,54 @@
       open(unit=20,file=ofile,form='unformatted',iostat=fstat,status='old')
 #endif
       if (fstat /= 0) then
-        write(*,*) 'error opening initial conditions'
-        write(*,*) 'rank',rank,'file:',ofile
-        call mpi_abort(mpi_comm_world,ierr,ierr)
+         write(*,*) 'error opening initial conditions'
+         write(*,*) 'rank',rank,'file:',ofile
+         call mpi_abort(mpi_comm_world,ierr,ierr)
       endif
       read(20) np_local
-!      np_local=100**3
+      !      np_local=100**3
       if (np_local > max_np) then
-        write(*,*) 'too many particles to store'
-        write(*,*) 'rank',rank,'np_local',np_local,'max_np',max_np
-        call mpi_abort(mpi_comm_world,ierr,ierr)
+         write(*,*) 'too many particles to store'
+         write(*,*) 'rank',rank,'np_local',np_local,'max_np',max_np
+         call mpi_abort(mpi_comm_world,ierr,ierr)
       endif
-! this was for the old initial condition generator 
-!      read(20) xv(:3,:np_local)
-!      do i=1,np_local
-!        read(20) xv(:,i)
-!      enddo
+      ! this was for the old initial condition generator 
+      !      read(20) xv(:3,:np_local)
+      !      do i=1,np_local
+      !        read(20) xv(:,i)
+      !      enddo
       read(20) xv(:,:np_local)
       close(20)
 
-    endif
+     
+   endif
+
+#ifdef PID_FLAG
+
+    call delete_particles
+
+    do i=1,np_local
+       ! Assign a uniqe ID to particles in physical volumes.        
+       ! This assumes that no more than 1 particle is present in each cell initially
+       ! The numerical factor (0.5 now) should match (particle to fine grid) ratio (see dist_init.f90)
+       PID(i) = int(i + (rank)*(0.5*nc/nodes_dim)**3,kind=8)
+#ifdef DEBUG_PID_INTENSE
+       !write(*,*) i,'PID=', PID(i), 'xv', xv(1:3,i) ! useful to discover the grids!!!
+       !pause
+#endif
+    enddo
+
+#ifdef DEBUG_PID
+    write(*,*) 'np_local=',np_local
+    write(*,*) 'xv', xv(1:3,np_local), 'PID', PID(np_local) ! should be non-zero
+    write(*,*) 'xv', xv(1:3,np_local+1), 'PID', PID(np_local+1) ! should be zero
+#endif
+
+    if(rank==0)write(*,*) 'PID initialized' 
+    
+
+#endif
+    
 
 !! calculate total number of particles and particle mass
 
@@ -176,19 +205,19 @@
     call mpi_bcast(np_total,1,MPI_INTEGER8,0,mpi_comm_world,ierr)
 
     if (.not.restart_ic) then
-      if (pairwise_ic) then
-        mass_p=10000.0
-      elseif (pair_infall) then
-        mass_p=pair_infall_mass
-      elseif (pp_test) then
-        mass_p=10000.0/4.
-      else
+       if (pairwise_ic) then
+          mass_p=10000.0
+       elseif (pair_infall) then
+          mass_p=pair_infall_mass
+       elseif (pp_test) then
+          mass_p=10000.0/4.
+       else
 #ifdef MHD
-        mass_p = (real(nf_physical_dim)**3 / real(np_total))*(1-omega_b/omega_m)
+          mass_p = (real(nf_physical_dim)**3 / real(np_total))*(1-omega_b/omega_m)
 #else
-        mass_p = real(nf_physical_dim)**3 / real(np_total)
+          mass_p = real(nf_physical_dim)**3 / real(np_total)
 #endif
-      endif
+       endif
     endif
 
     if (rank == 0) write(*,*) 'particle mass=', mass_p
@@ -198,6 +227,13 @@
 #ifdef SCALED_IC
     do i=1,np_local
       xv(:,i)=xv(:,i)/4.0
+    enddo
+#endif
+
+! this is to test if we can reconstruct particle ID from drifting vs non-drifting populations
+#ifdef X_DRIFT
+    do i=1,np_local
+      xv(4,i)=xv(4,i) + 10
     enddo
 #endif
 

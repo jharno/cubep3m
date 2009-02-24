@@ -15,7 +15,7 @@ character(*), parameter :: kernel_path=cubepm_root//'kernels/'
 
 ! turn this off for pair-wise force tests
 
-logical, parameter 	:: cosmo = .false.!.true. !.false.
+logical, parameter 	:: cosmo = .true. !.false.
 
 ! equation of state for dark energy w parameter
 
@@ -55,7 +55,7 @@ integer(4), parameter   :: restart_checkpoint = 1
 
 logical, parameter      :: random_ic   = .false.
 logical, parameter      :: grid_ic     = .false.
-logical, parameter      :: pairwise_ic = .true. !.false. !.true. 
+logical, parameter      :: pairwise_ic = .false. !.true. 
 logical, parameter      :: pair_infall = .false.
 logical, parameter      :: pair_infall_no_shake = .false.
 logical, parameter      :: pp_test     = .false.
@@ -63,7 +63,7 @@ logical, parameter      :: shake_test_ic = .false.
 real, parameter         :: pair_infall_mass = 1000
 real, parameter         :: pair_infall_sep  = 2.0
 real, parameter         :: min_sep=0.0 !10
-real, parameter         :: max_sep=15!3.0 !20 !nf_buf !2.0 !1
+real, parameter         :: max_sep=40!3.0 !20 !nf_buf !2.0 !1
 real, parameter         :: sep_inc=0.1
 
 !! particle-particle interaction parameters
@@ -77,10 +77,15 @@ real(4), parameter      :: pp_bias = 1.0 !0.85 !0.1 !0.4642
 
 ! testing flags
 
-logical, parameter :: ngp_fmesh_force = .true. 
-logical, parameter :: pp_force_flag = .true.
-logical, parameter :: pp_ext_force_flag = .true.
-logical, parameter :: coarse_vel_update = .true.
+logical, parameter :: ngp_fmesh_force = .true.!.true. 
+logical, parameter :: pp_force_flag = .true.!.true.
+logical, parameter :: pp_ext_force_flag = .true.!.true.
+logical, parameter :: coarse_vel_update = .true.!.true.
+
+logical, parameter :: PID_flag = .true.
+
+! Number of fine cell layers, for extended pp force calculation:
+integer(4), parameter   :: pp_range = 1 
 
 !! additional simulation analysis
 
@@ -153,9 +158,6 @@ integer(4), parameter   :: fine_clumping_scale = mesh_scale!*finer_halo_grid
 integer(4), parameter   :: coarsest_scale = 4 !by what factor to coarsen the output 
                                               !down from the coarse grid resolution
 
-! size of buffer around fine cell
-! for extended pp force calculation:
-integer(4), parameter   :: pp_range = 1 
 
 	
 integer(4), parameter :: max_np = density_buffer * ( ((nf_tile-2*nf_buf)*tiles_node_dim/2)**3 + &

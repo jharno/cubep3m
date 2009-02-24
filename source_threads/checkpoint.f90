@@ -14,7 +14,7 @@
     include 'cubepm.fh'
 #endif
 
-    character (len=max_path) :: ofile
+    character (len=max_path) :: ofile,ofile2
     character (len=4) :: rank_s
     character (len=7) :: z_s  
 
@@ -43,7 +43,11 @@
     z_s=adjustl(z_s)
 
     ofile=output_path//z_s(1:len_trim(z_s))//'xv'// &
-          rank_s(1:len_trim(rank_s))//'.dat'
+         rank_s(1:len_trim(rank_s))//'.dat'
+#ifdef PID_FLAG
+    ofile2=output_path//z_s(1:len_trim(z_s))//'PID'// &
+         rank_s(1:len_trim(rank_s))//'.dat'
+#endif
 
 !! Open checkpoint
 
@@ -90,6 +94,52 @@
     enddo
 
     close(12)
+
+!! Open PID file
+#ifdef PID_FLAG
+
+#ifdef BINARY
+    open (unit=15,file=ofile2,status='replace',iostat=fstat,form='binary')
+#else
+    open (unit=15,file=ofile2,status='replace',iostat=fstat,form='unformatted')
+#endif
+
+    if (fstat /= 0) then
+      write(*,*) 'error opening PID file for write'
+      write(*,*) 'rank',rank,'file:',ofile2
+      call mpi_abort(mpi_comm_world,ierr,ierr)
+    endif
+
+!! This is the file header
+
+#ifdef PPINT
+    write(15) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
+              cur_projection,cur_halofind,mass_p
+#else
+    write(15) np_local,a,t,tau,nts,dt_f_acc,dt_c_acc,cur_checkpoint, &
+              cur_projection,cur_halofind,mass_p
+#endif
+!! Particle list
+!    do i=0,nodes-1
+!      if (rank==i) print *,rank,num_writes,np_local
+!      call mpi_barrier(mpi_comm_world,ierr)
+!    enddo
+! the intel compiler puts arrays on the stack to write to disk
+! this causes memory problems
+!    write(12) xv(:,:np_local)
+    do i=1,num_writes
+      nplow=(i-1)*blocksize+1
+      nphigh=min(i*blocksize,np_local)
+!!      print *,rank,nplow,nphigh,np_local
+      do j=nplow,nphigh
+        write(15) PID(j)
+      enddo
+    enddo
+
+    close(15)
+
+#endif
+    
 
 #ifdef MHD
 !! Write gas checkpoint

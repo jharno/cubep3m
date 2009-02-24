@@ -45,6 +45,7 @@ print *,'size of fine mesh force=',12.0*cores*(nf-nf_buf+2)**3/mb
 
 print *,'size of buffer particle list=',(4.*2.*2.*max_np)/mb
 print *,'size of particle list=',(28.*max_np)/mb
+print *,'size of PID list=',(8.*max_np)/mb
 
 print *,'size of density projections=',((nf-nf_buf)*tiles*nodes_dim)**2*3.*4./mb
 print *,'size of gas and magnetic field=', 32.0*real((nf-nf_buf)*tiles+6)**3/mb
