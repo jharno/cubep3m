@@ -220,6 +220,7 @@ contains
 
     real(4) :: memory_used
 
+
     memory_used = real((nc_dim+2)*(nc_dim)*(nc_slab)) &    !slab
        + 3.0*real((nc_dim/2+1)*nc_dim*nc_slab) &  !kern_c
        + real((nf_tile+2)*nf_tile**2) & !rho_f
@@ -231,6 +232,14 @@ contains
        + 6.0*real(max_np) & !xv
        + real(max_np) &	 !ll
        + real((hoc_nc_h-hoc_nc_l)**3) !hoc
+
+
+#ifdef PID_FLAG
+!!  should also add PIDsend/PIDrecv buffers, but they're small 
+    memory_used = memory_used + 2.0*real(max_np) !PID
+#endif
+
+
 
 #ifdef MHD
 !! should also add send/recv mhd buffers, but they're small 

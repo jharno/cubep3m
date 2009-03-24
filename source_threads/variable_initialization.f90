@@ -155,11 +155,11 @@
       else
         write(*,*) 'Starting simulation at:'
         write(*,*) 'z      a'
-        write(*,'(f5.1,2x,f6.4)') z_i,a_i
+        write(*,'(f8.4,2x,f6.4)') z_i,a_i
         if (num_checkpoints > 0) then
           write(*,*) 'Checkpointing performed at:'
           do i=1,num_checkpoints
-            write(*,'(f5.1,2x,f6.4)') z_checkpoint(i),a_checkpoint(i)
+            write(*,'(f8.4,2x,f6.4)') z_checkpoint(i),a_checkpoint(i)
           enddo
         else
           write(*,*) 'no checkpoints to be stored'

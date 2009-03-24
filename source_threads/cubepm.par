@@ -6,16 +6,16 @@ include '../parameters'
 
 !! files / paths 
 
-character(*), parameter :: checkpoints=cubepm_root//'input/checkpoints'
-character(*), parameter :: projections=cubepm_root//'input/projections'
-character(*), parameter :: halofinds=  cubepm_root//'input/halofinds'
+character(*), parameter :: checkpoints=cubepm_root//'input/checkpoints_PID'
+character(*), parameter :: projections=cubepm_root//'input/projections_PID'
+character(*), parameter :: halofinds=  cubepm_root//'input/halofinds_PID'
 character(*), parameter :: kernel_path=cubepm_root//'kernels/'
 
 !! cosmological parameters
 
 ! turn this off for pair-wise force tests
 
-logical, parameter 	:: cosmo = .true. !.false.
+logical, parameter 	:: cosmo = .true.
 
 ! equation of state for dark energy w parameter
 
@@ -55,7 +55,7 @@ integer(4), parameter   :: restart_checkpoint = 1
 
 logical, parameter      :: random_ic   = .false.
 logical, parameter      :: grid_ic     = .false.
-logical, parameter      :: pairwise_ic = .false. !.true. 
+logical, parameter      :: pairwise_ic = .false. 
 logical, parameter      :: pair_infall = .false.
 logical, parameter      :: pair_infall_no_shake = .false.
 logical, parameter      :: pp_test     = .false.
@@ -85,7 +85,7 @@ logical, parameter :: coarse_vel_update = .true.!.true.
 logical, parameter :: PID_flag = .true.
 
 ! Number of fine cell layers, for extended pp force calculation:
-integer(4), parameter   :: pp_range = 1 
+integer(4), parameter   :: pp_range = 1
 
 !! additional simulation analysis
 
@@ -93,7 +93,7 @@ integer(4), parameter   :: pp_range = 1
 
 logical, parameter      :: coarse_ps = .false. !.true. ! .false.
 
-! halo finding parameters
+! halo finding parameters 
 
 ! write out entire halo catalog, or just the value of nhalo
 

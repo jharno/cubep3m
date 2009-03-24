@@ -7,11 +7,11 @@ FFTWINC=$(MCKENZIE_FFTW_INC_PATH) #/home/merz/lib/fftw-2.1.5_intel8/include
 
 LDLIBS= -lsrfftw_mpi -lsrfftw -lsfftw_mpi -lsfftw -lm -ldl
 
-FFLAGS=-shared-intel -fpp -g -CB -O3 -fpic -xT -DDIAG -DBINARY -DNGP -DPPINT -DOPENMP -DDISP_MESH -DMPI_TIME  -DLRCKCORR -DNGPH -DPID_FLAG #-DPP_EXT -DDEBUG 
+FFLAGS=-shared-intel -fpp -g -CB -O3 -fpic -xT -DDIAG -DBINARY -DNGP -DPPINT -DOPENMP -DDISP_MESH -DMPI_TIME  -DLRCKCORR -DNGPH -DPID_FLAG #-DDEBUG 
 #FFLAGS=-dyncom "divar,ivar,rvar,C2RAY_HALO,lvar" -fpp -g -CB -O3 -fpic -xT -DDIAG -DBINARY -DNGP -DPPINT -DDISP_MESH -DMPI_TIME #-DDEBUG 
 #-DSCALED_IC #-DDEBUG_VEL -fpe3 -check bounds -DDEBUG #-DMHD #-check bounds -DDEBUG #-DDEBUG_LOW #-DDEBUG_VEL -DDEBUG_CCIC -DDEBUG_RHOC -openmp -DDEBUG_LOW
 #FFLAGS=-fpp -g -O0 -CB -DDIAG -DBINARY -DNGP -DPPINT -DDISP_MESH -DMPI_TIME -DDEBUG 
-#OPTIONAL FLAGS :: -DMHD -DDEBUG_CCIC -DDEBUG_CRHO -DDEBUG_RHOC -DPOINTSRC ##-DBFTEST
+#OPTIONAL FLAGS :: -DMHD -DDEBUG_CCIC -DDEBUG_CRHO -DDEBUG_RHOC -DPOINTSRC ##-DBFTEST -DXDRIFT -DPID_FLAG -DPP_EXT -DREAD_SEED -DDEBUG_PP_EXT
 
 OBJS=   checkpoint.o coarse_cic_mass.o coarse_cic_mass_buffer.o coarse_force.o coarse_force_buffer.o coarse_mass.o coarse_max_dt.o coarse_mesh.o coarse_power.o coarse_velocity.o cubepm.o delete_particles.o fftw3ds.o fine_cic_mass.o fine_cic_mass_buffer.o fine_mesh.o fine_ngp_mass.o fine_velocity.o halofind.o fftw2.o kernel_initialization.o link_list.o mpi_initialization.o particle_initialization.o particle_mesh_threaded.o particle_pass.o projection.o report_pair.o set_pair.o indexedsort.o timers.o timestep.o update_position.o variable_initialization.o 
 
@@ -132,4 +132,4 @@ clean:
 	rm -f *.o *.pc cubep3m 
 
 tar:
-	tar -cvjf cubepm.tar.bz2 *.c *.par *.fh *.f90 Makefile kernels
+	tar -cvjf cubep3m.tar.bz2  *.par *.fh *.f90 Make_PP_THREADS

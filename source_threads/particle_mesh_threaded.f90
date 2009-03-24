@@ -21,6 +21,7 @@
 ! these are for fine ngp mass
     integer(4), dimension(3) :: i1
     real(4),    dimension(3) :: x, offset
+    real(8),    dimension(3) :: tmpx
 ! these are for fine velocity
     real(4), dimension(3) :: dx1, dx2
     real(4) :: dVc
@@ -68,7 +69,7 @@
 !!!!  IS FFTW2 THREADSAFE???  NEED TO TEST !!!!
 
     !$omp parallel default(shared) &
-    !$omp private(cur_tile,i,j,k,tile,thread,pp,ii,im,i3,cic_l,cic_h,i1,x, &
+    !$omp private(cur_tile,i,j,k,tile,thread,pp,ii,im,i3,cic_l,cic_h,i1,x,tmpx, &
     !$              offset,dx1,dx2,dVc,i2,jm,km,ip,jp,kp,force_mag,pp1,pp2,ipl,& 
     !$              sep,force_pp,rmag,pp_force_mag,v_init, np_tile, &
     !$              ip_min, jp_min, kp_min,ip_max, jp_max, kp_max, n_pairs)
@@ -116,8 +117,11 @@
 
             do
               if (pp == 0) exit
-              x(:) = xv(1:3,pp) + offset(:)
-              i1(:) = floor(x(:)) + 1
+              !x(:) = xv(1:3,pp) + offset(:)
+              tmpx(:) = real(xv(1:3,pp), kind=8) + real(offset(:), kind=8)
+              x = real(tmpx,kind=4)
+              i1(:) = floor(tmpx(:)) + 1
+              !i1(:) = floor(x(:)) + 1
               rho_f(i1(1),i1(2),i1(3),thread) = rho_f(i1(1),i1(2),i1(3),thread)+mass_p
               pp = ll(pp)
             enddo
@@ -211,8 +215,11 @@
 #endif
             do
               if (pp == 0) exit
-              x(:) = xv(1:3,pp) + offset(:)
-              i1(:) = floor(x(:)) + 1
+              tmpx(:) = real(xv(1:3,pp), kind=8) + real(offset(:), kind=8)
+              x = real(tmpx,kind=4)
+              i1(:) = floor(tmpx(:)) + 1
+              !x(:) = xv(1:3,pp) + offset(:)
+              !i1(:) = floor(x(:)) + 1
 
 ! arghh!!
 
@@ -292,7 +299,9 @@
                     pp1=llf(ip,im,jm,km,thread)
                     do jp=ip+1,ipl(im,jm,km)
                       pp2=llf(jp,im,jm,km,thread)
-                      sep=xv(:3,pp1)-xv(:3,pp2)
+                      sep=xv(:3,pp1)-xv(:3,pp2)                      
+                      !write(*,*) 'xv1=', xv(:,pp1)
+                      !write(*,*) 'xv2=', xv(:,pp2)                      
                       rmag=sqrt(sep(1)*sep(1)+sep(2)*sep(2)+sep(3)*sep(3))
                       if (rmag>rsoft) then
                         force_pp=mass_p*(sep/(rmag*pp_bias)**3)  !mass_p divides out below
@@ -321,6 +330,8 @@
 
 
 
+
+
 #ifdef PP_EXT
 
 !**********************************
@@ -328,7 +339,7 @@
 !**********************************
 
 #ifdef DEBUG_PP_EXT
-      write(*,*) 'Calling link_list_fine on :'
+      write(*,*) 'Creating link_list on fine fine mesh for :'
       write(*,*) 'tile',tile, 'thread', thread
 #endif
       
@@ -477,6 +488,8 @@
                            write(*,*) 'at position (i,j,k)=',i,j,k
                            write(*,*) 'on tile :',tile
                            write(*,*) 'with hoc_fine:', pp1, pp2
+                           write(*,*) 'xv1=',xv(:3,pp1)
+                           write(*,*) 'xv2=',xv(:3,pp2)
                            !pause
                            
 #endif
