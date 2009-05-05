@@ -19,7 +19,7 @@
     integer(4), dimension(3,2) :: search_limit
     integer(8) :: imass
     real(4) :: r,radius_calc,v_disp,clump_factor
-    real(4), dimension(3) :: x_mean,v_mean,v2_mean,l,dx,offset
+    real(4), dimension(3) :: x_mean,x2_mean,var_x, v_mean,v2_mean,l,dx,offset
     real(8) :: cfmassl,cfmassl2,cftmassl,cftmassl2
 
 #ifdef PID_FLAG    
@@ -343,6 +343,7 @@
        search_limit(:,2)=int(1.0/real(mesh_scale)*halo_pos(:,hi)+1.0/real(mesh_scale)*radius_calc+1.0)
        imass=0
        x_mean=0.0
+       x2_mean=0.0
        v_mean=0.0
        v2_mean=0.0
        l=0.0
@@ -371,6 +372,7 @@
                  mass_cell=mass_cell+1
                  imass=imass+1
                  x_mean=x_mean+xv(:3,pp)
+                 x2_mean=x2_mean+xv(:3,pp)**2 
                  v_mean=v_mean+xv(4:,pp)
                  v2_mean=v2_mean+xv(4:,pp)*xv(4:,pp)
                  l(1)=l(1)+(dx(3)*xv(5,pp)-dx(2)*xv(6,pp))
@@ -386,10 +388,18 @@
 
      halo_pos(:,hi)=halo_pos(:,hi)+offset 
      x_mean=x_mean/real(imass)+offset
+     x2_mean=x2_mean/real(imass)
      v_mean=v_mean/real(imass)
      v2_mean=v2_mean/real(imass)
      l=l/real(imass)
      v_disp=sqrt(v2_mean(1)+v2_mean(2)+v2_mean(3))
+     var_x=real(imass)/(real(imass-1))*(x2_mean - (x_mean-offset)**2)
+     write(*,*) 'x_mean=',x_mean
+     write(*,*) 'x2_mean=',x2_mean
+     write(*,*) 'imass=',imass
+     write(*,*) 'var_x=',var_x
+
+
      !!      write stuff to file or store in common arrays for Ifront 
      !!      to store in common block arrays, each array should be
      !!      max_maxima in size
@@ -416,21 +426,39 @@
                  cycle
               endif
               pp=hoc(i,j,k)
+
+              !***debuging
+              !write(*,*) 'Inside halo loop, rank=',rank,'hoc(ijk) =',pp
+              !***
               do
                  if (pp==0) exit
-                 !if(ii>max_llf) then
+                 !***debuging
+                 !write(*,*) 'Inside do pp loop, rank=',rank,'hoc(ijk) =',pp
+                 !***
+                  !if(ii>max_llf) then
                  !   write(*,*) 'too many particles in the halo for PID analysis'
                  !   exit
                  !endif
-                 dx=halo_pos(:,hi)-xv(:3,pp)
+                 dx=(halo_pos(:,hi) - offset) - xv(:3,pp)
                  r=sqrt(dx(1)**2+dx(2)**2+dx(3)**2)
+
+                 !***debuging
+                 !write(*,*) 'rank=',rank,'halo_pos(:,hi)=',halo_pos(:,hi),'xv(:,pp)=',xv(:3,pp),'offset = ',offset,'dx= ',dx,'r=',r,'radius_calc=',radius_calc
+                 !***
+
                  if(r<radius_calc)then
                     !ii=ii+1
-                    r_wrt_halo = xv(:3,pp) - x_mean
+                    !***debuging
+                    !write(*,*) 'Inside if loop, rank=',rank,'E_tmp=',E_tmp, 'pp=',pp, 'PID(pp)=',PID(pp)
+                    !***
+
+                    r_wrt_halo = xv(:3,pp) - (x_mean - offset)
                     v_wrt_halo = xv(4:,pp) - v_mean
                     dist = sqrt(r_wrt_halo(1)**2 +r_wrt_halo(2)**2 + r_wrt_halo(3)**2)
                     speed = sqrt(v_wrt_halo(1)**2 +v_wrt_halo(2)**2 + v_wrt_halo(3)**2)
                     E_tmp = 0.5*(speed)**2 - halo_mass(hi)*G/dist
+                    
+                   
 
                     ! find the most bound particles
                     do ii=1,N_p
@@ -439,6 +467,9 @@
                           E(ii)=E_tmp
                           pid_halo(ii+1:N_p) = pid_halo(ii:N_p-1)
                           pid_halo(ii) = PID(pp)
+                          !***debuging
+                          !write(*,*) 'Inside E loop, rank=',rank,'pid_halo(ii) =',pid_halo(ii), 'PID(pp)=',PID(pp)
+                          !***
                           exit
                        endif                       
                     enddo
@@ -448,17 +479,17 @@
                  pp=ll(pp)                
               enddo
               !            halo_particle_count ????
+              
            enddo
         enddo
      enddo
-     
-     !write(*,*)'E = ',E
-     !write(*,*)'pid_halo = ',pid_halo
 
-     if (halo_write .and. imass>0 .and. halo_mass(hi)>160) write(12) halo_pos(:,hi),x_mean,v_mean,l,v_disp,radius_calc,halo_mass(hi),imass*mass_p,halo_mass1(hi), pid_halo
+     write(*,*)'halo = ', hi, 'rank = ', rank,'E = ',E,'pid_halo = ',pid_halo
+
+     if (halo_write .and. imass>0 .and. halo_mass(hi)>160) write(12) halo_pos(:,hi),x_mean,v_mean,l,v_disp,radius_calc,halo_mass(hi),imass*mass_p,halo_mass1(hi), var_x, pid_halo
      
 #else
-     if (halo_write .and. imass>0 .and. halo_mass(hi)>160) write(12) halo_pos(:,hi),x_mean,v_mean,l,v_disp,radius_calc,halo_mass(hi),imass*mass_p,halo_mass1(hi)
+     if (halo_write .and. imass>0 .and. halo_mass(hi)>160) write(12) halo_pos(:,hi),x_mean,v_mean,l,v_disp,radius_calc,halo_mass(hi),imass*mass_p,halo_mass1(hi),var_x
 #endif
      
      !! these plus nhalo should be passed to C^2Ray for each iteration

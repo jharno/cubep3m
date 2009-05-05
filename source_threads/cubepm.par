@@ -6,9 +6,9 @@ include '../parameters'
 
 !! files / paths 
 
-character(*), parameter :: checkpoints=cubepm_root//'input/checkpoints_PID'
-character(*), parameter :: projections=cubepm_root//'input/projections_PID'
-character(*), parameter :: halofinds=  cubepm_root//'input/halofinds_PID'
+character(*), parameter :: checkpoints=cubepm_root//'input/checkpoints'!_Lensing'
+character(*), parameter :: projections=cubepm_root//'input/projections'!_Lensing'
+character(*), parameter :: halofinds=  cubepm_root//'input/halofinds'!_Lensing'
 character(*), parameter :: kernel_path=cubepm_root//'kernels/'
 
 !! cosmological parameters
@@ -34,13 +34,12 @@ real(4), parameter      :: cfactor = 1.05
 
 ! maximum number of timesteps (in case simulation runs off on us)
 
-integer(4), parameter   :: max_nts = 2000
+integer(4), parameter   :: max_nts = 10000
 
 ! if we are going to restart a simulation, set to true and
 ! specify which checkpoint to restart from
 
 !for 'cold' start:
-
 logical, parameter	:: restart_ic =  .false.   
 integer(4), parameter   :: restart_checkpoint = 1
 
@@ -60,6 +59,7 @@ logical, parameter      :: pair_infall = .false.
 logical, parameter      :: pair_infall_no_shake = .false.
 logical, parameter      :: pp_test     = .false.
 logical, parameter      :: shake_test_ic = .false.
+logical, parameter      :: superposition_test = .false.! .true.
 real, parameter         :: pair_infall_mass = 1000
 real, parameter         :: pair_infall_sep  = 2.0
 real, parameter         :: min_sep=0.0 !10
@@ -73,7 +73,7 @@ real(4), parameter      :: rsoft = 0.1 !0.02
 ! arbitrary timescale limiting parameter :: dt_max_pp=sqrt(dt_pp_scale*rsoft/max_pp_acceleration)
 real(4), parameter      :: dt_pp_scale = 0.05
 ! arbitrary pp bias (set to increase the force interaction)
-real(4), parameter      :: pp_bias = 1.0 !0.85 !0.1 !0.4642
+real(4), parameter      :: pp_bias = 1.00 !0.85 !0.1 !0.4642
 
 ! testing flags
 
@@ -85,7 +85,7 @@ logical, parameter :: coarse_vel_update = .true.!.true.
 logical, parameter :: PID_flag = .true.
 
 ! Number of fine cell layers, for extended pp force calculation:
-integer(4), parameter   :: pp_range = 1
+integer(4), parameter   :: pp_range = 5
 
 !! additional simulation analysis
 

@@ -156,6 +156,16 @@ if (rank == 0) write(*,*) 'finished kernel init',t_elapsed(wc_counter)
 
       dt_old = 0.0
       call update_position
+
+      if(superposition_test)then
+         write(*,*) 'Calling report force'
+         call report_force
+         write(*,*) 'Called report force'       
+         write(*,*) '*** Ending simulation here ***'
+         stop
+      endif
+
+
       dt = 0.0
 
       if (checkpoint_step) then

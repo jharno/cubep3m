@@ -391,6 +391,10 @@ contains
     write(*,*) 'redshift ',redshift
     write(*,*)
 
+#ifdef MY_TRANSFER
+    write(*,*) 'power index',power_index
+#endif
+
     call cpu_time(time2)
     time2=time2-time1
     write(*,"(f8.2,a)") time2,'  Called write params'
@@ -472,6 +476,11 @@ contains
          kr     =tf(1,k)
          tf(2,k)=kr**(3+ns)*tf(2,k)**2/(2*pi**2)
          tf(3,k)=kr**(3+ns)*tf(3,k)**2/(2*pi**2)
+
+#ifdef MY_TRANSFER
+         tf(2:3,k) = kr**(3-power_index)/(2*pi**2) 
+#endif
+
       enddo
 
       !! Compute dk
