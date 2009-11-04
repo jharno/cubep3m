@@ -29,18 +29,11 @@ program cic_power
 
   !! internal parallelization parameters
   integer(4), parameter :: nc_node_dim = nc/nodes_dim
-!  integer(4), parameter :: np_node_dim = np/nodes_dim
+  integer(4), parameter :: np_node_dim = np/nodes_dim
 !  integer(4), parameter :: np_buffer = 5*np_node_dim**3
 !  integer(4), parameter :: np_buffer = 0.35*np_node_dim**3
-
-!  integer(4), parameter :: np_buffer = 4*np_node_dim**3
-!  integer(4), parameter :: max_np = np_node_dim**3 + np_buffer
-
-  integer(4), parameter :: max_np = density_buffer * ( ((nf_tile-2*nf_buf)*tiles_node_dim/2)**3 + &
-                                  (8*nf_buf**3 + 6*nf_buf*(((nf_tile-2*nf_buf)*tiles_node_dim)**2) + &
-                                  12*(nf_buf**2)*((nf_tile-2*nf_buf)*tiles_node_dim))/8.0 )
-  integer(4), parameter :: np_buffer=int(2./3.*max_np)
-
+  integer(4), parameter :: np_buffer = 4*np_node_dim**3
+  integer(4), parameter :: max_np = np_node_dim**3 + np_buffer
   integer(4), parameter :: nodes = nodes_dim * nodes_dim * nodes_dim
   integer(4), parameter :: nodes_slab = nodes_dim * nodes_dim
   integer(4), parameter :: nc_slab = nc / nodes
@@ -66,8 +59,6 @@ program cic_power
   real, dimension(6,max_np) :: xvp
   real, dimension(3,np_buffer) :: xp_buf
   real, dimension(3*np_buffer) :: send_buf, recv_buf
-  real, dimension(0:nc_node_dim+1,0:nc_node_dim+1,0:nc_node_dim+1) :: den 
-  real, dimension(0:nc_node_dim+1,0:nc_node_dim+1) :: den_buf 
 
   !! Power spectrum arrays
   real, dimension(2,nc) :: pkdm
@@ -80,18 +71,18 @@ program cic_power
   real, dimension(nc_node_dim,nc_node_dim,nc_slab,0:nodes_slab-1) :: recv_cube
   real, dimension(nc+2,nc,nc_slab) :: slab, slab_work
 
+  !! arrays
+  real, dimension(0:nc_node_dim+1,0:nc_node_dim+1,0:nc_node_dim+1) :: den 
+  real, dimension(0:nc_node_dim+1,0:nc_node_dim+1) :: den_buf 
+
   !! Equivalence arrays to save memory
-  equivalence (den,slab_work,recv_cube,xp_buf) 
-!  equivalence (slab,xvp,cube)  !! merz --  not sure if xvp is larger than slab?????
-  equivalence (xvp,slab,cube) 
+  equivalence (slab_work,recv_cube) 
 
   !! Common block
 #ifdef PLPLOT
-!  common xvp,send_buf,slab_work,den_buf,den,cube,slab,xp_buf,recv_buf,pkdm,pkplot
-  common xvp,send_buf,den_buf,den,recv_buf,pkdm,pkplot
+  common xvp,send_buf,slab_work,den_buf,den,cube,slab,xp_buf,recv_buf,pkdm,pkplot
 #else
-!  common xvp,send_buf,slab_work,den_buf,den,cube,slab,xp_buf,recv_buf,pkdm
-  common xvp,send_buf,den_buf,den,recv_buf,pkdm
+  common xvp,send_buf,slab_work,den_buf,den,cube,slab,xp_buf,recv_buf,pkdm
 #endif
 
 !!---start main--------------------------------------------------------------!!
@@ -233,7 +224,7 @@ contains
     integer j,fstat
     character(len=7) :: z_string
     character(len=4) :: rank_string
-    character(len=512) :: check_name
+    character(len=100) :: check_name
 
     !! these are unnecessary headers from the checkpoint
     real(4) :: a,t,tau,dt_f_acc,dt_c_acc,dt_pp_acc,mass_p
@@ -286,7 +277,7 @@ contains
 !! tally up total number of particles
     call mpi_reduce(real(np_local,kind=4),np_total,1,mpi_real, &
                          mpi_sum,0,mpi_comm_world,ierr)
-    if (rank == 0) write(*,*) 'number of particles =', int(np_total,8)
+    if (rank == 0) write(*,*) 'number of particles =', int(np_total,4)
 
 !! read in particles
 !    do j=1,np_local
@@ -295,6 +286,28 @@ contains
     read(21) xvp(:,:np_local)
     close(21)
  
+#ifdef KAISER
+
+    !Red Shift Distortion: x_z -> x_z +  v_z/H(Z)   
+    !Converting seconds into simulation time units
+    !cancels the H0...
+    
+    !xv(3,ip+1:ip+nploc(i))=xv(3,ip+1:ip+nploc(i)) + xv(6,ip+1:ip+nploc(i))*1.5*sqrt(omegam/cubepm_a)
+    !xv(3,ip+1:ip+nploc(i))=xv(3,ip+1:ip+nploc(i)) + xv(6,ip+1:ip+nploc(i))*1.5/sqrt(cubepm_a*(1+cubepm_a*omegak/omegam + omegav/omegam*cubepm_a**3))
+    xvp(3,:)=xvp(3,:) + xvp(6,:)*1.5/sqrt(a*(1+a*(1-omega_m-omega_l)/omega_m + omega_l/omega_m*a**3))  
+
+    call pass_particles
+
+    if(rank==0) then
+       write(*,*) '**********************'
+       write(*,*) 'Included Kaiser Effect'
+       write(*,*) 'Omega_m =', omega_m, 'a =', a
+       !write(*,*) '1/H(z) =', 1.5*sqrt(omegam/cubepm_a)
+       write(*,*) '1/H(z) =', 1.5/sqrt(a*(1+a*(1-omega_m-omega_l)/omega_m + omega_l/omega_m*a**3))
+       write(*,*) '**********************'
+    endif
+#endif
+
   end subroutine read_particles
 
 !!---------------------------------------------------------------------------!!
@@ -312,11 +325,7 @@ contains
     num_elements = nc_node_dim * nc_node_dim * nc_slab
                        
 !! swap data           
-       
-#ifdef DEBUG_LOW
-  print *,'rank',rank,'starting swap'
-#endif
- 
+        
     do j = 0, nodes_dim - 1
       do i = 0, nodes_dim - 1
         slab_slice = i + j * nodes_dim
@@ -331,16 +340,8 @@ contains
                        ierr)
       enddo
     enddo
-
-#ifdef DEBUG_LOW
-  print *,'rank',rank,'starting wait'
-#endif
     
     call mpi_waitall(2*nodes_dim**2, requests, wait_status, ierr)
-
-#ifdef DEBUG_LOW
-  print *,'rank',rank,'finished wait'
-#endif
 
 !! place data in the slab
 
@@ -355,10 +356,6 @@ contains
       enddo
     enddo
       
-#ifdef DEBUG_LOW
-  print *,'rank',rank,'finished wait'
-#endif
-
   end subroutine pack_slab
     
 !-------------------------------------------------------------------!
@@ -386,8 +383,6 @@ contains
     enddo
 
     num_elements = nc_node_dim * nc_node_dim * nc_slab
-
-    call mpi_barrier(mpi_comm_world,ierr)
 
 !! swap data
 
@@ -434,9 +429,9 @@ contains
 
     if (firstfftw) then
       call rfftw3d_f77_mpi_create_plan(plan,mpi_comm_world,nc, &
-            nc,nc, FFTW_REAL_TO_COMPLEX, FFTW_ESTIMATE)
+            nc,nc, FFTW_REAL_TO_COMPLEX, FFTW_MEASURE)
       call rfftw3d_f77_mpi_create_plan(iplan,mpi_comm_world,nc, &
-            nc,nc, FFTW_COMPLEX_TO_REAL, FFTW_ESTIMATE)
+            nc,nc, FFTW_COMPLEX_TO_REAL, FFTW_MEASURE)
 #ifdef DEBUG_LOW
       print *,'finished initialization of fftw',rank
 #endif
@@ -522,7 +517,7 @@ contains
     integer :: kp
 #endif
     real         :: kr
-    character*512 :: fn
+    character*180 :: fn
     character*7  :: z_write
     real time1,time2
     call cpu_time(time1)
@@ -535,6 +530,16 @@ contains
     write(z_write,'(f7.3)') z_checkpoint(cur_checkpoint)
     z_write=adjustl(z_write)
     fn=output_path//z_write(1:len_trim(z_write))//'cicps.dat'
+#ifdef KAISER
+    fn=output_path//z_write(1:len_trim(z_write))//'cicps-RSD.dat'
+#ifdef NGP
+    fn=output_path//z_write(1:len_trim(z_write))//'ngpps-RSD.dat'
+#endif
+#endif
+
+#ifdef NGP
+    fn=output_path//z_write(1:len_trim(z_write))//'ngpps.dat'
+#endif
     write(*,*) 'Writing ',fn
     open(11,file=fn,recl=500)
     do k=2,hc+1
@@ -613,13 +618,13 @@ contains
     call mpi_reduce(dmax,dmaxt,1,mpi_real,mpi_max,0,mpi_comm_world,ierr)
 
     if (rank==0) then
-      dsum=dsumt/real(nc)**3
-      dvar=sqrt(dvart/real(nc)**3)
+      dsum=dsumt/nc**3
+      dvar=sqrt(dvart/nc**3)
       write(*,*)
       write(*,*) 'DM min    ',dmint
       write(*,*) 'DM max    ',dmaxt
-      write(*,*) 'Delta sum ',real(dsum,8)
-      write(*,*) 'Delta var ',real(dvar,8)
+      write(*,*) 'Delta sum ',real(dsum)
+      write(*,*) 'Delta var ',real(dvar)
       write(*,*)
     endif
  
@@ -640,8 +645,7 @@ contains
   subroutine pass_particles
     implicit none
 
-    integer i,pp,np_buf,np_exit,npo,npi
-    integer*8 np_final
+    integer i,pp,np_buf,np_exit,np_final,npo,npi
     real x(3),lb,ub
     integer, dimension(mpi_status_size) :: status,sstatus,rstatus
     integer :: tag,srequest,rrequest,sierr,rierr
@@ -1032,8 +1036,8 @@ contains
                     mpi_comm_world,ierr)
 
     if (rank == 0) then
-      print *,'total particles =',int(np_final,8)
-      if (np_final /= (int(np,8))**3) then
+      print *,'total particles =',np_final
+      if (np_final /= np**3) then
         print *,'ERROR: total number of particles incorrect after passing'
       endif
     endif
@@ -1137,7 +1141,11 @@ contains
                 k2=k1+1
                 w1=k1-kr
                 w2=1-w1
-                pow=sum((delta(i:i+1,j,k)/(real(ncr))**3)**2)
+#ifdef NGP
+                w1=1
+                w2=0
+#endif                
+                pow=sum((delta(i:i+1,j,k)/ncr**3)**2)
                 pkt(1,k1,k)=pkt(1,k1,k)+w1*pow
                 pkt(2,k1,k)=pkt(2,k1,k)+w1*pow**2
                 pkt(3,k1,k)=pkt(3,k1,k)+w1
@@ -1167,7 +1175,7 @@ contains
         else
           pk(:,k)=pktsum(1:2,k)/pktsum(3,k)
           pk(2,k)=sqrt(abs((pk(2,k)-pk(1,k)**2)/(pktsum(3,k)-1)))
-          pk(1:2,k)=4*pi*(real(k)-1.)**3*pk(1:2,k)
+          pk(1:2,k)=4*pi*(k-1)**3*pk(1:2,k)
        endif
       enddo
     endif

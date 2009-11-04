@@ -18,15 +18,18 @@
     integer(4) :: hi,pp,mass_cell
     integer(4), dimension(3,2) :: search_limit
     integer(8) :: imass
-    real(4) :: r,radius_calc,v_disp,clump_factor
-    real(4), dimension(3) :: x_mean,x2_mean,var_x, v_mean,v2_mean,l,dx,offset
+    real(4) :: r,radius_calc,v_disp,clump_factor, v_disp_CM
+    real(4), dimension(3) :: x_mean,x2_mean,var_x, v_mean,v2_mean,l,dx,offset, l_CM, v_mean_CM, v2_mean_CM
     real(8) :: cfmassl,cfmassl2,cftmassl,cftmassl2
+    real(4), dimension(3) :: r_wrt_halo,v_wrt_halo, v_mean2_CM
+
+
 
 #ifdef PID_FLAG    
     integer, parameter :: N_p = 10
     real(4), dimension(N_p) :: E
     integer(8), dimension(N_p) :: pid_halo
-    real(4), dimension(3) :: r_wrt_halo,v_wrt_halo
+!    real(4), dimension(3) :: r_wrt_halo,v_wrt_halo, v_mean2_CM
     real(4) :: dist,speed, E_tmp
 #endif
 
@@ -346,7 +349,10 @@
        x2_mean=0.0
        v_mean=0.0
        v2_mean=0.0
+       v_wrt_halo=0.0
+       v_mean2_CM=0.0
        l=0.0
+       l_CM=0.0
       do k=search_limit(3,1),search_limit(3,2)
         if (k < hoc_nc_l .or. k > hoc_nc_h) then
           print *,'halo analysis out of bounds in z dimension',k
@@ -392,12 +398,15 @@
      v_mean=v_mean/real(imass)
      v2_mean=v2_mean/real(imass)
      l=l/real(imass)
+     l_CM(1)=l(1)-(x_mean(3)*v_mean(2)-x_mean(2)*v_mean(3))
+     l_CM(2)=l(2)-(x_mean(1)*v_mean(3)-x_mean(3)*v_mean(1))
+     l_CM(3)=l(3)-(x_mean(2)*v_mean(1)-x_mean(1)*v_mean(2))
      v_disp=sqrt(v2_mean(1)+v2_mean(2)+v2_mean(3))
      var_x=real(imass)/(real(imass-1))*(x2_mean - (x_mean-offset)**2)
-     write(*,*) 'x_mean=',x_mean
-     write(*,*) 'x2_mean=',x2_mean
-     write(*,*) 'imass=',imass
-     write(*,*) 'var_x=',var_x
+     !write(*,*) 'x_mean=',x_mean
+     !write(*,*) 'x2_mean=',x2_mean
+     !write(*,*) 'imass=',imass
+     !write(*,*) 'var_x=',var_x
 
 
      !!      write stuff to file or store in common arrays for Ifront 
@@ -454,7 +463,9 @@
 
                     r_wrt_halo = xv(:3,pp) - (x_mean - offset)
                     v_wrt_halo = xv(4:,pp) - v_mean
+                    v_mean2_CM = v_mean2_CM + v_wrt_halo(:)**2
                     dist = sqrt(r_wrt_halo(1)**2 +r_wrt_halo(2)**2 + r_wrt_halo(3)**2)
+                    
                     speed = sqrt(v_wrt_halo(1)**2 +v_wrt_halo(2)**2 + v_wrt_halo(3)**2)
                     E_tmp = 0.5*(speed)**2 - halo_mass(hi)*G/dist
                     
@@ -484,9 +495,11 @@
         enddo
      enddo
 
-     write(*,*)'halo = ', hi, 'rank = ', rank,'E = ',E,'pid_halo = ',pid_halo
+     !write(*,*)'halo = ', hi, 'rank = ', rank,'E = ',E,'pid_halo = ',pid_halo
+     v_mean2_CM(:) = v_mean2_CM(:)/real(imass)
+     v_disp_CM = sqrt(v_mean2_CM(1) + v_mean2_CM(2) + v_mean2_CM(3))
 
-     if (halo_write .and. imass>0 .and. halo_mass(hi)>160) write(12) halo_pos(:,hi),x_mean,v_mean,l,v_disp,radius_calc,halo_mass(hi),imass*mass_p,halo_mass1(hi), var_x, pid_halo
+     if (halo_write .and. imass>0 .and. halo_mass(hi)>160) write(12) halo_pos(:,hi),x_mean,v_mean,l_CM,v_disp_CM,radius_calc,halo_mass(hi),imass*mass_p,halo_mass1(hi), var_x, pid_halo
      
 #else
      if (halo_write .and. imass>0 .and. halo_mass(hi)>160) write(12) halo_pos(:,hi),x_mean,v_mean,l,v_disp,radius_calc,halo_mass(hi),imass*mass_p,halo_mass1(hi),var_x

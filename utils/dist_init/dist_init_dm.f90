@@ -407,7 +407,7 @@ contains
     implicit none
     integer      :: k
     real         :: kr
-    character*80 :: fn
+    character*180 :: fn
 
     real time1,time2
     call cpu_time(time1)
@@ -479,6 +479,7 @@ contains
 
 #ifdef MY_TRANSFER
          tf(2:3,k) = kr**(3-power_index)/(2*pi**2) 
+         write(*,*)'Over-written by power law'
 #endif
 
       enddo
@@ -540,7 +541,7 @@ contains
     integer :: ig,jg,kg
 #endif
     real         :: x,x1,x2
-    character*80 :: fn
+    character*180 :: fn
     integer,allocatable,dimension(:) :: iseed
     integer,allocatable,dimension(:) :: iseed_all
 
@@ -773,7 +774,7 @@ contains
     real    :: r,x,y,z
     real    :: kr,ksq,kx,ky,kz
     real    :: phi8,phi8tot
-    character*80 :: fn
+    character*180 :: fn
 !! for more than 1+1e6 processes this will have to be increased
     character(len=6) :: rank_s
 
@@ -989,7 +990,7 @@ contains
     real*8  :: dsum,dvar,dsumt,dvart
     real, dimension(3) :: dis,x
     real*8, dimension(3) :: xav
-    character*80 :: fn
+    character*180 :: fn
 !! for more than 1+1e6 processes this will have to be increased
     character(len=6) :: rank_s
 

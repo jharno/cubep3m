@@ -14,16 +14,22 @@
     !real(4) :: xv_store(6,2)
     real(4) :: x_hole(3), pp_hole
     real(4), dimension(3,max_np):: dv
-
+    character (len=5) :: r_s
+    character (len=max_path) :: ofile
 
     if (rank==0) then
        
+       write(*,*) '***************'
+       write(*,*) 'Reporting Force'
+       write(*,*) '***************'
+    endif
+
        !do i=1,20
        !   write(*,*) 'xv(pp)= ',xv(:,i)
        !enddo
        
        ! 1 Delete ghosts and Set velocity to zero
-       !call delete_particles
+       call delete_particles
        xv(4:6,:) = 0
        
       ! do i=1,20
@@ -38,10 +44,10 @@
        
        dv(1:3,:) = xv(4:6,:) 
 
-       do i=1,20
-          write(*,*) 'xv(pp)= ',xv(:,i)
+      ! do i=1,20
+      !    write(*,*) 'xv(pp)= ',xv(:,i)
        !   write(*,*) 'dxv(pp)= ',dxv(:,i)          
-       enddo
+      ! enddo
        
        ! 4 Set the velocities to zero again
        xv(4:6,:) = 0
@@ -50,23 +56,44 @@
        !enddo
       
        ! 5 Remove a particle and keep track of its position (create a hole)
+
+       !!HOLE IN HIGH DENSITY REGION IN 1st NODE
+       !******************************************       
        
-       call random_number(pp_hole)
-       write(*,*)'pp_hole=',pp_hole
-       pp_hole = pp_hole*np_local
-       if(pp_hole < 1) pp_hole = pp_hole*np_local
-       write(*,*)'pp_hole=',ceiling(pp_hole)       
-       x_hole(:)=xv(1:3,ceiling(pp_hole))
-       write(*,*) 'x_hole= ',x_hole      
-       xv(1,ceiling(pp_hole)) = -1.000
-       write(*,*) 'x_delete= ',xv(1:3,ceiling(pp_hole))            
-       write(*,*) 'np_local before =', np_local
+       if (rank==0)then
+          write(*,*) 'Largest halo_mean =',halo_x_mean(:,2)
+          write(*,*) 'with mass =',halo_imass(2), 'out of',halo_imass(1:20)              
+          !x_hole = ceiling(halo_x_mean(:,2)/mesh_scale)            
+          x_hole = (/10.0,14.0,15.0/)            
+          write(*,*) 'coarse coordinate of x_hole = ',int(x_hole)     
+          pp_hole = hoc(int(x_hole(1)),int(x_hole(2)),int(x_hole(3)))       
+          write(*,*) 'hoc =',pp_hole      
+          x_hole(:) = xv(1:3,pp_hole) 
+
+          !******************************************
+          !! RANDOM HOLE
+          !******************************************
+          !call random_number(pp_hole)
+          !write(*,*)'pp_hole=',pp_hole
+          !pp_hole = pp_hole*np_local
+          !if(pp_hole < 1) pp_hole = pp_hole*np_local
+          !write(*,*)'pp_hole=',ceiling(pp_hole)       
+          !x_hole(:)=xv(1:3,ceiling(pp_hole))
+          !******************************************
+
+
+          write(*,*) 'x_hole= ',x_hole      
+          xv(1,ceiling(pp_hole)) = -1.000
+          write(*,*) 'x_delete= ',xv(1:3,ceiling(pp_hole))            
+          write(*,*) 'np_local before =', np_local
+       endif
+
        call delete_particles
-       write(*,*) 'np_local after =', np_local
+       if (rank==0) write(*,*) 'np_local after =', np_local
        
        ! must associate initial velocity with the new order of particle
        ! after deleting one
-       dv(:,ceiling(pp_hole)) = dv(:,np_local+1)
+       if (rank==0)dv(:,ceiling(pp_hole)) = dv(:,np_local+1)
 
        ! 6 Compute the force again
        call particle_mesh       
@@ -75,9 +102,9 @@
        ! 7 Compute change in velocity
        dv(1:3,:) = dv(1:3,:) - xv(4:6,:)
 
-       do i=1,20
-          write(*,*) 'dv(pp)= ',xv(1:3,i),dv(:,i)
-       enddo
+       !do i=1,20
+       !   write(*,*) 'dv(pp)= ',xv(1:3,i),dv(:,i)
+       !enddo
 
        do i = 1,np_local
 
@@ -110,14 +137,17 @@
           del_F=magF-magF_sim
           frac_err=del_F/magF
           
-          open(41,file='report_force.dat',position = 'append') 
-          write(41,'(6f16.8)') magr, magF_sim, magF, frac_err, &
+
+          write(r_s,'(i5)') rank
+          r_s = adjustl(r_s)
+          ofile = 'report_force'//r_s(1:len_trim(r_s))//'.dat'
+          !open(41,file='report_force.dat',position = 'append') 
+          open(41,file=ofile,position = 'append') 
+          write(41,'(6f18.8)') magr, magF_sim, magF, frac_err, &
                              magF_sim_r,magF_sim_t
           close(41)
  
 
-       enddo
-      
-    endif
+       enddo      
     
   end subroutine report_force 

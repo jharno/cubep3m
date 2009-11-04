@@ -85,6 +85,11 @@ if (rank == 0) write(*,*) 'finished kernel init',t_elapsed(wc_counter)
   if (rank == 0) write(*,*) 'finished updating buffers with initial conditions',t_elapsed(wc_counter)
 #endif
 
+ !if(rank ==0) write(*,*)'Calling init_projection.f90'
+ call link_list
+ call init_projection
+
+
   if (rank == 0) write(*,*) 'starting main loop'
   do 
     call timestep
@@ -157,16 +162,7 @@ if (rank == 0) write(*,*) 'finished kernel init',t_elapsed(wc_counter)
       dt_old = 0.0
       call update_position
 
-      if(superposition_test)then
-         write(*,*) 'Calling report force'
-         call report_force
-         write(*,*) 'Called report force'       
-         write(*,*) '*** Ending simulation here ***'
-         stop
-      endif
-
-
-      dt = 0.0
+      !dt = 0.0
 
       if (checkpoint_step) then
         call checkpoint
@@ -191,11 +187,31 @@ if (rank == 0) write(*,*) 'finished kernel init',t_elapsed(wc_counter)
           if (rank == 0) write(*,*) 'finished projection',t_elapsed(wc_counter)
         endif
 
+        if(superposition_test)then
+           !fine_clumping=0.0
+           !call link_list
+           !call particle_pass
+           !call halofind
+           if(rank==0)write(*,*) 'Calling report force'
+           call report_force
+           if(rank==0)then
+              write(*,*) 'Called report force'       
+              write(*,*) '*** Ending simulation here ***'
+           endif
+              !stop
+              !call  mpi_finalize(ierr)
+              !exit           
+           stop
+        endif
+
+
+
 !! Clean up ghost particles
 
         call delete_particles
 
       endif
+      dt = 0.0
 
     endif
 

@@ -7,7 +7,7 @@
     include 'cubepm.fh'
 
 #ifdef READ_SEED
-    character*60 :: seedfile
+    character(len=max_path) :: seedfile
     integer(4) :: seedsize
     integer(4), allocatable, dimension(:) :: iseed
 #endif

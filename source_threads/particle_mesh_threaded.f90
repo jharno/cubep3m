@@ -371,14 +371,15 @@
          if (i < cic_fine_l(1,thread) .or. i > cic_fine_h(1,thread) .or. &
               j < cic_fine_l(2,thread) .or. j > cic_fine_h(2,thread) .or. &
               k < cic_fine_l(3,thread) .or. k > cic_fine_h(3,thread)) then
-            !         !write (*,*) 'PARTICLE NOT IN CURRENT TILE',xv(:,pp) 
+
+            !write (*,*) 'PARTICLE NOT IN CURRENT TILE RANGE',xv(:,pp) 
             np_tile_buf=np_tile_buf+1
             !         goto 94
             !cycle
          else
-            !ll_fine(pp,thread) = hoc_fine(i-cic_fine_l(1,thread)+1, j-cic_fine_l(2,thread)+1, k-cic_fine_l(3,thread)+1,thread)
-            hoc_fine(i-cic_fine_l(1,thread)+1, j-cic_fine_l(2,thread)+1, k-cic_fine_l(3,thread)+1,thread)=pp
             ll_fine(pp,thread) = hoc_fine(i-cic_fine_l(1,thread)+1, j-cic_fine_l(2,thread)+1, k-cic_fine_l(3,thread)+1,thread)
+            hoc_fine(i-cic_fine_l(1,thread)+1, j-cic_fine_l(2,thread)+1, k-cic_fine_l(3,thread)+1,thread)=pp
+            !ll_fine(pp,thread) = hoc_fine(i-cic_fine_l(1,thread)+1, j-cic_fine_l(2,thread)+1, k-cic_fine_l(3,thread)+1,thread)
             !hoc_fine(i-cic_fine_l(1,thread)+1, j-cic_fine_l(2,thread)+1, k-cic_fine_l(3,thread)+1)=pp
             
             !write(*,*)'hoc_fine(',i,j,k,thread,')= ',hoc_fine(i-cic_fine_l(1,thread)+1, j-cic_fine_l(2,thread)+1, k-cic_fine_l(3,thread)+1,thread)
@@ -481,22 +482,36 @@
                            !pause
                            
                            pp2 = hoc_fine(ip,jp,kp,thread) 
-                           if(pp2 == 0) cycle 
-                           
+                           if(pp2 == 0) cycle                                                     
+                              
+ 
 #ifdef DEBUG_PP_EXT
-                           write(*,*) 'Found a pair with sep :',ip-i,jp-j,kp-k,'on thread', thread
+                           write(*,*) 'Found a pair of cells with sep :',ip-i,jp-j,kp-k,'on thread', thread
                            write(*,*) 'at position (i,j,k)=',i,j,k
                            write(*,*) 'on tile :',tile
                            write(*,*) 'with hoc_fine:', pp1, pp2
-                           write(*,*) 'xv1=',xv(:3,pp1)
-                           write(*,*) 'xv2=',xv(:3,pp2)
+                           write(*,*) 'xv(hoc1)=',xv(:3,pp1)
+                           write(*,*) 'xv(hoc2)=',xv(:3,pp2)
+                           write(*,*) 'll_fine=',ll_fine(1:20,thread)
                            !pause
                            
 #endif
+			   n_pairs = 0
+			   do
+			      if(pp1==0)exit
+				 do 
+				    if(pp2==0)exit
+
                            n_pairs = n_pairs+1
                            
+
                            sep = xv(:3,pp1) - xv(:3,pp2)
                            rmag=sqrt(sep(1)*sep(1)+sep(2)*sep(2)+sep(3)*sep(3))
+
+			   !write(*,*) 'n_pairs =',n_pairs
+			   !write(*,*) 'sep =',sep
+			   !write(*,*) 'rmag =',rmag
+
                            if (rmag>rsoft) then
                               if(rmag>real(nf_cutoff)+sqrt(3.0))then
                                  force_pp=mass_p*(sep/(rmag*pp_bias)**3)
@@ -527,8 +542,17 @@
                               endif
                            endif
                            
-                           
-                           
+
+				pp2=ll_fine(pp2,thread)                           
+                           	enddo
+				pp2 = hoc_fine(ip,jp,kp,thread)
+				pp1=ll_fine(pp1,thread)
+				enddo
+#ifdef DEBUG_PP_EXT
+                                write(*,*) 'n_pairs in that cell couple =',n_pairs
+#endif
+				! Restore pp1 value for the next pp2 iteration
+				pp1 = hoc_fine(i,j,k,thread)
                         enddo
                      enddo
                   enddo
@@ -542,7 +566,7 @@
       
 
 #ifdef DEBUG_PP_EXT
-      write(*,*) 'pp_ext_force_max(',thread,') =', pp_ext_force_max(thread),'n_pairs =', n_pairs
+      write(*,*) 'pp_ext_force_max(',thread,') =', pp_ext_force_max(thread)!,'n_pairs =', n_pairs
 #endif
       
 #endif

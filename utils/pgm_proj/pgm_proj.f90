@@ -19,7 +19,9 @@ character(len=*),parameter :: opath=output_path
 
 !list of redshift to calculate pgms at (from cubepm.par)
 
-character(len=*),parameter :: projections=cubepm_root//'input/projections' 
+!character(len=*),parameter :: projections=cubepm_root//'input/projections'
+!character(len=*),parameter :: projections=cubepm_root//'input/projections_Lensing' 
+character(len=*),parameter :: projections=cubepm_root//'input/projections_test'
 
 integer(4),parameter :: max_input=100
 character(len=max_input) :: ofile,ifile

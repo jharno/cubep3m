@@ -191,7 +191,7 @@
         t=t+dt
         a=a+da
 
-      else ! cosmo
+      else ! not cosmo
    
         a = 1.0
         a_mid = a
@@ -241,6 +241,14 @@
 
     real(4) :: a0,dt0,dt_x,da1,da2
     real(8) :: a_x,adot,addot,atdot,arkm,a3rlm,omHsq
+    real(8), parameter :: e = 2.718281828459046
+
+
+#ifdef Chaplygin
+    call Chaplygin(a0,dt0,da1,da2)
+    return
+    write(*,*) '***** IF I SEE THIS, SOMETHING IS WRONG!! *****'
+#endif
 
     !! Expand Friedman equation to third order and integrate
     dt_x=dt0/2
@@ -248,25 +256,81 @@
     omHsq=4.0/9.0
 !    a3rlm=a_x**3*omega_l/omega_m
     a3rlm=a_x**(-3*wde)*omega_l/omega_m
+!    a3rlm=a_x**(-3*wde - 3*w_a)*(omega_l/omega_m)*e**(3*w_a*(a_x - 1))
     arkm=a_x*(1.0-omega_m-omega_l)/omega_m
+
     adot=sqrt(omHsq*a_x**3*(1.0+arkm+a3rlm))
 !    addot=a_x**2*omHsq*(1.5+2.0*arkm+3.0*a3rlm)
     addot=a_x**2*omHsq*(1.5+2.0*arkm+1.5*(1.0-wde)*a3rlm)
+!    addot=a_x**2*omHsq*(1.5+2.0*arkm+1.5*(1.0-wde + w_a*(a_x - 1))*a3rlm)
 !    atdot=a_x*adot*omHsq*(3.0+6.0*arkm+15.0*a3rlm)
     atdot=a_x*adot*omHsq*(3.0+6.0*arkm+1.5*(2.0-3.0*wde)*(1.0-wde)*a3rlm)
+!    atdot=a_x*adot*omHsq*(3.0+6.0*arkm+1.5*(3*w_a**2*a_x**2 + 6*w_a*(1-wde-w_a)+ (2.0-3.0*(wde+w_a))*(1.0-(wde+w_a)))*a3rlm)
+
     da1=adot*dt_x+(addot*dt_x**2)/2.0+(atdot*dt_x**3)/6.0
 
     a_x=a0+da1
     omHsq=4.0/9.0
 !    a3rlm=a_x**3*omega_l/omega_m
     a3rlm=a_x**(-3*wde)*omega_l/omega_m
+!    a3rlm=a_x**(-3*wde - 3*w_a)*(omega_l/omega_m)*e**(3*w_a*(a_x - 1))
     arkm=a_x*(1.0-omega_m-omega_l)/omega_m
+
     adot=sqrt(omHsq*a_x**3*(1.0+arkm+a3rlm))
 !    addot=a_x**2*omHsq*(1.5+2.0*arkm+3.0*a3rlm)
     addot=a_x**2*omHsq*(1.5+2.0*arkm+1.5*(1.0-wde)*a3rlm)
+!    addot=a_x**2*omHsq*(1.5+2.0*arkm+1.5*(1.0-wde + w_a*(a_x - 1))*a3rlm)
 !    atdot=a_x*adot*omHsq*(3.0+6.0*arkm+15.0*a3rlm)
     atdot=a_x*adot*omHsq*(3.0+6.0*arkm+1.5*(2.0-3.0*wde)*(1.0-wde)*a3rlm)
+!    atdot=a_x*adot*omHsq*(3.0+6.0*arkm+1.5*(3*w_a**2*a_x**2 + 6*w_a*(1-wde-w_a)+ (2.0-3.0*(wde+w_a))*(1.0-(wde+w_a)))*a3rlm)
+
     da2=adot*dt_x+(addot*dt_x**2)/2.0+(atdot*dt_x**3)/6.0
 
   end subroutine expansion
+
+!! Added Equation of State of Chaplygin gas:: Joachim Harnois-Deraps -- jharno@cita.utoronto.ca
+  subroutine Chaplygin(a0,dt0,da1,da2)
+    implicit none
+
+    include 'cubepm.par'
+
+    real(4) :: a0,dt0,dt_x,da1,da2
+    real(8) :: a_x,adot,addot,atdot,arkm,omHsq, a3rchm,G_ch
+
+
+    !! Expand Friedman equation to third order and integrate
+    dt_x=dt0/2
+    a_x=a0
+    omHsq=4.0/9.0
+
+    a3rchm=a_x**(-3)*omega_ch/omega_m
+    arkm=a_x*(1.0-omega_m-omega_ch)/omega_m
+    G_ch = A_ch + (1.0-A_ch)*a_x**(-3.0-3.0*alpha_ch)
+
+    adot=sqrt(omHsq*a_x**3*(1.0 + arkm + a3rchm*(G_ch)**(1.0/(1.0+alpha_ch))))    
+    addot=a_x**2*omHsq*(1.5 + 2.0*arkm + 3.0*a3rchm*A_ch*(G_ch)**(-alpha_ch/(1.0+alpha_ch)))
+    atdot=a_x*adot*omHsq*(3.0 + 6.0*arkm +3.0*a3rchm*( G_ch)**(1.0/(1.0+alpha_ch) - 2.0)*(5.0*A_ch**2 + 3.0*A_ch*(1.0-A_ch)*a_x**(-3.0-3.0*alpha_ch)*(2.0+alpha_ch/2.0) + (1.0 - A_ch)**2*a_x**(-6.0-6.0*alpha_ch) ))
+
+
+    da1=adot*dt_x+(addot*dt_x**2)/2.0+(atdot*dt_x**3)/6.0
+
+    a_x=a0+da1
+    omHsq=4.0/9.0
+
+
+    adot=sqrt(omHsq*a_x**3*(1.0 + arkm + a3rchm*(G_ch)**(1.0/(1.0+alpha_ch))))    
+    addot=a_x**2*omHsq*(1.5 + 2.0*arkm + 3.0*a3rchm*A_ch*(G_ch)**(-alpha_ch/(1.0+alpha_ch)))
+    atdot=a_x*adot*omHsq*(3.0 + 6.0*arkm +3.0*a3rchm*( G_ch)**(1.0/(1.0+alpha_ch) - 2.0)*(5.0*A_ch**2 + 3.0*A_ch*(1.0-A_ch)*a_x**(-3.0-3.0*alpha_ch)*(2.0+alpha_ch/2.0) + (1.0 - A_ch)**2*a_x**(-6.0-6.0*alpha_ch) ))
+
+    da2=adot*dt_x+(addot*dt_x**2)/2.0+(atdot*dt_x**3)/6.0
+
+#ifdef debug_Chalpygin
+    write(*,*) 'Called Chaplygin expansion:'
+    write(*,*) 'with A_ch =',A_ch, 'alpha_ch =',alpha_ch
+    write(*,*)'a_init =',a0, 'dt =',dt0
+    write(*,*)'da1 =',da1, 'da2 =',da2
+#endif
+
+
+  end subroutine Chaplygin
 

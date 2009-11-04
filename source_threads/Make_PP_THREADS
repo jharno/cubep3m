@@ -7,13 +7,13 @@ FFTWINC=$(MCKENZIE_FFTW_INC_PATH) #/home/merz/lib/fftw-2.1.5_intel8/include
 
 LDLIBS= -lsrfftw_mpi -lsrfftw -lsfftw_mpi -lsfftw -lm -ldl
 
-FFLAGS=-shared-intel -fpp -g -CB -O3 -fpic -xT -DDIAG -DBINARY -DNGP -DPPINT -DOPENMP  -DMPI_TIME  -DLRCKCORR -DNGPH -DPID_FLAG  #-DDISP_MESH #-DPP_EXT #-DREAD_SEED #-DDISP_MESH -DPID_FLAG #-DDEBUG 
+FFLAGS=-shared-intel -fpp -g -CB -O3 -fpic -xT -DDIAG -DBINARY -DNGP -DPPINT -DOPENMP  -DMPI_TIME  -DLRCKCORR -DNGPH -DDISP_MESH #-DPP_EXT #-DDEBUG_PP_EXT #-DREAD_SEED #-DDISP_MESH -DPID_FLAG #-DDEBUG 
 #FFLAGS=-dyncom "divar,ivar,rvar,C2RAY_HALO,lvar" -fpp -g -CB -O3 -fpic -xT -DDIAG -DBINARY -DNGP -DPPINT -DDISP_MESH -DMPI_TIME #-DDEBUG 
 #-DSCALED_IC #-DDEBUG_VEL -fpe3 -check bounds -DDEBUG #-DMHD #-check bounds -DDEBUG #-DDEBUG_LOW #-DDEBUG_VEL -DDEBUG_CCIC -DDEBUG_RHOC -openmp -DDEBUG_LOW
 #FFLAGS=-fpp -g -O0 -CB -DDIAG -DBINARY -DNGP -DPPINT -DDISP_MESH -DMPI_TIME -DDEBUG 
-#OPTIONAL FLAGS :: -DMHD -DDEBUG_CCIC -DDEBUG_CRHO -DDEBUG_RHOC -DPOINTSRC ##-DBFTEST -DXDRIFT -DPID_FLAG -DPP_EXT -DREAD_SEED -DDEBUG_PP_EXT
+#OPTIONAL FLAGS :: -DMHD -DDEBUG_CCIC -DDEBUG_CRHO -DDEBUG_RHOC -DPOINTSRC ##-DBFTEST -DXDRIFT -DPID_FLAG -DPP_EXT -DREAD_SEED -DDEBUG_PP_EXT -DChaplygin
 
-OBJS=   checkpoint.o coarse_cic_mass.o coarse_cic_mass_buffer.o coarse_force.o coarse_force_buffer.o coarse_mass.o coarse_max_dt.o coarse_mesh.o coarse_power.o coarse_velocity.o cubepm.o delete_particles.o fftw3ds.o fine_cic_mass.o fine_cic_mass_buffer.o fine_mesh.o fine_ngp_mass.o fine_velocity.o halofind.o fftw2.o kernel_initialization.o link_list.o mpi_initialization.o particle_initialization.o particle_mesh_threaded.o particle_pass.o projection.o report_pair.o report_force.o set_pair.o indexedsort.o timers.o timestep.o update_position.o variable_initialization.o 
+OBJS=   checkpoint.o coarse_cic_mass.o coarse_cic_mass_buffer.o coarse_force.o coarse_force_buffer.o coarse_mass.o coarse_max_dt.o coarse_mesh.o coarse_power.o coarse_velocity.o cubepm.o delete_particles.o fftw3ds.o fine_cic_mass.o fine_cic_mass_buffer.o fine_mesh.o fine_ngp_mass.o fine_velocity.o halofind.o fftw2.o init_projection.o kernel_initialization.o link_list.o mpi_initialization.o particle_initialization.o particle_mesh_threaded.o particle_pass.o projection.o report_pair.o report_force.o set_pair.o indexedsort.o timers.o timestep.o update_position.o variable_initialization.o 
 
 run: cubep3m
 
@@ -86,6 +86,9 @@ halofind_new.o: halofind_new.f90
 fftw2.o: fftw2.f90
 	$(FC) $(FFLAGS) -I$(FFTWINC) -c $<
 
+init_projection.o: init_projection.f90
+	$(FC) $(FFLAGS) -c $<
+
 kernel_initialization.o: kernel_initialization.f90
 	$(FC) $(FFLAGS) -c $<
 
@@ -134,5 +137,9 @@ variable_initialization.o: variable_initialization.f90
 clean:
 	rm -f *.o *.pc cubep3m 
 
-tar:
-	tar -cvjf cubep3m.tar.bz2  *.par *.fh *.f90 Make_PP_THREADS
+tar_source:
+	tar -cvjf source_threads.tar.bz2  *.par *.fh *.f90 *.i Make_PP_THREADS
+
+# use make clean before!!!
+tar_code:
+	tar -cvjf cubep3m.tar.bz2  -recursive ../../*
