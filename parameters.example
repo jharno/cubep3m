@@ -41,6 +41,10 @@ real(4),      parameter :: omega_l        = 0.76
 real(4),      parameter :: omega_m        = 1.0 - omega_l
 real(4),      parameter :: omega_b        = 0.04 
 !real(4),      parameter :: omega_b        = omega_m
+real(4),      parameter :: omega_ch       = 0.7 ! To use for Chaplygyn gas expansion.
+real(4),      parameter :: bias           = 1 
+real(4),      parameter :: power_index    = 2.0 ! 1.0,1.5 and 2.0 for power_law transfer function.
+                                                ! use with omega_l = 0.0
 
 ! Fine mesh force cut-off in fine mesh cells (determined by kernel)
 integer(4),   parameter :: nf_cutoff      = 16
