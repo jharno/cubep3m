@@ -123,9 +123,9 @@
     call mpi_irecv(recv_buf,nppx*6,mpi_real,cart_neighbor(5), &
                    tag,mpi_comm_world,rrequest,rierr)
 #ifdef PID_FLAG
-    call mpi_isend(send_buf_PID,np_buf,mpi_double_precision,cart_neighbor(6), &
+    call mpi_isend(send_buf_PID,np_buf,MPI_integer8,cart_neighbor(6), &
          tag,mpi_comm_world,srequest,sierr)
-    call mpi_irecv(recv_buf_PID,nppx,mpi_double_precision,cart_neighbor(5), &
+    call mpi_irecv(recv_buf_PID,nppx,MPI_integer8,cart_neighbor(5), &
          tag,mpi_comm_world,rrequest,rierr)
 #endif
 
@@ -206,9 +206,9 @@
     call mpi_irecv(recv_buf,npmx*6,mpi_real,cart_neighbor(6), &
                    tag,mpi_comm_world,rrequest,rierr)
 #ifdef PID_FLAG
-    call mpi_isend(send_buf_PID,np_buf,mpi_double_precision,cart_neighbor(5), &
+    call mpi_isend(send_buf_PID,np_buf,MPI_integer8,cart_neighbor(5), &
          tag,mpi_comm_world,srequest,sierr)
-    call mpi_irecv(recv_buf_PID,npmx,mpi_double_precision,cart_neighbor(6), &
+    call mpi_irecv(recv_buf_PID,npmx,MPI_integer8,cart_neighbor(6), &
          tag,mpi_comm_world,rrequest,rierr)
 #endif
     
@@ -327,9 +327,9 @@
     call mpi_irecv(recv_buf,npmy*6,mpi_real,cart_neighbor(4), &
                    tag,mpi_comm_world,rrequest,rierr)
 #ifdef PID_FLAG
-    call mpi_isend(send_buf_PID,np_buf,mpi_double_precision,cart_neighbor(3), &
+    call mpi_isend(send_buf_PID,np_buf,MPI_integer8,cart_neighbor(3), &
          tag,mpi_comm_world,srequest,sierr)
-    call mpi_irecv(recv_buf_PID,npmy,mpi_double_precision,cart_neighbor(4), &
+    call mpi_irecv(recv_buf_PID,npmy,MPI_integer8,cart_neighbor(4), &
          tag,mpi_comm_world,rrequest,rierr)
 #endif
 
@@ -417,9 +417,9 @@
     call mpi_irecv(recv_buf,nppy*6,mpi_real,cart_neighbor(3), &
                    tag,mpi_comm_world,rrequest,rierr)
 #ifdef PID_FLAG
-    call mpi_isend(send_buf_PID,np_buf,mpi_double_precision,cart_neighbor(4), &
+    call mpi_isend(send_buf_PID,np_buf,MPI_integer8,cart_neighbor(4), &
          tag,mpi_comm_world,srequest,sierr)
-    call mpi_irecv(recv_buf_PID,nppy,mpi_double_precision,cart_neighbor(3), &
+    call mpi_irecv(recv_buf_PID,nppy,MPI_integer8,cart_neighbor(3), &
          tag,mpi_comm_world,rrequest,rierr)
 #endif
 
@@ -523,9 +523,9 @@
     call mpi_irecv(recv_buf,nppz*6,mpi_real,cart_neighbor(1), &
                    tag,mpi_comm_world,rrequest,rierr)
 #ifdef PID_FLAG
-    call mpi_isend(send_buf_PID,np_buf,mpi_double_precision,cart_neighbor(2), &
+    call mpi_isend(send_buf_PID,np_buf,MPI_integer8,cart_neighbor(2), &
          tag,mpi_comm_world,srequest,sierr)
-    call mpi_irecv(recv_buf_PID,nppz,mpi_double_precision,cart_neighbor(1), &
+    call mpi_irecv(recv_buf_PID,nppz,MPI_integer8,cart_neighbor(1), &
          tag,mpi_comm_world,rrequest,rierr)
 #endif
 
@@ -599,9 +599,9 @@
     call mpi_irecv(recv_buf,npmz*6,mpi_real,cart_neighbor(2), &
                    tag,mpi_comm_world,rrequest,rierr)
 #ifdef PID_FLAG
-    call mpi_isend(send_buf_PID,np_buf,mpi_double_precision,cart_neighbor(1), &
+    call mpi_isend(send_buf_PID,np_buf,MPI_integer8,cart_neighbor(1), &
          tag,mpi_comm_world,srequest,sierr)
-    call mpi_irecv(recv_buf_PID,npmz,mpi_double_precision,cart_neighbor(2), &
+    call mpi_irecv(recv_buf_PID,npmz,MPI_integer8,cart_neighbor(2), &
          tag,mpi_comm_world,rrequest,rierr)
 #endif
 
