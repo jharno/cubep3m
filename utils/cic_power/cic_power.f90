@@ -10,10 +10,10 @@ program cic_power
 
   logical, parameter :: correct_kernel=.false.
 
-  !character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints'
+  character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints'
   !character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints_LargePID'!bao_600Mpc'
   !character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints_bao_600Mpc'
-  character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints_UBC_FAR'
+  !character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints_UBC_FAR'
 
   !! nc is the number of cells per box length
   integer, parameter :: hc=nc/2

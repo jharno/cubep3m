@@ -10,8 +10,10 @@ program serial_halo_merge
 
   implicit none
 !  include '/smaug/data/theorie/iliev/cubep3m_threads_largerun/parameters'
-  include '/cita/d/scratch-2week/jharno/workdir/parameters'
-  
+  !include '/cita/d/scratch-2week/jharno/workdir/parameters'
+  include '../../parameters'
+
+
   character(len=*),parameter :: halofinds ='/cita/d/scratch-2week/jharno/workdir/input/halofinds' 
   character(len=*),parameter :: serial_output_path=output_path !'/cita/d/scratch-2week/jharno/cubep3m_new_V1/out/RUN-1/' !halo_data/'
   integer, parameter :: nn=nodes_dim**3 !! number of nodes total

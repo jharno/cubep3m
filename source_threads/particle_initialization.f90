@@ -171,13 +171,16 @@
 
 #ifdef PID_FLAG
 
-    call delete_particles
+
+    write(*,*) 'np_local before delete', np_local, 'rank =', rank
+    !call delete_particles
 
     do i=1,np_local
        ! Assign a uniqe ID to particles in physical volumes.        
        ! This assumes that no more than 1 particle is present in each cell initially
        ! The numerical factor (0.5 now) should match (particle to fine grid) ratio (see dist_init.f90)
-       PID(i) = int(i + (rank)*(0.5*nc/nodes_dim)**3,kind=8)
+       !PID(i) = int(i + (rank)*(0.5*nc/nodes_dim)**3,kind=8)
+       PID(i) = int(i,kind=8) + int(rank*np_local,kind=8)
 #ifdef DEBUG_PID_INTENSE
        !write(*,*) i,'PID=', PID(i), 'xv', xv(1:3,i) ! useful to discover the grids!!!
        !pause
@@ -192,9 +195,35 @@
 
     if(rank==0)write(*,*) 'PID initialized' 
     
+    ! Write initial PIDs to a file:
+
+    fstat = 0
+
+#ifdef BINARY
+      open(unit=21,file=ic_path//'PID'//rank_s(1:len_trim(rank_s))//'.ic',form='binary',iostat=fstat)
+#else
+      open(unit=21,file=ic_path//'PID'//rank_s(1:len_trim(rank_s))//'.ic',form='unformatted',iostat=fstat)
+#endif
+      if (fstat /= 0) then
+         write(*,*) 'error writing initial PID'
+         write(*,*) 'rank',rank,'file:',ic_path//'PID'//rank_s(1:len_trim(rank_s))//'.ic'
+         call mpi_abort(mpi_comm_world,ierr,ierr)
+      endif
+      write(21) np_local
+      write(21) PID(:np_local)
+      close(21)
+      !stop
 
 #endif
     
+
+    ! ensure that particles start in physical volume
+    call link_list
+    call particle_pass
+    call delete_particles
+    write(*,*) 'np_local after delete', np_local, 'rank =', rank
+
+
 
 !! calculate total number of particles and particle mass
 
