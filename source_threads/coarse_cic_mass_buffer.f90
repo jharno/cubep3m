@@ -1,5 +1,6 @@
 !! add mass to coarse mesh density along nodal boundry
   subroutine coarse_cic_mass_boundry(pp)
+    use omp_lib
     implicit none
 
 #ifdef PPINT

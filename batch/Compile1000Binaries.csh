@@ -19,16 +19,16 @@ module load fftw
 #set MaxRun = '30'
 #set Version = '1'
 set MinVersion = '1'
-set MaxVersion = '200'
+set MaxVersion = '1'
 
 
-sed '3 s/Run-1/Run-'"$MinVersion"'/' ../parameters -i  # Comment to run on same seeds
-sed '7 s/Run-1/Run-'"$MinVersion"'/' ../parameters -i 
-sed '11 s/Run-1/Run-'"$MinVersion"'/' ../parameters -i 
+#sed '3 s/Run-1/Run-'"$MinVersion"'/' ../parameters -i  # Comment to run on same seeds
+#sed '7 s/Run-1/Run-'"$MinVersion"'/' ../parameters -i 
+#sed '11 s/Run-1/Run-'"$MinVersion"'/' ../parameters -i 
 
-#sed '3 s/RUN-1/RUN-'"$Run"'/' ../parameters -i  # Comment to run on same seeds
-#sed '7 s/RUN-1/RUN-'"$Run"'/' ../parameters -i 
-#sed '11 s/RUN-1/RUN-'"$Run"'/' ../parameters -i 
+sed '3 s/LOS1/LOS'"$MinVersion"'/' ../parameters -i  # Comment to run on same seeds
+sed '7 s/LOS1/LOS'"$MinVersion"'/' ../parameters -i 
+sed '11 s/LOS1/LOS'"$MinVersion"'/' ../parameters -i 
 
 
 #while($Run <= $MaxRun)
@@ -75,9 +75,12 @@ sed '11 s/Run-1/Run-'"$MinVersion"'/' ../parameters -i
 
 
 	grep V ../parameters
-	sed '3 s/Run-'"$Version"'/Run-'"$NextVersion"'/' ../parameters -i  # Comment to run on same seeds
-	sed '7 s/Run-'"$Version"'/Run-'"$NextVersion"'/' ../parameters -i 
-	sed '11 s/Run-'"$Version"'/Run-'"$NextVersion"'/' ../parameters -i 
+	#sed '3 s/Run-'"$Version"'/Run-'"$NextVersion"'/' ../parameters -i  
+	#sed '7 s/Run-'"$Version"'/Run-'"$NextVersion"'/' ../parameters -i 
+	#sed '11 s/Run-'"$Version"'/Run-'"$NextVersion"'/' ../parameters -i 
+	sed '3 s/LOS'"$Version"'/LOS'"$NextVersion"'/' ../parameters -i  
+	sed '7 s/LOS'"$Version"'/LOS'"$NextVersion"'/' ../parameters -i 
+	sed '11 s/LOS'"$Version"'/LOS'"$NextVersion"'/' ../parameters -i 
 
 	@ Version = ($Version + 1)
 
@@ -95,10 +98,10 @@ sed '11 s/Run-1/Run-'"$MinVersion"'/' ../parameters -i
 @ NextVersion = (1)    
 #@ NextRun = (1)    
 
-sed '3 s/Run-'"$Version"'/Run-'"$NextVersion"'/' ../parameters -i  # Comment to run on same seeds
-sed '7 s/Run-'"$Version"'/Run-'"$NextVersion"'/' ../parameters -i 
-sed '11 s/Run-'"$Version"'/Run-'"$NextVersion"'/' ../parameters -i 
+#sed '3 s/Run-'"$Version"'/Run-'"$NextVersion"'/' ../parameters -i  # Comment to run on same seeds
+#sed '7 s/Run-'"$Version"'/Run-'"$NextVersion"'/' ../parameters -i 
+#sed '11 s/Run-'"$Version"'/Run-'"$NextVersion"'/' ../parameters -i 
 
-#sed '3 s/RUN-'"$Run"'/RUN-'"$NextRun"'/' ../parameters -i  # Comment to run on same seeds
-#sed '7 s/RUN-'"$Run"'/RUN-'"$NextRun"'/' ../parameters -i 
-#sed '11 s/RUN-'"$Run"'/RUN-'"$NextRun"'/' ../parameters -i 
+sed '3 s/LOS'"$Version"'/LOS'"$NextVersion"'/' ../parameters -i  # Comment to run on same seeds
+sed '7 s/LOS'"$Version"'/LOS'"$NextVersion"'/' ../parameters -i 
+sed '11 s/LOS'"$Version"'/LOS'"$NextVersion"'/' ../parameters -i 

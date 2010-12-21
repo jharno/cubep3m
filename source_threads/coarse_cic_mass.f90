@@ -1,5 +1,6 @@
 !! add mass to coarse mesh density
   subroutine coarse_cic_mass(pp)
+    use omp_lib
     implicit none
 
 #ifdef PPINT

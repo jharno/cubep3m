@@ -4,7 +4,7 @@ include '../parameters'
 
 !! files / paths 
 
-character(*), parameter :: checkpoints=cubepm_root//'input/checkpoints'!_Lensing'
+character(*), parameter :: checkpoints=cubepm_root//'input/checkpoints'
 character(*), parameter :: projections=cubepm_root//'input/projections'!_Lensing'
 character(*), parameter :: halofinds=  cubepm_root//'input/halofinds'!_Lensing'
 character(*), parameter :: kernel_path=cubepm_root//'kernels/'
@@ -45,8 +45,8 @@ integer(4), parameter   :: max_nts = 4000
 
 !for restart:
 
-logical, parameter	:: restart_ic =  .false.!.true.
-integer(4), parameter   :: restart_checkpoint = 5 ! line number in input/checkpoint 
+logical, parameter	:: restart_ic =  .false.
+integer(4), parameter   :: restart_checkpoint = 1 ! line number in input/checkpoint 
 
 ! other internal initial conditions for testing, if all ic flags are
 ! set .false. cubepm assumes it is starting with initial conditions
