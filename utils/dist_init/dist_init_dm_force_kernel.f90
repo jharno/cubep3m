@@ -1133,14 +1133,16 @@ contains
              !xvp(1)=dis(1)+(2*i1-1.5)
              !xvp(2)=dis(2)+(2*j1-1.5)
              !xvp(3)=dis(3)+(2*k1-1.5)
+
+             !factor of 2.0 comes going from new_nc (= nc/2) to nc.
              xvp(1)=2.*(dis(1)+(i1-0.5))
              xvp(2)=2.*(dis(2)+(j1-0.5))
              xvp(3)=2.*(dis(3)+(k1-0.5))
 
  
-             xvp(4)=dis(1)*vf
-             xvp(5)=dis(2)*vf
-             xvp(6)=dis(3)*vf
+             xvp(4)=2.*dis(1)*vf
+             xvp(5)=2.*dis(2)*vf
+             xvp(6)=2.*dis(3)*vf
 !             if(i.le.10 .and. j.eq.1 .and. k.eq.1) write(*,*)'xv' ,xvp(1:3)
              write(11) xvp
           enddo
