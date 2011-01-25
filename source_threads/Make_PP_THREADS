@@ -2,8 +2,8 @@ SHELL = /bin/sh
 
 FC=mpif77
 
-FFTWLIB=$(MCKENZIE_FFTW_LIB_PATH) #/home/merz/lib/fftw-2.1.5_intel8/lib
-FFTWINC=$(MCKENZIE_FFTW_INC_PATH) #/home/merz/lib/fftw-2.1.5_intel8/include
+#FFTWLIB=$(MCKENZIE_FFTW_LIB_PATH) #/home/merz/lib/fftw-2.1.5_intel8/lib
+#FFTWINC=$(MCKENZIE_FFTW_INC_PATH) #/home/merz/lib/fftw-2.1.5_intel8/include
 
 LDLIBS= -lsrfftw_mpi -lsrfftw -lsfftw_mpi -lsfftw -lm -ldl
 
@@ -18,7 +18,7 @@ OBJS=   checkpoint.o coarse_cic_mass.o coarse_cic_mass_buffer.o coarse_force.o c
 run: cubep3m
 
 cubep3m: $(OBJS)
-	$(FC) $(FFLAGS) -openmp  $^ -o $@ -L$(FFTWLIB) $(LDLIBS) 
+	$(FC) $(FFLAGS) -openmp  $^ -o $@  $(LDLIBS)
 
 cubepm.o: cubepm.f90 
 	$(FC) $(FFLAGS) -openmp -c $<  
@@ -57,7 +57,7 @@ delete_particles.o: delete_particles.f90
 	$(FC) $(FFLAGS) -c $<
 
 fftw3ds.o: fftw3ds.f90
-	$(FC) $(FFLAGS) -I$(FFTWINC) -c $<
+	$(FC) $(FFLAGS) -c $<
 
 fine_cic_mass.o: fine_cic_mass.f90
 	$(FC) $(FFLAGS) -c $<
@@ -84,7 +84,7 @@ halofind_new.o: halofind_new.f90
 	$(FC) $(FFLAGS) -c $<
 
 fftw2.o: fftw2.f90
-	$(FC) $(FFLAGS) -I$(FFTWINC) -c $<
+	$(FC) $(FFLAGS) -c $< 
 
 init_projection.o: init_projection.f90
 	$(FC) $(FFLAGS) -c $<

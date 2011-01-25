@@ -12,6 +12,6 @@ cd ../source_threads
 make clean
 #make -j8 -f Make_NOMHD_PP_THREADS
 # this version for threaded  inline
-make  -f Make_PP_THREADS
+make  -f Make_PP_THREADS -j8
 cd ../batch
 #exit 0

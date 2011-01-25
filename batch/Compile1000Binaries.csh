@@ -10,25 +10,25 @@
 
 # Make sure parameters starts at the right output path  
 
-module unload fftw
-module load fftw
+#module unload fftw
+#module load fftw
 
 
 
 #set Run = '1'
 #set MaxRun = '30'
 #set Version = '1'
-set MinVersion = '1'
-set MaxVersion = '1'
+set MinVersion = '28'
+set MaxVersion = '50'
 
 
 #sed '3 s/Run-1/Run-'"$MinVersion"'/' ../parameters -i  # Comment to run on same seeds
 #sed '7 s/Run-1/Run-'"$MinVersion"'/' ../parameters -i 
 #sed '11 s/Run-1/Run-'"$MinVersion"'/' ../parameters -i 
 
-sed '3 s/LOS1/LOS'"$MinVersion"'/' ../parameters -i  # Comment to run on same seeds
-sed '7 s/LOS1/LOS'"$MinVersion"'/' ../parameters -i 
-sed '11 s/LOS1/LOS'"$MinVersion"'/' ../parameters -i 
+sed '3 s/LBG1/LBG'"$MinVersion"'/' ../parameters -i  # Comment to run on same seeds
+sed '7 s/LBG1/LBG'"$MinVersion"'/' ../parameters -i 
+sed '11 s/LBG1/LBG'"$MinVersion"'/' ../parameters -i 
 
 
 #while($Run <= $MaxRun)
@@ -51,10 +51,10 @@ sed '11 s/LOS1/LOS'"$MinVersion"'/' ../parameters -i
 
 	#source COMPILE.csh	
 	source COMPILE_cubep3m.csh
-	source COMPILE_cic_power.csh
+	#source COMPILE_cic_power.csh
 	source COMPILE_dist_init.csh
 	#source COMPILE_pgm_proj.csh
-	source COMPILE_halo_power.csh
+	#source COMPILE_halo_power.csh
 
 	#cd ../utils/halo_merge
 	#rm -f halo_merge
@@ -64,10 +64,10 @@ sed '11 s/LOS1/LOS'"$MinVersion"'/' ../parameters -i
 	mv ../utils/dist_init/dist_init ../utils/dist_init/dist_init_$suffix
 	#mv ../utils/halo_merge/s_halo_merge ../utils/halo_merge/s_halo_merge_$suffix	
 	#mv ../utils/cic_power/cic_power ../utils/cic_power/cic_power_$suffix
-        mv ../utils/cic_power/ngp_power ../utils/cic_power/ngp_power_$suffix
+        #mv ../utils/cic_power/ngp_power ../utils/cic_power/ngp_power_$suffix
 	#mv ../utils/cic_power/cic_init_power ../utils/cic_power/cic_init_power_$suffix
-	mv ../utils/cic_power/ngp_init_power ../utils/cic_power/ngp_init_power_$suffix
-	mv ../utils/cic_power/halo_power ../utils/cic_power/halo_power_$suffix
+	#mv ../utils/cic_power/ngp_init_power ../utils/cic_power/ngp_init_power_$suffix
+	#mv ../utils/cic_power/halo_power ../utils/cic_power/halo_power_$suffix
 	#cd ../../batch
 
 	#grep pp_range ../source_threads/cubepm.par
@@ -78,9 +78,9 @@ sed '11 s/LOS1/LOS'"$MinVersion"'/' ../parameters -i
 	#sed '3 s/Run-'"$Version"'/Run-'"$NextVersion"'/' ../parameters -i  
 	#sed '7 s/Run-'"$Version"'/Run-'"$NextVersion"'/' ../parameters -i 
 	#sed '11 s/Run-'"$Version"'/Run-'"$NextVersion"'/' ../parameters -i 
-	sed '3 s/LOS'"$Version"'/LOS'"$NextVersion"'/' ../parameters -i  
-	sed '7 s/LOS'"$Version"'/LOS'"$NextVersion"'/' ../parameters -i 
-	sed '11 s/LOS'"$Version"'/LOS'"$NextVersion"'/' ../parameters -i 
+	sed '3 s/LBG'"$Version"'/LBG'"$NextVersion"'/' ../parameters -i  
+	sed '7 s/LBG'"$Version"'/LBG'"$NextVersion"'/' ../parameters -i 
+	sed '11 s/LBG'"$Version"'/LBG'"$NextVersion"'/' ../parameters -i 
 
 	@ Version = ($Version + 1)
 
@@ -102,6 +102,6 @@ sed '11 s/LOS1/LOS'"$MinVersion"'/' ../parameters -i
 #sed '7 s/Run-'"$Version"'/Run-'"$NextVersion"'/' ../parameters -i 
 #sed '11 s/Run-'"$Version"'/Run-'"$NextVersion"'/' ../parameters -i 
 
-sed '3 s/LOS'"$Version"'/LOS'"$NextVersion"'/' ../parameters -i  # Comment to run on same seeds
-sed '7 s/LOS'"$Version"'/LOS'"$NextVersion"'/' ../parameters -i 
-sed '11 s/LOS'"$Version"'/LOS'"$NextVersion"'/' ../parameters -i 
+sed '3 s/LBG'"$Version"'/LBG'"$NextVersion"'/' ../parameters -i  # Comment to run on same seeds
+sed '7 s/LBG'"$Version"'/LBG'"$NextVersion"'/' ../parameters -i 
+sed '11 s/LBG'"$Version"'/LBG'"$NextVersion"'/' ../parameters -i 

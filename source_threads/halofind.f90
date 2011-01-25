@@ -1,6 +1,7 @@
 !! Halofinding subroutine
  
   subroutine halofind 
+    use omp_lib
     implicit none
 
     include 'mpif.h'
@@ -19,20 +20,18 @@
     integer(4), dimension(3,2) :: search_limit
     integer(8) :: imass
     real(4) :: r,radius_calc,v_disp,clump_factor, v_disp_CM
-    real(4), dimension(3) :: x_mean,x2_mean,var_x, v_mean,v2_mean,l,dx,offset, l_CM, v_mean_CM, v2_mean_CM
+    real(4), dimension(3) :: x_mean,x2_mean,var_x, v_mean,v2_mean,l,dx,offset, l_CM, v_mean_CM, v2_mean_CM!, v2_disp_wrt_halo
     real(8) :: cfmassl,cfmassl2,cftmassl,cftmassl2
-    real(4), dimension(3) :: r_wrt_halo,v_wrt_halo, v_mean2_CM
-
-
-
-#ifdef PID_FLAG    
-    integer, parameter :: N_p = 10
+    real(4), dimension(3) :: r_wrt_halo,v_wrt_halo, v2_wrt_halo
+    integer, parameter :: N_p = 50
     real(4), dimension(N_p) :: E
+#ifdef PID_FLAG
     integer(8), dimension(N_p) :: pid_halo
+    real(4), dimension(6,N_p) ::xv_halo
+#endif
 !    real(4), dimension(3) :: r_wrt_halo,v_wrt_halo, v_mean2_CM
     real(4) :: dist,speed, E_tmp
-#endif
-
+    real(4), dimension(6) :: I_ij
 
     offset(1)=cart_coords(3)*nf_physical_node_dim
     offset(2)=cart_coords(2)*nf_physical_node_dim
@@ -350,7 +349,7 @@
        v_mean=0.0
        v2_mean=0.0
        v_wrt_halo=0.0
-       v_mean2_CM=0.0
+       v2_wrt_halo=0.0
        l=0.0
        l_CM=0.0
       do k=search_limit(3,1),search_limit(3,2)
@@ -402,6 +401,9 @@
      l_CM(2)=l(2)-(x_mean(1)*v_mean(3)-x_mean(3)*v_mean(1))
      l_CM(3)=l(3)-(x_mean(2)*v_mean(1)-x_mean(1)*v_mean(2))
      v_disp=sqrt(v2_mean(1)+v2_mean(2)+v2_mean(3))
+     !v_disp_x = sqrt(v2_mean(1))
+     !v_disp_y = sqrt(v2_mean(2))
+     !v_disp_z = sqrt(v2_mean(3))
      var_x=real(imass)/(real(imass-1))*(x2_mean - (x_mean-offset)**2)
      !write(*,*) 'x_mean=',x_mean
      !write(*,*) 'x2_mean=',x2_mean
@@ -413,12 +415,13 @@
      !!      to store in common block arrays, each array should be
      !!      max_maxima in size
 
-#ifdef PID_FLAG
-
      !ii=0
+#ifdef PID_FLAG
      pid_halo=0
+#endif
      E=0
      E_tmp=0
+     I_ij=0
      do k=search_limit(3,1),search_limit(3,2)
         if (k < hoc_nc_l .or. k > hoc_nc_h) then
            print *,'halo analysis out of bounds in z dimension',k
@@ -463,8 +466,14 @@
 
                     r_wrt_halo = xv(:3,pp) - (x_mean - offset)
                     v_wrt_halo = xv(4:,pp) - v_mean
-                    v_mean2_CM = v_mean2_CM + v_wrt_halo(:)**2
+                    v2_wrt_halo = v2_wrt_halo + v_wrt_halo(:)**2
                     dist = sqrt(r_wrt_halo(1)**2 +r_wrt_halo(2)**2 + r_wrt_halo(3)**2)
+                    I_ij(1) = I_ij(1)+r_wrt_halo(1)*r_wrt_halo(1)
+                    I_ij(2) = I_ij(2)+r_wrt_halo(1)*r_wrt_halo(2)
+                    I_ij(3) = I_ij(3)+r_wrt_halo(1)*r_wrt_halo(3)
+                    I_ij(4) = I_ij(4)+r_wrt_halo(2)*r_wrt_halo(2)
+                    I_ij(5) = I_ij(5)+r_wrt_halo(2)*r_wrt_halo(3)
+                    I_ij(6) = I_ij(6)+r_wrt_halo(3)*r_wrt_halo(3)
                     
                     speed = sqrt(v_wrt_halo(1)**2 +v_wrt_halo(2)**2 + v_wrt_halo(3)**2)
                     E_tmp = 0.5*(speed)**2 - halo_mass(hi)*G/dist
@@ -476,11 +485,14 @@
                        if(E_tmp < E(ii))then
                           E(ii+1:N_p) = E(ii:N_p-1)
                           E(ii)=E_tmp
+#ifdef PID_FLAG
                           pid_halo(ii+1:N_p) = pid_halo(ii:N_p-1)
                           pid_halo(ii) = PID(pp)
+                          xv_halo(:,ii) = xv(:,pp)
                           !***debuging
                           !write(*,*) 'Inside E loop, rank=',rank,'pid_halo(ii) =',pid_halo(ii), 'PID(pp)=',PID(pp)
                           !***
+#endif
                           exit
                        endif                       
                     enddo
@@ -496,13 +508,18 @@
      enddo
 
      !write(*,*)'halo = ', hi, 'rank = ', rank,'E = ',E,'pid_halo = ',pid_halo
-     v_mean2_CM(:) = v_mean2_CM(:)/real(imass)
-     v_disp_CM = sqrt(v_mean2_CM(1) + v_mean2_CM(2) + v_mean2_CM(3))
+     v2_wrt_halo(:) = v2_wrt_halo(:)/real(imass)
+     !v_disp_wrt_halo = sqrt(v2_wrt_halo(1) + v2_wrt_halo(2) + v2_wrt_halo(3))
+     !v_disp_wrt_halo(1) = sqrt(v2_wrt_halo(1))
+     !v_disp_wrt_halo(2) = sqrt(v2_wrt_halo(2))
+     !v_disp_wrt_halo(3) = sqrt(v2_wrt_halo(3))
 
-     if (halo_write .and. imass>0 .and. halo_mass(hi)>160) write(12) halo_pos(:,hi),x_mean,v_mean,l_CM,v_disp_CM,radius_calc,halo_mass(hi),imass*mass_p,halo_mass1(hi), var_x, pid_halo
+
+#ifdef PID_FLAG
+     if (halo_write .and. imass>0 .and. halo_mass(hi)>160) write(12) halo_pos(:,hi),x_mean,v_mean,l_CM,v2_wrt_halo,radius_calc,halo_mass(hi),imass*mass_p,halo_mass1(hi), var_x, pid_halo,xv_halo
      
 #else
-     if (halo_write .and. imass>0 .and. halo_mass(hi)>160) write(12) halo_pos(:,hi),x_mean,v_mean,l,v_disp,radius_calc,halo_mass(hi),imass*mass_p,halo_mass1(hi),var_x
+     if (halo_write .and. imass>0 .and. halo_mass(hi)>160) write(12) halo_pos(:,hi),x_mean,v_mean,l_CM,v2_wrt_halo,radius_calc,halo_mass(hi),imass*mass_p,halo_mass1(hi),var_x,I_ij
 #endif
      
      !! these plus nhalo should be passed to C^2Ray for each iteration
@@ -533,6 +550,7 @@
 !-----------------------------------------------------------------------------!
 
   subroutine find_halos(tile)
+    use omp_lib
     implicit none
     include 'cubep3m.fh'
 
@@ -759,6 +777,7 @@
 !! Initialize halo finding arrays
 
   subroutine initialize_halofind
+    use omp_lib
 
     implicit none
     include 'cubep3m.fh'
@@ -766,6 +785,8 @@
 
     integer(4) :: ii, i, j, k, fstat
     real(4) :: r
+    integer(4), allocatable , dimension(:,:) :: idist_tmp
+    allocate(idist_tmp(3,nlist))
 
 ! Loop through a box of length 2*nc_halo_max
 ! if cell is within sphere of radius = box length / 2
@@ -795,7 +816,13 @@
 
     isortdist(:ii)=(/ (i,i=1,ii) /)
     call indexedsort(ii,rdist,isortdist)
-    idist(:,:ii)=idist(:,isortdist(:ii))
+    if(rank==0)write(*,*)'debug flag 1'    
+    !idist(:,:ii)=idist(:,isortdist(:ii))
+    idist_tmp(:,:ii)=idist(:,isortdist(:ii))
+    idist(:,:ii)=idist_tmp(:,:ii)
+    deallocate(idist_tmp)
+
+    if(rank==0)write(*,*)'debug flag 2'
 
 
     if (rank == 0) then
@@ -824,6 +851,7 @@
 
 !! construct coarse mesh density and velocity field 
   subroutine coarse_cic_mass_vel(pp)
+    use omp_lib
     implicit none
 
     include 'cubep3m.fh'
@@ -894,6 +922,7 @@
 
 !! construct coarse mesh density and velocity field along nodal boundry
   subroutine coarse_cic_mass_vel_boundry(pp)
+    use omp_lib
     implicit none
 
     include 'cubep3m.fh'

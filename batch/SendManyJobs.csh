@@ -3,11 +3,11 @@
 set init_firstSim='1'
 set init_lastSim='1'
 set numSims_per_Jobs='1'
-set MAXSIM='2'
+set MAXSIM='50'
 
 set old_firstSim=$init_firstSim
 set old_lastSim=$init_lastSim
-set firstSim='2' #or any number
+set firstSim='8' #or any number
 @ lastSim = ( $firstSim + $numSims_per_Jobs - 1 )
 
 
@@ -18,8 +18,8 @@ while ( $lastSim <= $MAXSIM )
    #sed '14 s/'"$old_firstSim"'/'"$firstSim"'/' cubep3m_loop.pbs -i
    #sed '15 s/'"$old_lastSim"'/'"$lastSim"'/' cubep3m_loop.pbs -i
 
-   sed '14 s/'"$old_firstSim"'/'"$firstSim"'/' cubep3m_loop_LOS.pbs -i 
-   sed '15 s/'"$old_lastSim"'/'"$lastSim"'/' cubep3m_loop_LOS.pbs -i
+   sed '14 s/'"$old_firstSim"'/'"$firstSim"'/' cubep3m_LBG.pbs -i 
+   sed '15 s/'"$old_lastSim"'/'"$lastSim"'/' cubep3m_LBG.pbs -i
 
    #grep MIN cubep3m_loop.pbs 
    #grep MAX cubep3m_loop.pbs 
@@ -27,7 +27,7 @@ while ( $lastSim <= $MAXSIM )
 
 
    #qsub cubep3m_loop.pbs
-   qsub cubep3m_loop_LOS.pbs
+   qsub cubep3m_LBG.pbs
 
    #echo qsubed
 
@@ -42,7 +42,7 @@ end
 #   sed '14 s/'"$old_firstSim"'/'"$init_firstSim"'/' cubep3m_loop.pbs -i
 #   sed '15 s/'"$old_lastSim"'/'"$init_lastSim"'/' cubep3m_loop.pbs -i
 
-   sed '14 s/'"$old_firstSim"'/'"$init_firstSim"'/' cubep3m_loop_LOS.pbs -i
-   sed '15 s/'"$old_lastSim"'/'"$init_lastSim"'/' cubep3m_loop_LOS.pbs -i
+   sed '14 s/'"$old_firstSim"'/'"$init_firstSim"'/' cubep3m_LBG.pbs -i
+   sed '15 s/'"$old_lastSim"'/'"$init_lastSim"'/' cubep3m_LBG.pbs -i
 
 
