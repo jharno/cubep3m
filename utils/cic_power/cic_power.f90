@@ -1079,7 +1079,7 @@ contains
 
   subroutine cicmass
     implicit none
-    real, parameter :: mp=(ncr/np)**3
+    real, parameter :: mp=(ncr/np)**3*(1 - omega_b/omega_m)
 
     integer :: i,i1,i2,j1,j2,k1,k2
     real    :: x,y,z,dx1,dx2,dy1,dy2,dz1,dz2,vf,v(3)
