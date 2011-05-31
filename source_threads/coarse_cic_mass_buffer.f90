@@ -24,8 +24,13 @@
       dx1(:) = i1(:) - x(:)
       dx2(:) = 1.0 - dx1(:)
 
+#ifdef MHD
+      dx1(1) = mass_p * dx1(1) * (1.0 - omega_b/omega_m)
+      dx2(1) = mass_p * dx2(1) * (1.0 - omega_b/omega_m)
+#else
       dx1(1) = mass_p * dx1(1)
       dx2(1) = mass_p * dx2(1)
+#endif
 
 #ifdef DEBUG_CCIC
 !      if (i1(1) == 1 .and. i1(2) == 1 .and. &

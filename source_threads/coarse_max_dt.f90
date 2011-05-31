@@ -29,6 +29,7 @@
       enddo
     enddo
     !$omp end parallel do
+    write(*,*)  'Max coarse force= ', max_force
 
     call mpi_reduce(max_force,dt_c_acc,1,mpi_real,mpi_max,0, &
                     mpi_comm_world,ierr)

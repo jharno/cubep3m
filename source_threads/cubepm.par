@@ -77,8 +77,8 @@ real(4), parameter      :: pp_bias = 1.00 !0.85 !0.1 !0.4642
 
 ! testing flags
 
-logical, parameter :: ngp_fmesh_force = .true.!.true. 
-logical, parameter :: pp_force_flag = .true.!.true.
+logical, parameter :: ngp_fmesh_force = .true. 
+logical, parameter :: pp_force_flag = .false.!.true.
 logical, parameter :: pp_ext_force_flag = .true.!.true.
 logical, parameter :: coarse_vel_update = .true.!.true.
 

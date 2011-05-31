@@ -242,7 +242,7 @@
           mass_p=10000.0/4.
        else
 #ifdef MHD
-          mass_p = (real(nf_physical_dim)**3 / real(np_total))*(1-omega_b/omega_m)
+          mass_p = (real(nf_physical_dim)**3 / real(np_total))!*(1-omega_b/omega_m)
 #else
           mass_p = real(nf_physical_dim)**3 / real(np_total)
 #endif

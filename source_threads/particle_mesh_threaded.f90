@@ -28,10 +28,10 @@
     integer(4), dimension(3) :: i2
     integer(4) :: jm,km,ip,jp,kp, ip_min, jp_min, kp_min,ip_max, jp_max, kp_max
     real(4) :: force_mag
-#ifdef PPINT
+!#ifdef PPINT
     integer pp1,pp2,ipl(mesh_scale,mesh_scale,mesh_scale)
     real sep(3), force_pp(3), rmag, pp_force_mag, v_init(3) ! pp_force_accum(3)
-#endif
+!#endif
  
 #ifdef MHD
     integer(4) :: nerrl,nerr
@@ -87,14 +87,33 @@
       tile(2) = (j-1) /  tiles_node_dim
       j = j - tile(2) * tiles_node_dim
       tile(1) = j - 1
+
 !#ifdef MHD
 !      call fine_mesh(tile,cmax,nerr,thread)
 !#else
 !      call fine_mesh(tile,thread)
 !#endif
 
+
 !! normalize fine mesh density
-      rho_f(:,:,:,thread)= 0.0
+     rho_f(:,:,:,thread)= 0.0
+
+#ifdef MHD
+#ifdef DEBUG_PP_MESH
+!    print *,rank,'gas mass init rho_f:',sum(rho_f)
+    print *,'Entering fine_gas_mass', cur_tile, thread, rank
+#endif
+
+    call fine_gas_mass(tile,thread) 
+    rho_f(:,:,:,thread) = rho_f(:,:,:,thread)*(omega_b/omega_m) 
+
+#ifdef DEBUG_PP_MESH
+    print *,cur_tile ,thread,rank,'gas mass rho_f:',sum(rho_f)
+#endif
+
+#endif
+
+
 !! calculate coarse mesh offsets
 #ifdef NGP
       cic_l(:) = nc_tile_dim * tile(:) + 2 - nc_buf
@@ -121,7 +140,12 @@
               x = real(tmpx,kind=4)
               i1(:) = floor(tmpx(:)) + 1
               !i1(:) = floor(x(:)) + 1
+
+#ifdef MHD
+              rho_f(i1(1),i1(2),i1(3),thread) = rho_f(i1(1),i1(2),i1(3),thread)+mass_p*(1.0-omega_b/omega_m)
+#else
               rho_f(i1(1),i1(2),i1(3),thread) = rho_f(i1(1),i1(2),i1(3),thread)+mass_p
+#endif
               pp = ll(pp)
             enddo
 
@@ -149,8 +173,8 @@
 #endif
 !! transform and calculate fine mesh force 
       call cubepm_fftw2('f',thread)
-#ifdef DEBUG
-      print *,'rank',rank,'finished first fft'
+#ifdef DEBUG_PP_MESH
+      print *,'(tile,thread,rank) = (',cur_tile,thread,rank,') finished first fft'
 #endif
       cmplx_rho_f(:,:,:,thread)=rho_f(:,:,:,thread)
 
@@ -166,12 +190,12 @@
           enddo
         enddo
 
-#ifdef DEBUG
-        print *,'rank',rank,'thread',thread,'finished convolve'
+#ifdef DEBUG_PP_MESH
+        print *,'(tile,thread, rank) = (',cur_tile, thread, rank,') finished convolve'
 #endif
         call cubepm_fftw2('b',thread)
-#ifdef DEBUG
-        print *,'rank',rank,'thread',thread,'finished second fft'
+#ifdef DEBUG_PP_MESH
+        print *,'(tile,thread,rank) = *',cur_tile,thread,rank,') finished second fft'
 #endif
 
         force_f(i3,:,:,:,thread) = rho_f(nf_buf-1:nf_tile-nf_buf+1,nf_buf-1:nf_tile-nf_buf+1, &
@@ -207,7 +231,7 @@
           do i = tile(1) * nc_tile_dim + 1, (tile(1) + 1) * nc_tile_dim
             pp = hoc(i,j,k)
 #ifdef PPINT
-#ifdef DEBUG
+#ifdef DEBUG_PP_MESH_INTENSE
             if (pp /= 0) print *,pp,i,j,k
 #endif
             ipl=0
@@ -230,7 +254,7 @@
 
 #ifdef NGP
               if (pp_test) print *,'before ngp',pp,xv(:,pp)
-#ifdef DEBUG
+#ifdef DEBUG_PP_MESH_INTENSE
               print *,'force',i1,force_f(:,i1(1),i1(2),i1(3),thread)
 #endif
               if (ngp_fmesh_force) xv(4:6,pp)=xv(4:6,pp)+force_f(1:3,i1(1),i1(2),i1(3),thread) * &
@@ -241,7 +265,9 @@
                 if (force_mag > f_force_max(thread)) f_force_max(thread)=force_mag
               endif
               if (pp_test) print *,'before pp',pp,xv(:,pp)
+!********************************************************
 #ifdef PPINT
+
               do im=1,3
                 i2(im)=mod(i1(im)-1,mesh_scale)+1
               enddo
@@ -252,6 +278,8 @@
               endif
               llf(ipl(i2(1),i2(2),i2(3)),i2(1),i2(2),i2(3),thread)=pp
 #endif
+!********************************************************
+
 #else
               i2(:) = i1(:) + 1
               dx1(:) = i1(:) - x(:)
@@ -284,12 +312,15 @@
 #endif
               pp = ll(pp)
             enddo
+
+!***********
 #ifdef PPINT
+!***********
             do km=1,mesh_scale
               do jm=1,mesh_scale
                 do im=1,mesh_scale
                   if (pp_test .and. ipl(im,jm,km) /= 0) print *,'ipl',im,jm,km,ipl(im,jm,km)
-#ifdef DEBUG
+#ifdef DEBUG_PP_MESH
                   if ( ipl(im,jm,km) > 1) print *,'ipl',rank,i,j,k,im,jm,km,ipl(im,jm,km)
 #endif
                   pp_force_accum(:,:ipl(im,jm,km),thread)=0.0
@@ -302,7 +333,11 @@
                       !write(*,*) 'xv2=', xv(:,pp2)                      
                       rmag=sqrt(sep(1)*sep(1)+sep(2)*sep(2)+sep(3)*sep(3))
                       if (rmag>rsoft) then
-                        force_pp=mass_p*(sep/(rmag*pp_bias)**3)  !mass_p divides out below
+#ifdef MHD
+              force_pp=mass_p*(sep/(rmag*pp_bias)**3)*(1.0 - omega_b/omega_m)
+#else          
+              force_pp=mass_p*(sep/(rmag*pp_bias)**3)  !mass_p divides out below
+#endif
                         pp_force_accum(:,ip,thread)=pp_force_accum(:,ip,thread)-force_pp
                         pp_force_accum(:,jp,thread)=pp_force_accum(:,jp,thread)+force_pp
                         if (pp_force_flag) then
@@ -320,17 +355,26 @@
               enddo
             enddo
 #endif
+!****************
+! end of pp force
+!****************
           enddo
         enddo
       enddo
-! end fine velocity
+! end fine velocity on dm
 
-
-
-
+#ifdef MHD
+    !write(*,*)  'Calling fine_velocity for MHD'
+    call fine_velocity(tile,cmax,nerr,thread)
+    write(*,*)  'Called fine_velocity for MHD on tile', cur_tile
+#endif
 
 
 #ifdef PP_EXT
+
+!*****************
+!Extended pp force
+!*****************
 
 !**********************************
 ! 1-Create link list on fine mesh *
@@ -513,6 +557,10 @@
                                  force_pp=mass_p*(sep/(rmag*pp_bias)**3)*(1 - (7.0/4.0)*(rmag*pp_bias/(nf_cutoff))**3 + &
                                       (3.0/4.0)*(rmag*pp_bias/(nf_cutoff))**5)  !mass_p divides out below
                               endif
+#ifdef MHD
+                                 force_pp = force_pp*(1.0 - omega_b/omega_m)                
+#endif
+
                               !force_pp = force_pp - mass_p*( -7*rmag/(4*nf_cutoff**3) + 3*rmag**3/(4*nf_cutoff**5))
                               !force_pp = force_pp + sep*mass_p*(7/(4*nf_cutoff**3) - 3*rmag**2/(4*nf_cutoff**5))
                               pp_ext_force_accum(:,pp1,thread)=pp_ext_force_accum(:,pp1,thread)-force_pp

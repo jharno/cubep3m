@@ -35,24 +35,24 @@
     if (rank==0) then
      open(51,file='fforce.dat',form='formatted',status='replace')
      do i=nf_buf-1,nf_tile-nf_buf+1
-       write(51,*) force_f(:,i,i,i)
+       write(51,*) force_f(:,i,i,i,thread)
      enddo
      close(51)
     endif
 #endif
 
-    if (.not.pair_infall) then
-      force_mag=0.0
-      do k=nf_buf-1,nf_tile-nf_buf+1
-        do j=nf_buf-1,nf_tile-nf_buf+1
-          do i=nf_buf-1,nf_tile-nf_buf+1
-            force_mag=sqrt(force_f(1,i,j,k,thread)**2 &
-                +force_f(2,i,j,k,thread)**2+force_f(3,i,j,k,thread)**2)
-            if (force_mag > f_force_max(thread)) f_force_max(thread)=force_mag
-          enddo
-        enddo
-      enddo
-    endif
+!    if (.not.pair_infall) then
+!      force_mag=0.0
+!      do k=nf_buf-1,nf_tile-nf_buf+1
+!        do j=nf_buf-1,nf_tile-nf_buf+1
+!          do i=nf_buf-1,nf_tile-nf_buf+1
+!            force_mag=sqrt(force_f(1,i,j,k,thread)**2 &
+!                +force_f(2,i,j,k,thread)**2+force_f(3,i,j,k,thread)**2)
+!            if (force_mag > f_force_max(thread)) f_force_max(thread)=force_mag
+!          enddo
+!        enddo
+!      enddo
+!    endif
 
 #ifdef MHD
 !! update gas velocity
@@ -74,7 +74,7 @@
           iff=i+nf_buf
           iu=i+u_offset(1)
 !! NEED TO SORT OUT TIMESTEP dt IN BELOW (should be 2 * dt!)
-!          acc= a_mid * G * 2.0 * dt * force_f(:,iff,jff,kff)
+!          acc= a_mid * G * 2.0 * dt * force_f(:,iff,jff,kff,thread)
           acc= a_mid * G * dt * force_f(:,iff,jff,kff,thread)
           gaz=u(:,iu,ju,ku)
           v=gaz(2:4)/gaz(1)
@@ -89,7 +89,7 @@
               dv(q)=acc(q)-sign(c(q)-0.9/dt,acc(q))
             endif
           enddo
-#ifndef NO_MHD_GRAV
+#ifndef NO_MHD_GRAV_FINE
           u(5,iu,ju,ku)=gaz(5)+sum((gaz(2:4)+gaz(1)*dv/2)*dv)
           u(2:4,iu,ju,ku)=gaz(2:4)+gaz(1)*dv
 #endif
@@ -97,7 +97,7 @@
       enddo
     enddo
 #endif
-
+#ifdef DM_VEL_OLD
 !! update dark matter velocity
 
     offset(:) = real(nf_buf) - tile(:) * nf_physical_tile_dim
@@ -235,5 +235,6 @@
         enddo
       enddo
     enddo
-
-  end subroutine fine_velocity
+! end of #ifdef DM_VEL_OLD:
+#endif
+end subroutine fine_velocity

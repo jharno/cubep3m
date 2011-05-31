@@ -25,7 +25,7 @@
 
 #ifdef MHD
 !    print *,rank,'gas mass init rho_f:',sum(rho_f)
-    call fine_gas_mass(tile)
+    call fine_gas_mass(tile,thread)
 !    print *,rank,'gas mass rho_f:',sum(rho_f)
     call system_clock(count=count_f,count_rate=count_r)
 #ifdef MPI_TIME

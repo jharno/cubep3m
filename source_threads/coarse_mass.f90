@@ -31,6 +31,9 @@
        enddo
      enddo
    enddo
+
+   rho_c = rho_c*(omega_b/omega_m)
+
 #endif
 
 ! unfortunately even unrolling this didn't prevent shared accesses to rho_c
