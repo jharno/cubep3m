@@ -1,13 +1,19 @@
 !! cic_power.f90 Parallelized: Hugh Merz Jun 15, 2005
-!! This version is used to calculate the power spectrum of the initial conditions
 !! Compile with: mpif77 -fpp -g -w -O3 -axN cic_power.f90 -o cic_power  -L/home/merz/lib/fftw-2.1.5_intel8/lib -I/home/merz/lib/fftw-2.1.5_intel8/include -lsrfftw_mpi -lsrfftw -lsfftw_mpi -lsfftw -lm -ldl
 
-program cic_init_power 
+program cic_power 
   implicit none
   include 'mpif.h'
 
 ! frequently changed parameters are found in this header file:
   include '../../parameters'
+
+  logical, parameter :: correct_kernel=.false.
+
+  character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints'
+  !character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints_LargePID'!bao_600Mpc'
+  !character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints_bao_600Mpc'
+  !character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints_UBC_FAR'
 
   !! nc is the number of cells per box length
   integer, parameter :: hc=nc/2
@@ -16,13 +22,20 @@ program cic_init_power
 
   !! np is the number of particles
   !! np should be set to nc (1:1), hc (1:2), or qc (1:4)
-  integer, parameter :: np= hc
+  integer, parameter :: np=hc
   real, parameter    :: npr=np
+
+  !! internals
+  integer, parameter :: max_checkpoints=100
+  real, dimension(max_checkpoints) :: z_checkpoint
+  integer num_checkpoints, cur_checkpoint
 
   !! internal parallelization parameters
   integer(4), parameter :: nc_node_dim = nc/nodes_dim
   integer(4), parameter :: np_node_dim = np/nodes_dim
-  integer(4), parameter :: np_buffer = np_node_dim**3
+!  integer(4), parameter :: np_buffer = 5*np_node_dim**3
+!  integer(4), parameter :: np_buffer = 0.35*np_node_dim**3
+  integer(4), parameter :: np_buffer = 4*np_node_dim**3
   integer(4), parameter :: max_np = np_node_dim**3 + np_buffer
   integer(4), parameter :: nodes = nodes_dim * nodes_dim * nodes_dim
   integer(4), parameter :: nodes_slab = nodes_dim * nodes_dim
@@ -52,29 +65,27 @@ program cic_init_power
 
   !! Power spectrum arrays
   real, dimension(2,nc) :: pkdm
-  real, dimension(3,nc) :: pktsum,pksum
 #ifdef PLPLOT
   real*8, dimension(3,nc) :: pkplot
 #endif
 
-  !! arrays
+  !! Fourier transform arrays
   real, dimension(nc_node_dim,nc_node_dim,nc_node_dim) :: cube
   real, dimension(nc_node_dim,nc_node_dim,nc_slab,0:nodes_slab-1) :: recv_cube
   real, dimension(nc+2,nc,nc_slab) :: slab, slab_work
+
+  !! arrays
   real, dimension(0:nc_node_dim+1,0:nc_node_dim+1,0:nc_node_dim+1) :: den 
   real, dimension(0:nc_node_dim+1,0:nc_node_dim+1) :: den_buf 
 
   !! Equivalence arrays to save memory
-  equivalence (den,slab_work,recv_cube,xp_buf) 
-  equivalence (xvp,cube,slab) 
-  equivalence (send_buf,den_buf)
-  equivalence (recv_buf,pktsum,pkdm)
+  equivalence (slab_work,recv_cube) 
 
   !! Common block
 #ifdef PLPLOT
-  common xvp,den,recv_buf,send_buf,pkplot,pksum
+  common xvp,send_buf,slab_work,den_buf,den,cube,slab,xp_buf,recv_buf,pkdm,pkplot
 #else
-  common xvp,den,recv_buf,send_buf,pksum
+  common xvp,send_buf,slab_work,den_buf,den,cube,slab,xp_buf,recv_buf,pkdm
 #endif
 
 !!---start main--------------------------------------------------------------!!
@@ -82,11 +93,14 @@ program cic_init_power
   call mpi_initialize
   if (rank == 0) call writeparams
   firstfftw=.true.  ! initialize fftw so that it generates the plans
-  call initvar
-  call read_particles
-  call pass_particles
-  call darkmatter
-  if (rank == 0) call writepowerspectra
+  call read_checkpoint_list
+  do cur_checkpoint=1,num_checkpoints
+    call initvar
+    call read_particles
+    call pass_particles
+    call darkmatter
+    if (rank == 0) call writepowerspectra
+  enddo
   call cp_fftw(0)
   call mpi_finalize(ierr)
 
@@ -109,8 +123,8 @@ contains
     call mpi_comm_size(mpi_comm_world,nodes_returned,ierr)
     if (ierr /= mpi_success) call mpi_abort(mpi_comm_world,ierr,ierr)
     if (nodes_returned /= nodes ) then
-      write(*,*) 'cic_init_power compiled for a different number of nodes'
-      write(*,*) 'mpirun nodes=',nodes_returned,'cic_init_power nodes=',nodes 
+      write(*,*) 'cic_pow compiled for a different number of nodes'
+      write(*,*) 'mpirun nodes=',nodes_returned,'cic_pow nodes=',nodes 
       call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
     if (mod(nc,nodes) /= 0) then
@@ -122,7 +136,7 @@ contains
     if (ierr /= mpi_success) call mpi_abort(mpi_comm_world,ierr,ierr)
 
     if (rank==0) then
-      write(*,*) 'cic_init_power running on',nodes,'nodes'
+      write(*,*) 'cic_pow running on',nodes,'nodes'
       write(*,*) 'using cubic distribution:',nodes_dim,'nodes per dimension'
       write(*,*) nc,'cells in mesh'
     endif
@@ -176,34 +190,86 @@ contains
 
 !!---------------------------------------------------------------------------!!
 
+  subroutine read_checkpoint_list
+!! read in list of checkpoints to calculate spectra for
+    implicit none
+
+    integer :: i,fstat
+
+    if (rank == 0) then
+      open(11,file=checkpoints,status='old',iostat=fstat)
+      if (fstat /= 0) then
+        print *,'error opening checkpoint list file'
+        print *,'rank',rank,'file:',checkpoints
+        call mpi_abort(mpi_comm_world,ierr,ierr)
+      endif
+      do num_checkpoints=1,max_checkpoints
+        read(unit=11,err=51,end=41,fmt='(f20.10)') z_checkpoint(num_checkpoints)
+      enddo
+  41  num_checkpoints=num_checkpoints-1
+  51  close(11)
+      print *,'checkpoints to recompose:'
+      do i=1,num_checkpoints
+        write(*,'(f5.1)') z_checkpoint(i)
+      enddo
+    endif
+
+    call mpi_bcast(num_checkpoints,1,mpi_integer,0,mpi_comm_world,ierr)
+
+  end subroutine read_checkpoint_list
+
+!!---------------------------------------------------------------------------!!
+
   subroutine read_particles
     implicit none
     
     real z_write,np_total
     integer j,fstat
-    character*512 :: fn
-    character(len=6) :: rank_s
-#ifdef DEBUG
-    integer :: i,pe
-    real*8 :: xva(6)
-    real*4 :: dmin,dmax
-#endif
+    character(len=7) :: z_string
+    character(len=4) :: rank_string
+    character(len=100) :: check_name
 
+    !! these are unnecessary headers from the checkpoint
+    real(4) :: a,t,tau,dt_f_acc,dt_c_acc,dt_pp_acc,mass_p
+    integer(4) :: nts,sim_checkpoint,sim_projection,sim_halofind
+
+!! generate checkpoint names on each node
     if (rank==0) then
-      print *,'calculating spectrum initial conditions'
+      z_write = z_checkpoint(cur_checkpoint)
+      print *,'calculating spectrum for z=',z_write
     endif
 
-    write(rank_s,'(i6)') rank 
+    call mpi_bcast(z_write,1,mpi_real,0,mpi_comm_world,ierr)
 
-    rank_s=adjustl(rank_s)
-    fn=scratch_path//'xv'//rank_s(1:len_trim(rank_s))//'.ic'
-    open(21,file=fn,status='old',form='binary',iostat=fstat)
+    write(z_string,'(f7.3)') z_write
+    z_string=adjustl(z_string)
+
+    write(rank_string,'(i4)') rank
+    rank_string=adjustl(rank_string)
+
+    check_name=output_path//z_string(1:len_trim(z_string))//'xv'// &
+               rank_string(1:len_trim(rank_string))//'.dat'
+
+!! open checkpoint    
+#ifdef BINARY
+    open(unit=21,file=check_name,status='old',iostat=fstat,form='binary')
+#else
+    open(unit=21,file=check_name,status='old',iostat=fstat,form='unformatted')
+#endif
     if (fstat /= 0) then
-      print *,'error opening:',fn
+      write(*,*) 'error opening checkpoint'
+      write(*,*) 'rank',rank,'file:',check_name
       call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
 
-    read(21) np_local
+!! read in checkpoint header data
+#ifdef PPINT
+    read(21) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint, &
+               sim_projection,sim_halofind,mass_p
+#else
+    read(21) np_local,a,t,tau,nts,dt_f_acc,dt_c_acc,sim_checkpoint, &
+               sim_projection,sim_halofind,mass_p
+#endif
 
     if (np_local > max_np) then
       write(*,*) 'too many particles to store'
@@ -214,40 +280,36 @@ contains
 !! tally up total number of particles
     call mpi_reduce(real(np_local,kind=4),np_total,1,mpi_real, &
                          mpi_sum,0,mpi_comm_world,ierr)
-    if (rank == 0) write(*,*) 'number of particles =', int(np_total,8)
+    if (rank == 0) write(*,*) 'number of particles =', int(np_total,4)
 
-#ifdef DEBUG
-    xva=0.
-    dmin=1000.0
-    dmax=-1000.0
-#endif
-
-    do j=1,np_local
-      read(21) xvp(:,j)
-#ifdef DEBUG
-      do i=1,3
-        if (xvp(i,j)<dmin) then
-          dmin=xvp(i,j)
-          pe=j
-        endif
-        if (xvp(i,j)>dmax) dmax=xvp(i,j)
-      enddo
-      xva=real(xvp(:,j),kind=8)+xva
-#endif
-    enddo
+!! read in particles
+!    do j=1,np_local
+!      read(21) xvp(:,j)
+!    enddo
+    read(21) xvp(:,:np_local)
     close(21)
-
-#ifdef DEBUG
-    do j=0,nodes-1
-      if (rank==j) then
-        print *,rank,'averages:',xva/real(np_local)
-        print *,rank,'min',dmin,'max',dmax
-        print *,rank,'bad particle',xvp(:,pe)
-      endif
-      call mpi_barrier(mpi_comm_world,ierr)
-    enddo
-#endif
  
+#ifdef KAISER
+
+    !Red Shift Distortion: x_z -> x_z +  v_z/H(Z)   
+    !Converting seconds into simulation time units
+    !cancels the H0...
+    
+    !xv(3,ip+1:ip+nploc(i))=xv(3,ip+1:ip+nploc(i)) + xv(6,ip+1:ip+nploc(i))*1.5*sqrt(omegam/cubepm_a)
+    !xv(3,ip+1:ip+nploc(i))=xv(3,ip+1:ip+nploc(i)) + xv(6,ip+1:ip+nploc(i))*1.5/sqrt(cubepm_a*(1+cubepm_a*omegak/omegam + omegav/omegam*cubepm_a**3))
+    xvp(3,:)=xvp(3,:) + xvp(6,:)*1.5/sqrt(a*(1+a*(1-omega_m-omega_l)/omega_m + omega_l/omega_m*a**3))  
+
+    call pass_particles
+
+    if(rank==0) then
+       write(*,*) '**********************'
+       write(*,*) 'Included Kaiser Effect'
+       write(*,*) 'Omega_m =', omega_m, 'a =', a
+       !write(*,*) '1/H(z) =', 1.5*sqrt(omegam/cubepm_a)
+       write(*,*) '1/H(z) =', 1.5/sqrt(a*(1+a*(1-omega_m-omega_l)/omega_m + omega_l/omega_m*a**3))
+       write(*,*) '**********************'
+    endif
+#endif
 
   end subroutine read_particles
 
@@ -404,7 +466,7 @@ contains
       call rfftwnd_f77_mpi(plan,1,slab,slab_work,1,order)
     else
       call rfftwnd_f77_mpi(iplan,1,slab,slab_work,1,order)
-      slab=slab/real(nc)*real(nc)*real(nc)
+      slab=slab/real(nc*nc*nc)
     endif
 
 #ifdef DEBUG_LOW
@@ -439,7 +501,7 @@ contains
     write(*,*) 'nodes   ', nodes
     write(*,*) 'nc      ', nc
     write(*,*) 'np      ', np
-    write(*,*) 'np total',int(np,kind=8)**3
+    write(*,*)
     write(*,*) 'box      ',box
     write(*,*)
 
@@ -458,7 +520,8 @@ contains
     integer :: kp
 #endif
     real         :: kr
-    character*512 :: fn
+    character*180 :: fn
+    character*5  :: prefix
     character*7  :: z_write
     real time1,time2
     call cpu_time(time1)
@@ -468,16 +531,41 @@ contains
     !! 2nd is dm p(k)
     !! 3rd is standard deviation
 
-#ifdef NGP
-    fn=output_path//'init_ngpps.dat'
+    write(z_write,'(f7.3)') z_checkpoint(cur_checkpoint)
+    z_write=adjustl(z_write)
+    
+#ifdef NGP 
+    prefix='ngpps'
 #else
-    fn=output_path//'init_cicps.dat'
+    prefix='cicps'
 #endif
+
+#ifdef KAISER
+   fn=output_path//z_write(1:len_trim(z_write))//prefix//'-RSD.dat' 
+#else
+   fn=output_path//z_write(1:len_trim(z_write))//prefix//'.dat' 
+#endif
+
+!    fn=output_path//z_write(1:len_trim(z_write))//'cicps.dat'
+!#ifdef KAISER
+!    fn=output_path//z_write(1:len_trim(z_write))//'cicps-RSD.dat'
+!#ifdef NGP
+!    fn=output_path//z_write(1:len_trim(z_write))//'ngpps-RSD.dat'
+!#endif
+!#endif
+
+!#ifdef NGP
+!    fn=output_path//z_write(1:len_trim(z_write))//'ngpps.dat'
+!#endif
     write(*,*) 'Writing ',fn
     open(11,file=fn,recl=500)
     do k=2,hc+1
        kr=2*pi*(k-1)/box
+#ifdef NGP
+       write(11,*) kr,pkdm(:,k-1)
+#else
        write(11,*) kr,pkdm(:,k)
+#endif
 #ifdef PLPLOT
        kp=k-1
        pkplot(1,kp)=real(kr,kind=8)
@@ -503,8 +591,8 @@ contains
     implicit none
     integer :: i,j,k
     integer :: i1,j1,k1
-    real    :: d,dmin,dmax,dmint,dmaxt
-    real*8  :: dsum,dvar,dsumt,dvart,sum_dm_local,sum_dm
+    real    :: d,dmin,dmax,sum_dm,sum_dm_local,dmint,dmaxt
+    real*8  :: dsum,dvar,dsumt,dvart
     real, dimension(3) :: dis
 
     real time1,time2
@@ -522,16 +610,8 @@ contains
     call mesh_buffer
     cube=den(1:nc_node_dim,1:nc_node_dim,1:nc_node_dim)
 
-
-    sum_dm_local=0.0
-    do k=1,nc_node_dim
-      do j=1,nc_node_dim
-        do i=1,nc_node_dim
-          sum_dm_local=real(cube(i,j,k),kind=8)+sum_dm_local
-        enddo
-      enddo
-    enddo
-    call mpi_reduce(sum_dm_local,sum_dm,1,mpi_double_precision,mpi_sum,0,mpi_comm_world,ierr)
+    sum_dm_local=sum(cube) 
+    call mpi_reduce(sum_dm_local,sum_dm,1,mpi_real,mpi_sum,0,mpi_comm_world,ierr)
     if (rank == 0) print *,'DM total mass=',sum_dm
 
     !! Convert dm density field to delta field
@@ -559,8 +639,8 @@ contains
     call mpi_reduce(dmax,dmaxt,1,mpi_real,mpi_max,0,mpi_comm_world,ierr)
 
     if (rank==0) then
-      dsum=dsumt/real(nc)**3
-      dvar=sqrt(dvart/real(nc)**3)
+      dsum=dsumt/nc**3
+      dvar=sqrt(dvart/nc**3)
       write(*,*)
       write(*,*) 'DM min    ',dmint
       write(*,*) 'DM max    ',dmaxt
@@ -573,7 +653,7 @@ contains
     call cp_fftw(1)
 
     !! Compute dm power spectrum
-    call powerspectrum
+    call powerspectrum(slab,pkdm)
 
     call cpu_time(time2)
     time2=(time2-time1)
@@ -586,8 +666,7 @@ contains
   subroutine pass_particles
     implicit none
 
-    integer i,pp,np_buf,np_exit,npo,npi
-    integer*8 np_final
+    integer i,pp,np_buf,np_exit,np_final,npo,npi
     real x(3),lb,ub
     integer, dimension(mpi_status_size) :: status,sstatus,rstatus
     integer :: tag,srequest,rrequest,sierr,rierr
@@ -964,12 +1043,7 @@ contains
 
 #ifdef DEBUG
     do i=0,nodes-1
-      if (rank==i) then
-        print *,rank,'particles left in buffer=',np_buf
-        do pp=1,np_buf
-          print *,rank,'------',xp_buf(:,pp)
-        enddo
-      endif
+      if (rank==i) print *,rank,'particles left in buffer=',np_buf
       call mpi_barrier(mpi_comm_world,ierr)
     enddo
 #endif 
@@ -983,8 +1057,8 @@ contains
                     mpi_comm_world,ierr)
 
     if (rank == 0) then
-      print *,'total particles =',int(np_final,8)
-      if (np_final /= (int(np,8))**3) then
+      print *,'total particles =',np_final
+      if (np_final /= np**3) then
         print *,'ERROR: total number of particles incorrect after passing'
       endif
     endif
@@ -1050,16 +1124,21 @@ contains
 
 !!--------------------------------------------------------------!!
 
-  subroutine powerspectrum
+  subroutine powerspectrum(delta,pk)
     implicit none
+    real, dimension(2,nc)       :: pk
+    real, dimension(nc+2,nc,nc_slab) :: delta
 
     integer :: i,j,k,kg
     integer :: k1,k2
-    real    :: kr,kx,ky,kz,w1,w2,pow
+    real    :: kr,kx,ky,kz,w1,w2,pow, x,y,z,sync_x, sync_y, sync_z,kernel
+    real, dimension(3,nc,nc_slab) :: pkt
+    real, dimension(3,nc) :: pktsum
 
     real time1,time2
     call cpu_time(time1)
 
+    pkt=0.0
     pktsum=0.0
     !! Compute power spectrum
     do k=1,nc_slab
@@ -1078,42 +1157,80 @@ contains
           do i=1,nc+2,2
              kx=(i-1)/2
              kr=sqrt(kx**2+ky**2+kz**2)
+             if(kx.eq.0 .and. ky <=0 .and. kz <=0)cycle;
+             if(kx.eq.0 .and. ky >0 .and. kz <0)cycle;
              if (kr .ne. 0) then
                 k1=ceiling(kr)
                 k2=k1+1
                 w1=k1-kr
                 w2=1-w1
-                pow=sum((slab(i:i+1,j,k)/(real(ncr))**3)**2)
-                pktsum(1,k1)=pktsum(1,k1)+w1*pow
-                pktsum(2,k1)=pktsum(2,k1)+w1*pow**2
-                pktsum(3,k1)=pktsum(3,k1)+w1
-                pktsum(1,k2)=pktsum(1,k2)+w2*pow
-                pktsum(2,k2)=pktsum(2,k2)+w2*pow**2
-                pktsum(3,k2)=pktsum(3,k2)+w2
+                x = pi*real(kx)/ncr
+                y = pi*real(ky)/ncr
+                z = pi*real(kz)/ncr
+                
+                if(x==0) then 
+                   sync_x = 1
+                else
+                   sync_x = sin(x)/x
+                endif
+                if(y==0) then 
+                   sync_y = 1
+                else
+                   sync_y = sin(y)/y
+                endif
+                if(z==0) then 
+                   sync_z = 1
+                else
+                   sync_z = sin(z)/z
+                endif
+
+                kernel = sync_x*sync_y*sync_z
+                !write(*,*) i,j,k,kx,ky,kz,x,y,z,kernel
+                !pause
+#ifdef NGP
+                w1=1
+                w2=0
+#endif                
+                pow=sum((delta(i:i+1,j,k)/ncr**3)**2)/kernel
+                pkt(1,k1,k)=pkt(1,k1,k)+w1*pow
+                pkt(2,k1,k)=pkt(2,k1,k)+w1*pow**2
+                pkt(3,k1,k)=pkt(3,k1,k)+w1
+                pkt(1,k2,k)=pkt(1,k2,k)+w2*pow
+                pkt(2,k2,k)=pkt(2,k2,k)+w2*pow**2
+                pkt(3,k2,k)=pkt(3,k2,k)+w2
              endif
           enddo
        enddo
     enddo
 
+    !! Merge power spectrum from threads
+    do k=2,nc_slab
+       pkt(:,:,1)=pkt(:,:,1)+pkt(:,:,k)
+    enddo
+
     !! Reduce to rank 0
-    call mpi_reduce(pktsum,pksum,3*nc,mpi_real,mpi_sum,0,mpi_comm_world,ierr)
+    call mpi_reduce(pkt(:,:,1),pktsum,3*nc,mpi_real,mpi_sum,0,mpi_comm_world,ierr)
 
     !! Divide by weights
     !! pk(1,k) stores pk(k)
     !! pk(2,k) stores standard deviation
     if (rank == 0) then
       do k=1,nc
-        if (pksum(3,k) .eq. 0) then
-          pkdm(:,k)=0
+        if (pktsum(3,k) .eq. 0) then
+          pk(:,k)=0
         else
-          pkdm(:,k)=pksum(1:2,k)/pksum(3,k)
-          pkdm(2,k)=sqrt(abs((pkdm(2,k)-pkdm(1,k)**2)/(pksum(3,k)-1)))
-          pkdm(1:2,k)=4*pi*(real(k)-1.)**3*pkdm(1:2,k)
+          pk(:,k)=pktsum(1:2,k)/pktsum(3,k)
+          pk(2,k)=sqrt(abs((pk(2,k)-pk(1,k)**2)/(pktsum(3,k)-1)))
+#ifdef NGP
+          pk(1:2,k)=4*pi*(k)**3*pk(1:2,k)
+#else
+          pk(1:2,k)=4*pi*(k-1)**3*pk(1:2,k)
+#endif
        endif
       enddo
     endif
 
-    call mpi_bcast(pkdm,2*nc,mpi_real,0,mpi_comm_world,ierr)
+    call mpi_bcast(pk,2*nc,mpi_real,0,mpi_comm_world,ierr)
 
     call cpu_time(time2)
     time2=(time2-time1)
@@ -1133,26 +1250,27 @@ contains
     do k=1,max_np
        xvp(:,k)=0
     enddo
+    do k=1,nc_slab
+       slab_work(:,:,k)=0
+    enddo
     do k=0,nc_node_dim+1
        den(:,:,k)=0
     enddo
-    do k=1,3*np_buffer
-       send_buf(k)=0
+    do k=1,nc_node_dim
+       cube(:,:,k)=0
+    enddo
+    do k=1,nc_slab
+       slab(:,:,k)=0
+    enddo
+    do k=1,np_buffer
+       xp_buf(:,k)=0
     enddo
     do k=1,3*np_buffer
        recv_buf(k)=0
     enddo
     do k=1,nc
-       pktsum(:,k)=0
+       pkdm(:,k)=0
     enddo
-    do k=1,nc
-       pksum(:,k)=0
-    enddo
-#ifdef PLPLOT
-    do k=1,nc
-       pkplot(:,k)=0
-    enddo
-#endif
     
     call cpu_time(time2)
     time2=(time2-time1)
@@ -1225,4 +1343,4 @@ subroutine mesh_buffer
 
   end subroutine mesh_buffer
 
-end program cic_init_power 
+end program cic_power 

@@ -9,5 +9,12 @@
 
 cd ../utils/mhd_init
 rm -f mhd_init
-mpif77 -shared-intel -fpp -g -O3 -xhost -DBINARY -mt_mpi mhd_init.f90 -o mhd_init  -lm -ldl 
+
+mpif77 -shared-intel -fpp -g -O3 -xhost -DBINARY  mhd_init.f90 -o mhd_init  -lm -ldl 
+
+
+#mpif77 -shared-intel -fpp -g -O3 -xhost -DBINARY -DDEBUG -DNGP mhd_init.f90 -o mhd_init  -lsrfftw_mpi -lsrfftw -lsfftw_mpi -lsfftw -lm -ldl
+
+
+
 cd ../../batch

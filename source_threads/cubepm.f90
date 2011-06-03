@@ -162,6 +162,10 @@ if (rank == 0) write(*,*) 'finished kernel init',t_elapsed(wc_counter)
       dt_old = 0.0
       call update_position
 
+#ifdef MOVE_GRID_BACK
+      call move_grid_back
+#endif
+
       !dt = 0.0
 
       if (checkpoint_step) then

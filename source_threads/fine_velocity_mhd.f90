@@ -29,6 +29,23 @@
     integer nerr,q,kff,ku,jff,ju,iff,iu,u_offset(3)
     real cmax,c(3),v(3),cs,dv(3)
     real gaz(5),acc(3)
+    real, parameter ::T_CMB = 2.725 ! in K
+    real, parameter :: k_B = 1.38065E-23 ! in J/K
+    real,parameter  :: h = 0.701
+    real :: UnitConversion
+    real    :: E_thermal
+    real    :: z
+
+    !CMB coupling for z>150
+    z = 1.0/a-1.0
+    !call mpi_bcast(z,1,MPI_REAL,0,MPI_COMM_WORLD,ierr)
+    if(z<150.0)then
+       E_thermal = 0.0
+    else
+       UnitConversion = (1+z)**(-5.0)*real(nc)**2/(box*h)**2/omega_m/4.2302E-16
+       E_thermal = 0.0! k_B*T_CMB*(1+z)*UnitConversion
+    endif 
+
 #endif
 
 #ifdef FF_BOUND_DEBUG
@@ -90,7 +107,7 @@
             endif
           enddo
 #ifndef NO_MHD_GRAV_FINE
-          u(5,iu,ju,ku)=gaz(5)+sum((gaz(2:4)+gaz(1)*dv/2)*dv)
+          u(5,iu,ju,ku)=gaz(5)+sum((gaz(2:4)+gaz(1)*dv/2)*dv) +E_thermal
           u(2:4,iu,ju,ku)=gaz(2:4)+gaz(1)*dv
 #endif
         enddo

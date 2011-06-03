@@ -6,10 +6,9 @@
 program mhd_init
   implicit none
   include 'mpif.h'
-
+  
 ! frequently changed parameters are found in this header file:
   include '../../parameters'
-
   !! nc is the number of cells per box length
   integer, parameter :: hc=nc/2
   real, parameter    :: ncr=nc
@@ -34,6 +33,8 @@ program mhd_init
   integer(4), dimension(6) :: cart_neighbor
   integer(4), dimension(3) :: slab_coord, cart_coords
   integer(4) :: slab_rank, mpi_comm_cart, cart_rank, rank, ierr
+  real, dimension(2,nc) :: pkdm
+  real, dimension(3,nc) :: pktsum,pksum
 
   integer(4) :: np_local
 
@@ -56,7 +57,12 @@ program mhd_init
   !! MHD arrays
   real, dimension(5,nc_node_dim,nc_node_dim,nc_node_dim) :: u
   real, dimension(3,nc_node_dim,nc_node_dim,nc_node_dim) :: b
-
+  real, dimension(0:nc_node_dim+1,0:nc_node_dim+1,0:nc_node_dim+1) :: den
+  real, dimension(0:nc_node_dim+1,0:nc_node_dim+1) :: den_buf
+  !real, dimension(nc+2,nc,nc_slab) :: slab, slab_work
+  !real, dimension(nc_node_dim,nc_node_dim,nc_node_dim) :: cube
+  !real, dimension(nc_node_dim,nc_node_dim,nc_slab,0:nodes_slab-1) :: recv_cube
+  
   !! Common block
 
   common xvp,u
@@ -227,27 +233,6 @@ contains
     close(21)
 
 
-#ifdef KAISER
-
-    !Red Shift Distortion: x_z -> x_z +  v_z/H(Z)
-    !Converting seconds into simulation time units
-    !cancels the H0...
-
-    xvp(3,:)=xvp(3,:) + xvp(6,:)*1.5/sqrt(a*(1+a*(1-omega_m-omega_l)/omega_m + omega_l/omega_m*a**3))
-
-    call pass_particles
-
-    if(rank==0) then
-       write(*,*) '**********************'
-       write(*,*) 'Included Kaiser Effect'
-       write(*,*) 'Omega_m =', omega_m, 'a =', a
-       !write(*,*) '1/H(z) =', 1.5*sqrt(omegam/cubepm_a)
-       write(*,*) '1/H(z) =', 1.5/sqrt(a*(1+a*(1-omega_m-omega_l)/omega_m + omega_l/omega_m*a**3))
-       write(*,*) '**********************'
-    endif
-#endif
-
-
 #ifdef DEBUG
     do j=0,nodes-1
       if (rank==j) then
@@ -272,7 +257,6 @@ contains
     real, dimension(3) :: dis
     character(len=4) :: rank_string
     character(len=100) :: check_name
-
     real time1,time2
     call cpu_time(time1)
 
@@ -285,7 +269,7 @@ contains
        print *,'Wrinting u and b to file'
     endif
  
-   write(rank_string,'(i4)') rank
+    write(rank_string,'(i4)') rank
     rank_string=adjustl(rank_string)
   
     check_name=output_path//'mhd_ic'// &
@@ -364,10 +348,18 @@ contains
 
   subroutine GetU
     implicit none
-    real, parameter :: mp=(ncr/np)**3
+    real, parameter :: mp=(ncr/np)**3!*omega_b/omega_m
+    real, parameter ::T_CMB = 2.725 ! in K
+    real, parameter ::gamma = 5./3.
+    real, parameter :: k_B = 1.38065E-23 ! in J/K
+    real,parameter  :: h = 0.701
+    real(8), parameter :: UnitConversion = (1+z_i)**(-5.0)*ncr**2/(box*h)**2/omega_m/4.2302E-16
 
     integer :: i,i1,i2,j1,j2,k1,k2
     real    :: x,y,z,dx1,dx2,dy1,dy2,dz1,dz2,vf,v(3)
+    real    :: E_thermal
+
+    E_thermal = 0! k_B*T_CMB*(1+z_i)*UnitConversion
 
     do i=1,np_local
        x=xvp(1,i)!-0.5
@@ -391,16 +383,12 @@ contains
        if (i1 < 1 .or. i2 > nc_node_dim .or. j1 < 1 .or. &
            j2 > nc_node_dim .or. k1 < 1 .or. k2 > nc_node_dim) then 
          print *,'particle out of bounds',i1,i2,j1,j2,k1,k2,nc_node_dim
+         cycle
        endif 
 
        dz1=mp*dz1
        dz2=mp*dz2
-       !u(1,i1,j1,k1) = u(1,i1,j1,k1)+dx1*dy1*dz1 
-       !u(2,i1,j1,k1) = u(2,i1,j1,k1)-dx1*dy1*dz1*v(1) 
-       !u(3,i1,j1,k1) = u(3,i1,j1,k1)-dx1*dy1*dz1*v(2) 
-       !u(4,i1,j1,k1) = u(4,i1,j1,k1)-dx1*dy1*dz1*v(3) 
-       !u(5,i1,j1,k1) = dx1*dy1*dz1*(v(1)**2+v(2)**2+v(3)**2)/2.0 ! + E_Thermal(i1,j1,k1)
-
+      
        u(1,i1,j1,k1)=u(1,i1,j1,k1)+dx1*dy1*dz1
        u(1,i2,j1,k1)=u(1,i2,j1,k1)+dx2*dy1*dz1
        u(1,i1,j2,k1)=u(1,i1,j2,k1)+dx1*dy2*dz1
@@ -410,42 +398,43 @@ contains
        u(1,i1,j2,k2)=u(1,i1,j2,k2)+dx1*dy2*dz2
        u(1,i2,j2,k2)=u(1,i2,j2,k2)+dx2*dy2*dz2
  
-       u(2,i1,j1,k1)=u(2,i1,j1,k1)-dx1*dy1*dz1*v(1)
-       u(2,i2,j1,k1)=u(2,i2,j1,k1)-dx2*dy1*dz1*v(1)
-       u(2,i1,j2,k1)=u(2,i1,j2,k1)-dx1*dy2*dz1*v(1)
-       u(2,i2,j2,k1)=u(2,i2,j2,k1)-dx2*dy2*dz1*v(1)
-       u(2,i1,j1,k2)=u(2,i1,j1,k2)-dx1*dy1*dz2*v(1)
-       u(2,i2,j1,k2)=u(2,i2,j1,k2)-dx2*dy1*dz2*v(1)
-       u(2,i1,j2,k2)=u(2,i1,j2,k2)-dx1*dy2*dz2*v(1)
-       u(2,i2,j2,k2)=u(2,i2,j2,k2)-dx2*dy2*dz2*v(1)
+       u(2,i1,j1,k1)=u(2,i1,j1,k1)+dx1*dy1*dz1*v(1)
+       u(2,i2,j1,k1)=u(2,i2,j1,k1)+dx2*dy1*dz1*v(1)
+       u(2,i1,j2,k1)=u(2,i1,j2,k1)+dx1*dy2*dz1*v(1)
+       u(2,i2,j2,k1)=u(2,i2,j2,k1)+dx2*dy2*dz1*v(1)
+       u(2,i1,j1,k2)=u(2,i1,j1,k2)+dx1*dy1*dz2*v(1)
+       u(2,i2,j1,k2)=u(2,i2,j1,k2)+dx2*dy1*dz2*v(1)
+       u(2,i1,j2,k2)=u(2,i1,j2,k2)+dx1*dy2*dz2*v(1)
+       u(2,i2,j2,k2)=u(2,i2,j2,k2)+dx2*dy2*dz2*v(1)
  
-       u(3,i1,j1,k1)=u(3,i1,j1,k1)-dx1*dy1*dz1*v(2)
-       u(3,i2,j1,k1)=u(3,i2,j1,k1)-dx2*dy1*dz1*v(2)
-       u(3,i1,j2,k1)=u(3,i1,j2,k1)-dx1*dy2*dz1*v(2)
-       u(3,i2,j2,k1)=u(3,i2,j2,k1)-dx2*dy2*dz1*v(2)
-       u(3,i1,j1,k2)=u(3,i1,j1,k2)-dx1*dy1*dz2*v(2)
-       u(3,i2,j1,k2)=u(3,i2,j1,k2)-dx2*dy1*dz2*v(2)
-       u(3,i1,j2,k2)=u(3,i1,j2,k2)-dx1*dy2*dz2*v(2)
-       u(3,i2,j2,k2)=u(3,i2,j2,k2)-dx2*dy2*dz2*v(2)
+       u(3,i1,j1,k1)=u(3,i1,j1,k1)+dx1*dy1*dz1*v(2)
+       u(3,i2,j1,k1)=u(3,i2,j1,k1)+dx2*dy1*dz1*v(2)
+       u(3,i1,j2,k1)=u(3,i1,j2,k1)+dx1*dy2*dz1*v(2)
+       u(3,i2,j2,k1)=u(3,i2,j2,k1)+dx2*dy2*dz1*v(2)
+       u(3,i1,j1,k2)=u(3,i1,j1,k2)+dx1*dy1*dz2*v(2)
+       u(3,i2,j1,k2)=u(3,i2,j1,k2)+dx2*dy1*dz2*v(2)
+       u(3,i1,j2,k2)=u(3,i1,j2,k2)+dx1*dy2*dz2*v(2)
+       u(3,i2,j2,k2)=u(3,i2,j2,k2)+dx2*dy2*dz2*v(2)
 
-       u(4,i1,j1,k1)=u(4,i1,j1,k1)-dx1*dy1*dz1*v(3)
-       u(4,i2,j1,k1)=u(4,i2,j1,k1)-dx2*dy1*dz1*v(3)
-       u(4,i1,j2,k1)=u(4,i1,j2,k1)-dx1*dy2*dz1*v(3)
-       u(4,i2,j2,k1)=u(4,i2,j2,k1)-dx2*dy2*dz1*v(3)
-       u(4,i1,j1,k2)=u(4,i1,j1,k2)-dx1*dy1*dz2*v(3)
-       u(4,i2,j1,k2)=u(4,i2,j1,k2)-dx2*dy1*dz2*v(3)
-       u(4,i1,j2,k2)=u(4,i1,j2,k2)-dx1*dy2*dz2*v(3)
-       u(4,i2,j2,k2)=u(4,i2,j2,k2)-dx2*dy2*dz2*v(3)
+       u(4,i1,j1,k1)=u(4,i1,j1,k1)+dx1*dy1*dz1*v(3)
+       u(4,i2,j1,k1)=u(4,i2,j1,k1)+dx2*dy1*dz1*v(3)
+       u(4,i1,j2,k1)=u(4,i1,j2,k1)+dx1*dy2*dz1*v(3)
+       u(4,i2,j2,k1)=u(4,i2,j2,k1)+dx2*dy2*dz1*v(3)
+       u(4,i1,j1,k2)=u(4,i1,j1,k2)+dx1*dy1*dz2*v(3)
+       u(4,i2,j1,k2)=u(4,i2,j1,k2)+dx2*dy1*dz2*v(3)
+       u(4,i1,j2,k2)=u(4,i1,j2,k2)+dx1*dy2*dz2*v(3)
+       u(4,i2,j2,k2)=u(4,i2,j2,k2)+dx2*dy2*dz2*v(3)
   
-       u(5,i1,j1,k1)=u(5,i1,j1,k1)-dx1*dy1*dz1*(v(1)**2+v(2)**2+v(3)**2)/2.0 ! + E_Thermal(i1,j1,k1)
-       u(5,i2,j1,k1)=u(5,i2,j1,k1)-dx2*dy1*dz1*(v(1)**2+v(2)**2+v(3)**2)/2.0 ! + E_Thermal(i2,j1,k1)
-       u(5,i1,j2,k1)=u(5,i1,j2,k1)-dx1*dy2*dz1*(v(1)**2+v(2)**2+v(3)**2)/2.0 ! + E_Thermal(i1,j2,k1)
-       u(5,i2,j2,k1)=u(5,i2,j2,k1)-dx2*dy2*dz1*(v(1)**2+v(2)**2+v(3)**2)/2.0 ! + E_Thermal(i2,j2,k1)
-       u(5,i1,j1,k2)=u(5,i1,j1,k2)-dx1*dy1*dz2*(v(1)**2+v(2)**2+v(3)**2)/2.0 ! + E_Thermal(i1,j1,k2)
-       u(5,i2,j1,k2)=u(5,i2,j1,k2)-dx2*dy1*dz2*(v(1)**2+v(2)**2+v(3)**2)/2.0 ! + E_Thermal(i2,j1,k2)
-       u(5,i1,j2,k2)=u(5,i1,j2,k2)-dx1*dy2*dz2*(v(1)**2+v(2)**2+v(3)**2)/2.0 ! + E_Thermal(i1,j2,k2)
-       u(5,i2,j2,k2)=u(5,i2,j2,k2)-dx2*dy2*dz2*(v(1)**2+v(2)**2+v(3)**2)/2.0 ! + E_Thermal(i2,j2,k2)
+       u(5,i1,j1,k1)=u(5,i1,j1,k1)+dx1*dy1*dz1*(v(1)**2+v(2)**2+v(3)**2)/2.0  + E_thermal
+       u(5,i2,j1,k1)=u(5,i2,j1,k1)+dx2*dy1*dz1*(v(1)**2+v(2)**2+v(3)**2)/2.0  + E_thermal
+       u(5,i1,j2,k1)=u(5,i1,j2,k1)+dx1*dy2*dz1*(v(1)**2+v(2)**2+v(3)**2)/2.0  + E_thermal
+       u(5,i2,j2,k1)=u(5,i2,j2,k1)+dx2*dy2*dz1*(v(1)**2+v(2)**2+v(3)**2)/2.0  + E_thermal
+       u(5,i1,j1,k2)=u(5,i1,j1,k2)+dx1*dy1*dz2*(v(1)**2+v(2)**2+v(3)**2)/2.0  + E_thermal
+       u(5,i2,j1,k2)=u(5,i2,j1,k2)+dx2*dy1*dz2*(v(1)**2+v(2)**2+v(3)**2)/2.0  + E_thermal
+       u(5,i1,j2,k2)=u(5,i1,j2,k2)+dx1*dy2*dz2*(v(1)**2+v(2)**2+v(3)**2)/2.0  + E_thermal
+       u(5,i2,j2,k2)=u(5,i2,j2,k2)+dx2*dy2*dz2*(v(1)**2+v(2)**2+v(3)**2)/2.0  + E_thermal
     enddo
+       !u=u*0.000000001
 
     return
   end subroutine GetU
@@ -474,6 +463,5 @@ contains
     if (rank == 0) write(*,"(f8.2,a)") time2,'  Called init var'
     return
   end subroutine initvar
-
 
 end program mhd_init

@@ -63,6 +63,7 @@ program cic_init_power
   real, dimension(nc+2,nc,nc_slab) :: slab, slab_work
   real, dimension(0:nc_node_dim+1,0:nc_node_dim+1,0:nc_node_dim+1) :: den 
   real, dimension(0:nc_node_dim+1,0:nc_node_dim+1) :: den_buf 
+  real, dimension(5,nc_node_dim,nc_node_dim,nc_node_dim) :: u
 
   !! Equivalence arrays to save memory
   equivalence (den,slab_work,recv_cube,xp_buf) 
@@ -77,14 +78,25 @@ program cic_init_power
   common xvp,den,recv_buf,send_buf,pksum
 #endif
 
+      type comm_wld
+        integer :: g !global number of zones in one direction
+        integer :: r !global index of index 0 in local array
+        integer :: m,n !start and end of local section without buffers
+        integer :: l !dimension of array inclusive buffers
+        integer, dimension(4) :: requests !communication handles
+      end type comm_wld
+
+      type(comm_wld) :: nx,ny,nz
+
+
 !!---start main--------------------------------------------------------------!!
 
   call mpi_initialize
   if (rank == 0) call writeparams
   firstfftw=.true.  ! initialize fftw so that it generates the plans
   call initvar
-  call read_particles
-  call pass_particles
+  !call read_particles
+  !call pass_particles
   call darkmatter
   if (rank == 0) call writepowerspectra
   call cp_fftw(0)
@@ -469,9 +481,9 @@ contains
     !! 3rd is standard deviation
 
 #ifdef NGP
-    fn=output_path//'init_ngpps.dat'
+    fn=output_path//'init_ngpps-mhd.dat'
 #else
-    fn=output_path//'init_cicps.dat'
+    fn=output_path//'init_cicps-mhd.dat'
 #endif
     write(*,*) 'Writing ',fn
     open(11,file=fn,recl=500)
@@ -501,11 +513,16 @@ contains
 
   subroutine darkmatter
     implicit none
-    integer :: i,j,k
+    integer :: i,j,k, cur_iter, cur_t
     integer :: i1,j1,k1
     real    :: d,dmin,dmax,dmint,dmaxt
     real*8  :: dsum,dvar,dsumt,dvart,sum_dm_local,sum_dm
     real, dimension(3) :: dis
+    real z_write!,nptotal
+    integer fstat
+    character(len=7) :: z_string
+    character(len=4) :: rank_s
+    character(len=100) :: check_name
 
     real time1,time2
     call cpu_time(time1)
@@ -516,7 +533,37 @@ contains
     enddo
 
     !! Assign masses to grid to compute dm power spectrum
-    call cicmass
+    !call cicmass
+
+    if (rank==0) then
+    !  z_write = z_checkpoint(cur_checkpoint)
+      print *,'calculating initial mhd spectrum'
+    endif
+
+    call mpi_bcast(z_write,1,mpi_real,0,mpi_comm_world,ierr) !! ????
+    
+    write(rank_s,'(i4)') rank
+    rank_s=adjustl(rank_s)
+
+    check_name=output_path//'mhd_ic'// &
+               rank_s(1:len_trim(rank_s))//'.dat'
+
+#ifdef BINARY
+    open(unit=21,file=check_name,status='old',iostat=fstat,form='binary')
+#else
+    open(unit=21,file=check_name,status='old',iostat=fstat,form='unformatted')
+#endif
+    !read(21)  cur_iter, cur_t,nx,ny,nz
+    read(21)  u!u(1,:,:,:) !u(:,nx%m:nx%n,ny%m:ny%n,nz%m:nz%n)
+    !read(185) b  !b(:,nx%m:nx%n,ny%m:ny%n,nz%m:nz%n)
+    close(21)
+  
+    write(*,*) u(1,1,1,1:10)
+
+    den(1:nc_node_dim,1:nc_node_dim,1:nc_node_dim) = u(1,:,:,:)!*omega_m/omega_b
+
+
+
 
     !! have to accumulate buffer density 
     call mesh_buffer
@@ -1011,9 +1058,9 @@ contains
     real    :: x,y,z,dx1,dx2,dy1,dy2,dz1,dz2,vf,v(3)
 
     do i=1,np_local
-       x=xvp(1,i)-0.5
-       y=xvp(2,i)-0.5
-       z=xvp(3,i)-0.5
+       x=xvp(1,i)!-0.5
+       y=xvp(2,i)!-0.5
+       z=xvp(3,i)!-0.5
 
        i1=floor(x)+1
        i2=i1+1

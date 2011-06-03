@@ -42,12 +42,13 @@
 !       call random_number(offset)
 !       offset=(offset-0.5)*mesh_scale
 !       shake_offset=shake_offset+offset
-       print *,'current shake offset:',shake_offset
+       print *,'substracting  shake offset of :',shake_offset
     endif
 !    if (pair_infall_no_shake.and.pair_infall .or. pp_test) offset=0.0
 !    call mpi_bcast(offset,3,MPI_REAL,0,MPI_COMM_WORLD,ierr)
 !#endif
 
+    call mpi_bcast(shake_offset,3,MPI_REAL,0,MPI_COMM_WORLD,ierr)
     call system_clock(count=count_i)
     
     !$omp parallel do default(shared) private(i)
