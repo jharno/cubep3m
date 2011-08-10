@@ -18,11 +18,11 @@
 
     if (rank==0) then
        
-!This will always use the same random number at each time step. 
-!It surely introduces a bias, but is good for testing code. 
 
 #ifdef READ_SEED
        
+       !This will always use the same random number at each time step. 
+       ! It surely introduces a bias, but is good for testing code. 
        call random_seed
        call random_seed(size=seedsize)
        allocate(iseed(seedsize))

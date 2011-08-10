@@ -2,12 +2,12 @@ SHELL = /bin/sh
 
 FC=mpif77
 
+
 #FFTWLIB=$(MCKENZIE_FFTW_LIB_PATH) #/home/merz/lib/fftw-2.1.5_intel8/lib
 #FFTWINC=$(MCKENZIE_FFTW_INC_PATH) #/home/merz/lib/fftw-2.1.5_intel8/include
 
 LDLIBS= -lsrfftw_mpi -lsrfftw -lsfftw_mpi -lsfftw -lm -ldl
-
-FFLAGS=-shared-intel -fpp -g -O3 -fpic -xhost -DDIAG -DBINARY -DNGP -DPPINT -DMPI_TIME  -DLRCKCORR -DNGPH -DDISP_MESH -DMOVE_GRID_BACK # -DPP_EXT -DPID_FLAG #-DDEBUG_PP_EXT #-DREAD_SEED #-DDISP_MESH -DPID_FLAG #-DDEBUG 
+FFLAGS=-shared-intel -fpp -g -O3 -fpic -xhost -DDIAG -DBINARY -DNGP -DPPINT -DMPI_TIME  -DLRCKCORR -DNGPH -DPP_EXT  #-DPID_FLAG #-DDEBUG_PP_EXT #-DREAD_SEED #-DDISP_MESH -DPID_FLAG #-DDEBUG 
 #FFLAGS=-dyncom "divar,ivar,rvar,C2RAY_HALO,lvar" -fpp -g -CB -O3 -fpic -xT -DDIAG -DBINARY -DNGP -DPPINT -DDISP_MESH -DMPI_TIME #-DDEBUG 
 #-DSCALED_IC #-DDEBUG_VEL -fpe3 -check bounds -DDEBUG #-DMHD #-check bounds -DDEBUG #-DDEBUG_LOW #-DDEBUG_VEL -DDEBUG_CCIC -DDEBUG_RHOC -openmp -DDEBUG_LOW
 #FFLAGS=-fpp -g -O0 -CB -DDIAG -DBINARY -DNGP -DPPINT -DDISP_MESH -DMPI_TIME -DDEBUG 
@@ -16,6 +16,7 @@ FFLAGS=-shared-intel -fpp -g -O3 -fpic -xhost -DDIAG -DBINARY -DNGP -DPPINT -DMP
 OBJS=   checkpoint.o coarse_cic_mass.o coarse_cic_mass_buffer.o coarse_force.o coarse_force_buffer.o coarse_mass.o coarse_max_dt.o coarse_mesh.o coarse_power.o coarse_velocity.o cubepm.o delete_particles.o fftw3ds.o fine_cic_mass.o fine_cic_mass_buffer.o fine_mesh.o fine_ngp_mass.o fine_velocity.o halofind.o fftw2.o init_projection.o kernel_initialization.o link_list.o move_grid_back.o mpi_initialization.o particle_initialization.o particle_mesh_threaded.o particle_pass.o projection.o report_pair.o report_force.o set_pair.o indexedsort.o timers.o timestep.o update_position.o variable_initialization.o 
 
 run: cubep3m
+
 
 cubep3m: $(OBJS)
 	$(FC) $(FFLAGS) -openmp  $^ -o $@  $(LDLIBS)

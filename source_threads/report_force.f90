@@ -57,15 +57,16 @@
       
        ! 5 Remove a particle and keep track of its position (create a hole)
 
-       !!HOLE IN HIGH DENSITY REGION IN 1st NODE
-       !******************************************       
+       !**********************************************
+       ! DIG A HOLE IN HIGH DENSITY REGION IN 1st NODE
+       !**********************************************       
        
        if (rank==0)then
           write(*,*) 'Largest halo_mean =',halo_x_mean(:,2)
           write(*,*) 'with mass =',halo_imass(2), 'out of',halo_imass(1:20)              
-          !x_hole = ceiling(halo_x_mean(:,2)/mesh_scale)            
-          x_hole = (/10.0,14.0,15.0/)            
-          write(*,*) 'coarse coordinate of x_hole = ',int(x_hole)     
+          x_hole = ceiling(halo_x_mean(:,2)/mesh_scale)            
+          !x_hole = (/10.0,14.0,15.0/)            
+          write(*,*) 'coarse coordinate of x_hole = ',int(x_hole), ceiling(halo_x_mean(:,2)/mesh_scale)     
           pp_hole = hoc(int(x_hole(1)),int(x_hole(2)),int(x_hole(3)))       
           write(*,*) 'hoc =',pp_hole      
           x_hole(:) = xv(1:3,pp_hole) 
@@ -137,13 +138,17 @@
           del_F=magF-magF_sim
           frac_err=del_F/magF
           
+          if (magr  < 4.0 .and. magr >  0.1  .and.  magF_sim <1e-3 ) then
+             write(*,*) '***wrong***',xv(1:3,i)
+          endif
+
 
           write(r_s,'(i5)') rank
           r_s = adjustl(r_s)
           ofile = 'report_force'//r_s(1:len_trim(r_s))//'.dat'
           !open(41,file='report_force.dat',position = 'append') 
           open(41,file=ofile,position = 'append') 
-          write(41,'(6f18.8)') magr, magF_sim, magF, frac_err, &
+          write(41,'(6f22.8)') magr, magF_sim, magF, frac_err, &
                              magF_sim_r,magF_sim_t
           close(41)
  

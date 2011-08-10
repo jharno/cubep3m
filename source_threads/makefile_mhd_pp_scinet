@@ -172,4 +172,4 @@ tar_source:
 
 # use make clean before!!!
 tar_code:
-	tar -cvjf cubep3m.tar.bz2  -recursive ../../*
+	tar -cvjf cubep3m.tar.bz2  --recursion ../*
