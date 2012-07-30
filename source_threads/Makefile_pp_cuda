@@ -1,0 +1,25 @@
+FC=mpif77
+CC=cc
+NVCC=nvcc
+
+CUFLAGS=-O3
+
+%.o:%.cu
+	$(NVCC) $(CUFLAGS) -c $< -o $@
+
+
+
+#testforce: ppforce_test.o ppforce.o
+#	$(FC) -o $@ $^ 
+
+testcuda: ppforce_test.o nbody-ueli.o
+	$(FC) -o $@ $^ -L/opt/cuda/lib64 -lcudart -lgomp 
+
+ppforce_test.o: ppforce_test.f90
+	$(FC) $(FFLAGS) -c $<
+
+#ppforce.o: ppforce.c
+#	$(CC) $(FFLAGS) -c $<
+
+clean:
+	rm -rf *.o testcuda

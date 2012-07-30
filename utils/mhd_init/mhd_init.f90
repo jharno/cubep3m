@@ -16,7 +16,7 @@ program mhd_init
 
   !! np is the number of particles
   !! np should be set to nc (1:1), hc (1:2), or qc (1:4)
-  integer, parameter :: np= hc
+  integer, parameter :: np= nc
   real, parameter    :: npr=np
 
   !! internal parallelization parameters
@@ -53,19 +53,27 @@ program mhd_init
 
   !! Dark matter arrays
   real, dimension(6,max_np) :: xvp
+  real, dimension(3,np_buffer) :: xp_buf
+  real, dimension(3*np_buffer) :: send_buf, recv_buf
+  
 
-  !! MHD arrays
+!! MHD arrays
   real, dimension(5,nc_node_dim,nc_node_dim,nc_node_dim) :: u
   real, dimension(3,nc_node_dim,nc_node_dim,nc_node_dim) :: b
-  real, dimension(0:nc_node_dim+1,0:nc_node_dim+1,0:nc_node_dim+1) :: den
-  real, dimension(0:nc_node_dim+1,0:nc_node_dim+1) :: den_buf
+  real, dimension(5,0:nc_node_dim+1,0:nc_node_dim+1,0:nc_node_dim+1) :: den
+  real, dimension(5,0:nc_node_dim+1,0:nc_node_dim+1) :: den_buf
   !real, dimension(nc+2,nc,nc_slab) :: slab, slab_work
   !real, dimension(nc_node_dim,nc_node_dim,nc_node_dim) :: cube
   !real, dimension(nc_node_dim,nc_node_dim,nc_slab,0:nodes_slab-1) :: recv_cube
+
+ !!! arrays
+ ! real, dimension(0:nc_node_dim+1,0:nc_node_dim+1,0:nc_node_dim+1) :: den
+ ! real, dimension(0:nc_node_dim+1,0:nc_node_dim+1) :: den_buf
+  
   
   !! Common block
 
-  common xvp,u
+  common xvp,u, xp_buf, send_buf, recv_buf, den, den_buf
 
 
 !!---start main--------------------------------------------------------------!!
@@ -75,8 +83,9 @@ program mhd_init
   firstfftw=.true.  ! initialize fftw so that it generates the plans
   call initvar
   call read_particles
- ! call pass_particles
-  call darkmatter
+  call pass_particles
+write(*,*) 'Passed Particles'  
+call darkmatter
   !if (rank == 0) call writepowerspectra
   !call cp_fftw(0)
   call mpi_finalize(ierr)
@@ -260,6 +269,9 @@ contains
     real time1,time2
     call cpu_time(time1)
 
+    !do k=0,nc_node_dim+1
+    !   den(:,:,k)=0
+    !enddo
      
     call GetU
     !call GetB
@@ -346,6 +358,428 @@ contains
     return
   end subroutine darkmatter
 
+
+  subroutine pass_particles
+    implicit none
+
+    integer i,pp,np_buf,np_exit,np_final,npo,npi
+    real x(3),lb,ub
+    integer, dimension(mpi_status_size) :: status,sstatus,rstatus
+    integer :: tag,srequest,rrequest,sierr,rierr
+    real(4), parameter :: eps = 1.0e-03
+
+    lb=0.0
+    ub=real(nc_node_dim)
+
+    np_buf=0
+    pp=1
+    do
+      if (pp > np_local) exit
+      x=xvp(:3,pp)
+      if (x(1) < lb .or. x(1) >= ub .or. x(2) < lb .or. x(2) >= ub .or. &
+          x(3) < lb .or. x(3) >= ub ) then
+!        write (*,*) 'PARTICLE OUT',xv(:,pp)
+        np_buf=np_buf+1
+        if (np_buf > np_buffer) then
+          print *,rank,'np_buffer =',np_buffer,'exceeded - np_buf =',np_buf
+          call mpi_abort(mpi_comm_world,ierr,ierr)
+        endif 
+        xp_buf(:,np_buf)=xvp(:3,pp)
+        xvp(:,pp)=xvp(:,np_local)
+        np_local=np_local-1
+        cycle 
+      endif
+      pp=pp+1
+    enddo
+ 
+    call mpi_reduce(np_buf,np_exit,1,mpi_integer,mpi_sum,0, &
+                    mpi_comm_world,ierr) 
+
+#ifdef DEBUG
+    do i=0,nodes-1
+      if (rank==i) print *,rank,'np_exit=',np_buf
+      call mpi_barrier(mpi_comm_world,ierr)
+    enddo
+#endif 
+
+    if (rank == 0) print *,'total exiting particles =',np_exit
+
+! pass +x
+
+    tag=11 
+    npo=0
+    pp=1
+
+    do 
+      if (pp > np_buf) exit
+      if (xp_buf(1,pp) >= ub) then
+        npo=npo+1
+        send_buf((npo-1)*3+1:npo*3)=xp_buf(:,pp)
+        xp_buf(:,pp)=xp_buf(:,np_buf)
+        np_buf=np_buf-1
+        cycle
+      endif
+      pp=pp+1
+    enddo
+
+#ifdef DEBUG
+    do i=0,nodes-1
+      if (rank==i) print *,rank,'np_out=',npo
+      call mpi_barrier(mpi_comm_world,ierr)
+    enddo
+#endif 
+
+    npi = npo
+
+    call mpi_sendrecv_replace(npi,1,mpi_integer,cart_neighbor(6), &
+                              tag,cart_neighbor(5),tag,mpi_comm_world, &
+                              status,ierr) 
+
+    call mpi_isend(send_buf,npo*3,mpi_real,cart_neighbor(6), &
+                   tag,mpi_comm_world,srequest,sierr)
+    call mpi_irecv(recv_buf,npi*3,mpi_real,cart_neighbor(5), &
+                   tag,mpi_comm_world,rrequest,rierr)
+    call mpi_wait(srequest,sstatus,sierr)
+    call mpi_wait(rrequest,rstatus,rierr)
+
+    do pp=1,npi
+      xp_buf(:,np_buf+pp)=recv_buf((pp-1)*3+1:pp*3)
+      xp_buf(1,np_buf+pp)=max(xp_buf(1,np_buf+pp)-ub,lb)
+    enddo
+
+#ifdef DEBUG
+    do i=0,nodes-1
+      if (rank==i) print *,rank,'x+ np_local=',np_local
+      call mpi_barrier(mpi_comm_world,ierr)
+    enddo
+#endif 
+
+    pp=1
+    do 
+      if (pp > npi) exit 
+      x=xp_buf(:,np_buf+pp)
+      if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
+          x(3) >= lb .and. x(3) < ub ) then
+
+        np_local=np_local+1
+        xvp(:3,np_local)=x
+        xp_buf(:,np_buf+pp)=xp_buf(:,np_buf+npi)
+        npi=npi-1
+        cycle
+      endif
+      pp=pp+1
+    enddo
+   
+    np_buf=np_buf+npi
+
+#ifdef DEBUG
+    do i=0,nodes-1
+      if (rank==i) print *,rank,'x+ np_exit=',np_buf,np_local
+      call mpi_barrier(mpi_comm_world,ierr)
+    enddo
+#endif 
+
+! pass -x
+
+    tag=12
+    npo=0
+    pp=1
+    do
+      if (pp > np_buf) exit
+      if (xp_buf(1,pp) < lb) then
+        npo=npo+1
+        send_buf((npo-1)*3+1:npo*3)=xp_buf(:,pp)
+        xp_buf(:,pp)=xp_buf(:,np_buf)
+        np_buf=np_buf-1
+        cycle 
+      endif
+      pp=pp+1
+    enddo
+
+    npi = npo
+
+    call mpi_sendrecv_replace(npi,1,mpi_integer,cart_neighbor(5), &
+                              tag,cart_neighbor(6),tag,mpi_comm_world, &
+                              status,ierr)
+
+    call mpi_isend(send_buf,npo*3,mpi_real,cart_neighbor(5), &
+                   tag,mpi_comm_world,srequest,sierr)
+    call mpi_irecv(recv_buf,npi*3,mpi_real,cart_neighbor(6), &
+                   tag,mpi_comm_world,rrequest,rierr)
+    call mpi_wait(srequest,sstatus,sierr)
+    call mpi_wait(rrequest,rstatus,rierr)
+
+    do pp=1,npi
+      xp_buf(:,np_buf+pp)=recv_buf((pp-1)*3+1:pp*3)
+      xp_buf(1,np_buf+pp)=min(xp_buf(1,np_buf+pp)+ub,ub-eps)
+    enddo
+
+    pp=1
+    do
+      if (pp > npi) exit
+      x=xp_buf(:,np_buf+pp)
+      if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
+          x(3) >= lb .and. x(3) < ub ) then
+        np_local=np_local+1
+        xvp(:3,np_local)=x
+        xp_buf(:,np_buf+pp)=xp_buf(:,np_buf+npi)
+        npi=npi-1
+        cycle 
+      endif
+      pp=pp+1
+    enddo
+  
+    np_buf=np_buf+npi
+
+! pass +y
+
+    tag=13 
+    npo=0
+    pp=1
+    do 
+      if (pp > np_buf) exit
+      if (xp_buf(2,pp) >= ub) then
+        npo=npo+1
+        send_buf((npo-1)*3+1:npo*3)=xp_buf(:,pp)
+        xp_buf(:,pp)=xp_buf(:,np_buf)
+        np_buf=np_buf-1
+        cycle 
+      endif
+      pp=pp+1
+    enddo
+
+    npi = npo
+
+    call mpi_sendrecv_replace(npi,1,mpi_integer,cart_neighbor(4), &
+                              tag,cart_neighbor(3),tag,mpi_comm_world, &
+                              status,ierr) 
+
+    call mpi_isend(send_buf,npo*3,mpi_real,cart_neighbor(4), &
+                   tag,mpi_comm_world,srequest,sierr)
+    call mpi_irecv(recv_buf,npi*3,mpi_real,cart_neighbor(3), &
+                   tag,mpi_comm_world,rrequest,rierr)
+    call mpi_wait(srequest,sstatus,sierr)
+    call mpi_wait(rrequest,rstatus,rierr)
+
+
+    do pp=1,npi
+      xp_buf(:,np_buf+pp)=recv_buf((pp-1)*3+1:pp*3)
+      xp_buf(2,np_buf+pp)=max(xp_buf(2,np_buf+pp)-ub,lb)
+    enddo
+
+    pp=1
+    do 
+      if (pp > npi) exit 
+      x=xp_buf(:,np_buf+pp)
+      if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
+          x(3) >= lb .and. x(3) < ub ) then
+        np_local=np_local+1
+        xvp(:3,np_local)=x
+        xp_buf(:,np_buf+pp)=xp_buf(:,np_buf+npi)
+        npi=npi-1
+        cycle 
+      endif
+      pp=pp+1
+    enddo
+   
+    np_buf=np_buf+npi
+
+! pass -y
+
+    tag=14
+    npo=0
+    pp=1
+    do
+      if (pp > np_buf) exit
+      if (xp_buf(2,pp) < lb) then
+        npo=npo+1
+        send_buf((npo-1)*3+1:npo*3)=xp_buf(:,pp)
+        xp_buf(:,pp)=xp_buf(:,np_buf)
+        np_buf=np_buf-1
+        cycle
+      endif
+      pp=pp+1
+    enddo
+
+    npi = npo
+
+    call mpi_sendrecv_replace(npi,1,mpi_integer,cart_neighbor(3), &
+                              tag,cart_neighbor(4),tag,mpi_comm_world, &
+                              status,ierr)
+
+    call mpi_isend(send_buf,npo*3,mpi_real,cart_neighbor(3), &
+                   tag,mpi_comm_world,srequest,sierr)
+    call mpi_irecv(recv_buf,npi*3,mpi_real,cart_neighbor(4), &
+                   tag,mpi_comm_world,rrequest,rierr)
+
+    call mpi_wait(srequest,sstatus,sierr)
+    call mpi_wait(rrequest,rstatus,rierr)
+
+    do pp=1,npi
+      xp_buf(:,np_buf+pp)=recv_buf((pp-1)*3+1:pp*3)
+      xp_buf(2,np_buf+pp)=min(xp_buf(2,np_buf+pp)+ub,ub-eps)
+    enddo
+
+    pp=1
+    do
+      if (pp > npi) exit
+      x=xp_buf(:,np_buf+pp)
+      if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
+          x(3) >= lb .and. x(3) < ub ) then
+        np_local=np_local+1
+        xvp(:3,np_local)=x
+        xp_buf(:,np_buf+pp)=xp_buf(:,np_buf+npi)
+        npi=npi-1
+        cycle 
+      endif
+      pp=pp+1
+    enddo
+  
+    np_buf=np_buf+npi
+
+! pass +z
+
+    tag=15 
+    npo=0
+    pp=1
+    do 
+      if (pp > np_buf) exit
+      if (xp_buf(3,pp) >= ub) then
+        npo=npo+1
+        send_buf((npo-1)*3+1:npo*3)=xp_buf(:,pp)
+        xp_buf(:,pp)=xp_buf(:,np_buf)
+        np_buf=np_buf-1
+        cycle 
+      endif
+      pp=pp+1
+    enddo
+
+    npi = npo
+
+    call mpi_sendrecv_replace(npi,1,mpi_integer,cart_neighbor(2), &
+                              tag,cart_neighbor(1),tag,mpi_comm_world, &
+                              status,ierr) 
+
+    call mpi_isend(send_buf,npo*3,mpi_real,cart_neighbor(2), &
+                   tag,mpi_comm_world,srequest,sierr)
+
+    call mpi_irecv(recv_buf,npi*3,mpi_real,cart_neighbor(1), &
+                   tag,mpi_comm_world,rrequest,rierr)
+    call mpi_wait(srequest,sstatus,sierr)
+    call mpi_wait(rrequest,rstatus,rierr)
+
+    do pp=1,npi
+      xp_buf(:,np_buf+pp)=recv_buf((pp-1)*3+1:pp*3)
+      xp_buf(3,np_buf+pp)=max(xp_buf(3,np_buf+pp)-ub,lb)
+    enddo
+
+    pp=1
+    do 
+      if (pp > npi) exit 
+      x=xp_buf(:,np_buf+pp)
+      if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
+          x(3) >= lb .and. x(3) < ub ) then
+        np_local=np_local+1
+        xvp(:3,np_local)=x
+        xp_buf(:,np_buf+pp)=xp_buf(:,np_buf+npi)
+        npi=npi-1
+        cycle 
+      endif
+      pp=pp+1
+    enddo
+   
+    np_buf=np_buf+npi
+
+! pass -z
+
+    tag=16
+    npo=0
+    pp=1
+    do
+      if (pp > np_buf) exit
+      if (xp_buf(3,pp) < lb) then
+        npo=npo+1
+        send_buf((npo-1)*3+1:npo*3)=xp_buf(:,pp)
+        xp_buf(:,pp)=xp_buf(:,np_buf)
+        np_buf=np_buf-1
+        cycle
+      endif
+      pp=pp+1
+    enddo
+
+    npi = npo
+
+    call mpi_sendrecv_replace(npi,1,mpi_integer,cart_neighbor(1), &
+                              tag,cart_neighbor(2),tag,mpi_comm_world, &
+                              status,ierr)
+
+
+    call mpi_isend(send_buf,npo*3,mpi_real,cart_neighbor(1), &
+                   tag,mpi_comm_world,srequest,sierr)
+    call mpi_irecv(recv_buf,npi*3,mpi_real,cart_neighbor(2), &
+                   tag,mpi_comm_world,rrequest,rierr)
+    call mpi_wait(srequest,sstatus,sierr)
+    call mpi_wait(rrequest,rstatus,rierr)
+
+    do pp=1,npi
+      xp_buf(:,np_buf+pp)=recv_buf((pp-1)*3+1:pp*3)
+      xp_buf(3,np_buf+pp)=min(xp_buf(3,np_buf+pp)+ub,ub-eps)
+    enddo
+
+    pp=1
+    do
+      if (pp > npi) exit
+      x=xp_buf(:,np_buf+pp)
+      if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
+          x(3) >= lb .and. x(3) < ub ) then
+        np_local=np_local+1
+        xvp(:3,np_local)=x
+        xp_buf(:,np_buf+pp)=xp_buf(:,np_buf+npi)
+        npi=npi-1
+        cycle 
+      endif
+      pp=pp+1
+    enddo
+  
+    np_buf=np_buf+npi
+
+#ifdef DEBUG
+    do i=0,nodes-1
+      if (rank==i) print *,rank,'particles left in buffer=',np_buf
+      call mpi_barrier(mpi_comm_world,ierr)
+    enddo
+#endif 
+
+    call mpi_reduce(np_buf,np_exit,1,mpi_integer,mpi_sum,0, &
+                    mpi_comm_world,ierr)
+
+    if (rank == 0) print *,'total buffered particles =',np_exit
+
+    call mpi_reduce(np_local,np_final,1,mpi_integer,mpi_sum,0, &
+                    mpi_comm_world,ierr)
+
+    if (rank == 0) then
+      print *,'total particles =',np_final
+      if (np_final /= np**3) then
+        print *,'ERROR: total number of particles incorrect after passing'
+      endif
+
+    endif
+ 
+!!  Check for particles out of bounds
+
+    do i=1,np_local
+      if (xvp(1,i) < 0 .or. xvp(1,i) >= nc_node_dim .or. &
+          xvp(2,i) < 0 .or. xvp(2,i) >= nc_node_dim .or. &
+          xvp(3,i) < 0 .or. xvp(3,i) >= nc_node_dim) then
+        print *,'pass_particles:particle out of bounds',rank,i,xvp(:3,i),nc_node_dim
+      endif
+    enddo
+
+  end subroutine pass_particles
+
+
+
   subroutine GetU
     implicit none
     real, parameter :: mp=(ncr/np)**3!*omega_b/omega_m
@@ -353,18 +787,19 @@ contains
     real, parameter ::gamma = 5./3.
     real, parameter :: k_B = 1.38065E-23 ! in J/K
     real,parameter  :: h = 0.701
+    real, parameter :: u_floor = 0.001
     real(8), parameter :: UnitConversion = (1+z_i)**(-5.0)*ncr**2/(box*h)**2/omega_m/4.2302E-16
 
     integer :: i,i1,i2,j1,j2,k1,k2
     real    :: x,y,z,dx1,dx2,dy1,dy2,dz1,dz2,vf,v(3)
-    real    :: E_thermal
+    real    :: E_thermal, max_u, min_u, max_den, min_den
 
     E_thermal = 0! k_B*T_CMB*(1+z_i)*UnitConversion
 
     do i=1,np_local
-       x=xvp(1,i)!-0.5
-       y=xvp(2,i)!-0.5
-       z=xvp(3,i)!-0.5
+       x=xvp(1,i)-0.5
+       y=xvp(2,i)-0.5
+       z=xvp(3,i)-0.5
        v=xvp(4:6,i)
 
        i1=floor(x)+1
@@ -380,61 +815,100 @@ contains
        dz1=k1-z
        dz2=1-dz1
 
-       if (i1 < 1 .or. i2 > nc_node_dim .or. j1 < 1 .or. &
-           j2 > nc_node_dim .or. k1 < 1 .or. k2 > nc_node_dim) then 
-         print *,'particle out of bounds',i1,i2,j1,j2,k1,k2,nc_node_dim
+       if (i1 < 0 .or. i2 > nc_node_dim +1 .or. j1 < 0 .or. &
+           j2 > nc_node_dim +1 .or. k1 < 0 .or. k2 > nc_node_dim+1) then 
+         print *,'GetU : particle out of bounds',rank, x,y,z,i1,i2,j1,j2,k1,k2,nc_node_dim
          cycle
        endif 
 
        dz1=mp*dz1
        dz2=mp*dz2
       
-       u(1,i1,j1,k1)=u(1,i1,j1,k1)+dx1*dy1*dz1
-       u(1,i2,j1,k1)=u(1,i2,j1,k1)+dx2*dy1*dz1
-       u(1,i1,j2,k1)=u(1,i1,j2,k1)+dx1*dy2*dz1
-       u(1,i2,j2,k1)=u(1,i2,j2,k1)+dx2*dy2*dz1
-       u(1,i1,j1,k2)=u(1,i1,j1,k2)+dx1*dy1*dz2
-       u(1,i2,j1,k2)=u(1,i2,j1,k2)+dx2*dy1*dz2
-       u(1,i1,j2,k2)=u(1,i1,j2,k2)+dx1*dy2*dz2
-       u(1,i2,j2,k2)=u(1,i2,j2,k2)+dx2*dy2*dz2
+       den(1,i1,j1,k1)=den(1,i1,j1,k1)+dx1*dy1*dz1
+       den(1,i2,j1,k1)=den(1,i2,j1,k1)+dx2*dy1*dz1
+       den(1,i1,j2,k1)=den(1,i1,j2,k1)+dx1*dy2*dz1
+       den(1,i2,j2,k1)=den(1,i2,j2,k1)+dx2*dy2*dz1
+       den(1,i1,j1,k2)=den(1,i1,j1,k2)+dx1*dy1*dz2
+       den(1,i2,j1,k2)=den(1,i2,j1,k2)+dx2*dy1*dz2
+       den(1,i1,j2,k2)=den(1,i1,j2,k2)+dx1*dy2*dz2
+       den(1,i2,j2,k2)=den(1,i2,j2,k2)+dx2*dy2*dz2
  
-       u(2,i1,j1,k1)=u(2,i1,j1,k1)+dx1*dy1*dz1*v(1)
-       u(2,i2,j1,k1)=u(2,i2,j1,k1)+dx2*dy1*dz1*v(1)
-       u(2,i1,j2,k1)=u(2,i1,j2,k1)+dx1*dy2*dz1*v(1)
-       u(2,i2,j2,k1)=u(2,i2,j2,k1)+dx2*dy2*dz1*v(1)
-       u(2,i1,j1,k2)=u(2,i1,j1,k2)+dx1*dy1*dz2*v(1)
-       u(2,i2,j1,k2)=u(2,i2,j1,k2)+dx2*dy1*dz2*v(1)
-       u(2,i1,j2,k2)=u(2,i1,j2,k2)+dx1*dy2*dz2*v(1)
-       u(2,i2,j2,k2)=u(2,i2,j2,k2)+dx2*dy2*dz2*v(1)
+       den(2,i1,j1,k1)=den(2,i1,j1,k1)+dx1*dy1*dz1*v(1)
+       den(2,i2,j1,k1)=den(2,i2,j1,k1)+dx2*dy1*dz1*v(1)
+       den(2,i1,j2,k1)=den(2,i1,j2,k1)+dx1*dy2*dz1*v(1)
+       den(2,i2,j2,k1)=den(2,i2,j2,k1)+dx2*dy2*dz1*v(1)
+       den(2,i1,j1,k2)=den(2,i1,j1,k2)+dx1*dy1*dz2*v(1)
+       den(2,i2,j1,k2)=den(2,i2,j1,k2)+dx2*dy1*dz2*v(1)
+       den(2,i1,j2,k2)=den(2,i1,j2,k2)+dx1*dy2*dz2*v(1)
+       den(2,i2,j2,k2)=den(2,i2,j2,k2)+dx2*dy2*dz2*v(1)
  
-       u(3,i1,j1,k1)=u(3,i1,j1,k1)+dx1*dy1*dz1*v(2)
-       u(3,i2,j1,k1)=u(3,i2,j1,k1)+dx2*dy1*dz1*v(2)
-       u(3,i1,j2,k1)=u(3,i1,j2,k1)+dx1*dy2*dz1*v(2)
-       u(3,i2,j2,k1)=u(3,i2,j2,k1)+dx2*dy2*dz1*v(2)
-       u(3,i1,j1,k2)=u(3,i1,j1,k2)+dx1*dy1*dz2*v(2)
-       u(3,i2,j1,k2)=u(3,i2,j1,k2)+dx2*dy1*dz2*v(2)
-       u(3,i1,j2,k2)=u(3,i1,j2,k2)+dx1*dy2*dz2*v(2)
-       u(3,i2,j2,k2)=u(3,i2,j2,k2)+dx2*dy2*dz2*v(2)
+       den(3,i1,j1,k1)=den(3,i1,j1,k1)+dx1*dy1*dz1*v(2)
+       den(3,i2,j1,k1)=den(3,i2,j1,k1)+dx2*dy1*dz1*v(2)
+       den(3,i1,j2,k1)=den(3,i1,j2,k1)+dx1*dy2*dz1*v(2)
+       den(3,i2,j2,k1)=den(3,i2,j2,k1)+dx2*dy2*dz1*v(2)
+       den(3,i1,j1,k2)=den(3,i1,j1,k2)+dx1*dy1*dz2*v(2)
+       den(3,i2,j1,k2)=den(3,i2,j1,k2)+dx2*dy1*dz2*v(2)
+       den(3,i1,j2,k2)=den(3,i1,j2,k2)+dx1*dy2*dz2*v(2)
+       den(3,i2,j2,k2)=den(3,i2,j2,k2)+dx2*dy2*dz2*v(2)
 
-       u(4,i1,j1,k1)=u(4,i1,j1,k1)+dx1*dy1*dz1*v(3)
-       u(4,i2,j1,k1)=u(4,i2,j1,k1)+dx2*dy1*dz1*v(3)
-       u(4,i1,j2,k1)=u(4,i1,j2,k1)+dx1*dy2*dz1*v(3)
-       u(4,i2,j2,k1)=u(4,i2,j2,k1)+dx2*dy2*dz1*v(3)
-       u(4,i1,j1,k2)=u(4,i1,j1,k2)+dx1*dy1*dz2*v(3)
-       u(4,i2,j1,k2)=u(4,i2,j1,k2)+dx2*dy1*dz2*v(3)
-       u(4,i1,j2,k2)=u(4,i1,j2,k2)+dx1*dy2*dz2*v(3)
-       u(4,i2,j2,k2)=u(4,i2,j2,k2)+dx2*dy2*dz2*v(3)
+       den(4,i1,j1,k1)=den(4,i1,j1,k1)+dx1*dy1*dz1*v(3)
+       den(4,i2,j1,k1)=den(4,i2,j1,k1)+dx2*dy1*dz1*v(3)
+       den(4,i1,j2,k1)=den(4,i1,j2,k1)+dx1*dy2*dz1*v(3)
+       den(4,i2,j2,k1)=den(4,i2,j2,k1)+dx2*dy2*dz1*v(3)
+       den(4,i1,j1,k2)=den(4,i1,j1,k2)+dx1*dy1*dz2*v(3)
+       den(4,i2,j1,k2)=den(4,i2,j1,k2)+dx2*dy1*dz2*v(3)
+       den(4,i1,j2,k2)=den(4,i1,j2,k2)+dx1*dy2*dz2*v(3)
+       den(4,i2,j2,k2)=den(4,i2,j2,k2)+dx2*dy2*dz2*v(3)
   
-       u(5,i1,j1,k1)=u(5,i1,j1,k1)+dx1*dy1*dz1*(v(1)**2+v(2)**2+v(3)**2)/2.0  + E_thermal
-       u(5,i2,j1,k1)=u(5,i2,j1,k1)+dx2*dy1*dz1*(v(1)**2+v(2)**2+v(3)**2)/2.0  + E_thermal
-       u(5,i1,j2,k1)=u(5,i1,j2,k1)+dx1*dy2*dz1*(v(1)**2+v(2)**2+v(3)**2)/2.0  + E_thermal
-       u(5,i2,j2,k1)=u(5,i2,j2,k1)+dx2*dy2*dz1*(v(1)**2+v(2)**2+v(3)**2)/2.0  + E_thermal
-       u(5,i1,j1,k2)=u(5,i1,j1,k2)+dx1*dy1*dz2*(v(1)**2+v(2)**2+v(3)**2)/2.0  + E_thermal
-       u(5,i2,j1,k2)=u(5,i2,j1,k2)+dx2*dy1*dz2*(v(1)**2+v(2)**2+v(3)**2)/2.0  + E_thermal
-       u(5,i1,j2,k2)=u(5,i1,j2,k2)+dx1*dy2*dz2*(v(1)**2+v(2)**2+v(3)**2)/2.0  + E_thermal
-       u(5,i2,j2,k2)=u(5,i2,j2,k2)+dx2*dy2*dz2*(v(1)**2+v(2)**2+v(3)**2)/2.0  + E_thermal
+       den(5,i1,j1,k1)=den(5,i1,j1,k1)+dx1*dy1*dz1*(v(1)**2+v(2)**2+v(3)**2)/2.0  + E_thermal
+       den(5,i2,j1,k1)=den(5,i2,j1,k1)+dx2*dy1*dz1*(v(1)**2+v(2)**2+v(3)**2)/2.0  + E_thermal
+       den(5,i1,j2,k1)=den(5,i1,j2,k1)+dx1*dy2*dz1*(v(1)**2+v(2)**2+v(3)**2)/2.0  + E_thermal
+       den(5,i2,j2,k1)=den(5,i2,j2,k1)+dx2*dy2*dz1*(v(1)**2+v(2)**2+v(3)**2)/2.0  + E_thermal
+       den(5,i1,j1,k2)=den(5,i1,j1,k2)+dx1*dy1*dz2*(v(1)**2+v(2)**2+v(3)**2)/2.0  + E_thermal
+       den(5,i2,j1,k2)=den(5,i2,j1,k2)+dx2*dy1*dz2*(v(1)**2+v(2)**2+v(3)**2)/2.0  + E_thermal
+       den(5,i1,j2,k2)=den(5,i1,j2,k2)+dx1*dy2*dz2*(v(1)**2+v(2)**2+v(3)**2)/2.0  + E_thermal
+       den(5,i2,j2,k2)=den(5,i2,j2,k2)+dx2*dy2*dz2*(v(1)**2+v(2)**2+v(3)**2)/2.0  + E_thermal
     enddo
        !u=u*0.000000001
+
+    !loop over physical cells and look for voids
+    do i1 = 1,nc_node_dim
+      do j1 = 1,nc_node_dim
+        do k1 = 1,nc_node_dim
+           if(den(1,i1,j1,k1) .eq. 0.0)then
+             write(*,*) 'rank, den(1,i1,j1,k1) = 0.0: ', rank, i1,j1,k1
+             write(*,*) 'Should I be enforcing a floor?'             
+             !pause
+           endif
+        enddo
+      enddo
+    enddo
+
+    !write(*,*) '(before mesh) rank, min/max den (1)=', rank, minval(den(1,:,:,:)), maxval(den(1,:,:,:))
+    !write(*,*) '(before mesh) rank, min/max den (2)=', rank, minval(den(2,:,:,:)), maxval(den(2,:,:,:))
+    !write(*,*) '(before mesh) rank, min/max den (3)=', rank, minval(den(3,:,:,:)), maxval(den(3,:,:,:))
+    !write(*,*) '(before mesh) rank, min/max den (4)=', rank, minval(den(4,:,:,:)), maxval(den(4,:,:,:))
+    !write(*,*) '(before mesh) rank, min/max den (5)=', rank, minval(den(5,:,:,:)), maxval(den(5,:,:,:))
+     call mesh_buffer
+    !write(*,*) '(after mesh) rank, min/max den (1)=', rank, minval(den(1,:,:,:)), maxval(den(1,:,:,:))
+    !write(*,*) '(after mesh) rank, min/max den (2)=', rank, minval(den(2,:,:,:)), maxval(den(2,:,:,:))
+    !write(*,*) '(after mesh) rank, min/max den (3)=', rank, minval(den(3,:,:,:)), maxval(den(3,:,:,:))
+    !write(*,*) '(after mesh) rank, min/max den (4)=', rank, minval(den(4,:,:,:)), maxval(den(4,:,:,:))
+    !write(*,*) '(after mesh) rank, min/max den (5)=', rank, minval(den(5,:,:,:)), maxval(den(5,:,:,:))
+
+    u(1,:,:,:)=den(1,1:nc_node_dim,1:nc_node_dim,1:nc_node_dim)
+    u(2,:,:,:)=den(2,1:nc_node_dim,1:nc_node_dim,1:nc_node_dim)
+    u(3,:,:,:)=den(3,1:nc_node_dim,1:nc_node_dim,1:nc_node_dim)
+    u(4,:,:,:)=den(4,1:nc_node_dim,1:nc_node_dim,1:nc_node_dim)
+    u(5,:,:,:)=den(5,1:nc_node_dim,1:nc_node_dim,1:nc_node_dim)
+
+
+    write(*,*) ' rank, min/max u (1)=', rank, minval(u(1,:,:,:)), maxval(u(1,:,:,:))
+    write(*,*) ' rank, min/max u (2)=', rank, minval(u(2,:,:,:)), maxval(u(2,:,:,:))
+    write(*,*) ' rank, min/max u (3)=', rank, minval(u(3,:,:,:)), maxval(u(3,:,:,:))
+    write(*,*) ' rank, min/max u (4)=', rank, minval(u(4,:,:,:)), maxval(u(4,:,:,:))
+    write(*,*) ' rank, min/max u (5)=', rank, minval(u(5,:,:,:)), maxval(u(5,:,:,:))
+
 
     return
   end subroutine GetU
@@ -457,11 +931,86 @@ contains
     do k=1,nc_node_dim
        b(:,:,:,k)=0
     enddo
-    
+    do k=0,nc_node_dim+1
+       !den(:,:,:,k)=0.001
+       den(:,:,:,k) = 0
+    enddo
+    !write(*,*) '**** Enforcing a floor on den***'
+    do k=1,np_buffer
+       xp_buf(:,k)=0
+    enddo
+    do k=1,3*np_buffer
+       recv_buf(k)=0
+    enddo
+
     call cpu_time(time2)
     time2=(time2-time1)
     if (rank == 0) write(*,"(f8.2,a)") time2,'  Called init var'
     return
   end subroutine initvar
+
+subroutine mesh_buffer
+!! mesh_buffer -- buffer cubic decomposition mesh
+  implicit none
+
+  integer(4) :: buffer_size
+  integer(4) :: tag
+  integer(4) :: status(MPI_STATUS_SIZE)
+
+    buffer_size = 5*(nc_node_dim + 2)**2
+
+  tag=64
+
+!! send to node in -x
+
+    den_buf(:,:,:)=den(:,0,:,:)
+    call mpi_sendrecv_replace(den_buf,buffer_size,mpi_real, &
+                              cart_neighbor(5),tag,cart_neighbor(6), &
+                              tag,mpi_comm_cart,status,ierr)
+    den(:,nc_node_dim,:,:)=den(:,nc_node_dim,:,:)+den_buf(:,:,:)
+
+!! send to node in +x
+
+      den_buf(:,:,:)=den(:,nc_node_dim+1,:,:)
+      call mpi_sendrecv_replace(den_buf,buffer_size,mpi_real, &
+                              cart_neighbor(6),tag,cart_neighbor(5), &
+                              tag,mpi_comm_cart,status,ierr)
+      den(:,1,:,:)=den(:,1,:,:)+den_buf(:,:,:)
+
+!! send to node in -y
+
+      den_buf(:,:,:)=den(:,:,0,:)
+      call mpi_sendrecv_replace(den_buf,buffer_size,mpi_real, &
+                              cart_neighbor(3),tag,cart_neighbor(4), &
+                              tag,mpi_comm_cart,status,ierr)
+      den(:,:,nc_node_dim,:)=den(:,:,nc_node_dim,:)+den_buf(:,:,:)
+
+!! send to node in +y
+
+      den_buf(:,:,:)=den(:,:,nc_node_dim+1,:)
+      call mpi_sendrecv_replace(den_buf,buffer_size,mpi_real, &
+                              cart_neighbor(4),tag,cart_neighbor(3), &
+                              tag,mpi_comm_cart,status,ierr)
+      den(:,:,1,:)=den(:,:,1,:)+den_buf(:,:,:)
+
+!! send to node in -z
+
+      den_buf(:,:,:)=den(:,:,:,0)
+      call mpi_sendrecv_replace(den_buf,buffer_size,mpi_real, &
+                              cart_neighbor(1),tag,cart_neighbor(2), &
+                              tag,mpi_comm_cart,status,ierr)
+      den(:,:,:,nc_node_dim)=den(:,:,:,nc_node_dim)+den_buf(:,:,:)
+
+!! send to node in +z
+
+      den_buf(:,:,:)=den(:,:,:,nc_node_dim+1)
+      call mpi_sendrecv_replace(den_buf,buffer_size,mpi_real, &
+                              cart_neighbor(2),tag,cart_neighbor(1), &
+                              tag,mpi_comm_cart,status,ierr)
+
+      den(:,:,:,1)=den(:,:,:,1)+den_buf(:,:,:)
+
+  end subroutine mesh_buffer
+
 
 end program mhd_init

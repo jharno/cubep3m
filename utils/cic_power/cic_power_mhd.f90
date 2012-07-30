@@ -663,6 +663,44 @@ contains
     call mesh_buffer
     cube=den(1:nc_node_dim,1:nc_node_dim,1:nc_node_dim)
 
+#ifdef write_den
+!! generate checkpoint names on each node
+    if (rank==0) then
+       z_write = z_checkpoint(cur_checkpoint)
+       print *,'wrinting baryon density for z=',z_write
+    endif
+
+    call mpi_bcast(z_write,1,mpi_real,0,mpi_comm_world,ierr)
+
+    write(z_string,'(f7.3)') z_write
+    z_string=adjustl(z_string)
+    write(rank_string,'(i4)') rank
+    rank_string=adjustl(rank_string)
+
+#ifdef KAISER
+    check_name=output_path//z_string(1:len_trim(z_string))//'den-mhd'// &
+               rank_string(1:len_trim(rank_string))//'-rsd.dat'
+#else 
+    check_name=output_path//z_string(1:len_trim(z_string))//'den-mhd'// &
+               rank_string(1:len_trim(rank_string))//'.dat'
+#endif
+
+!! open and write density file   
+#ifdef BINARY
+    open(unit=21,file=check_name,status='replace',iostat=fstat,form='binary')
+#else
+    open(unit=21,file=check_name,status='replace',iostat=fstat,form='unformatted')
+#endif
+    if (fstat /= 0) then
+      write(*,*) 'error opening density file'
+      write(*,*) 'rank',rank,'file:',check_name
+      call mpi_abort(mpi_comm_world,ierr,ierr)
+    endif
+
+    write(21) cube
+#endif
+
+
     sum_dm_local=sum(cube) 
     call mpi_reduce(sum_dm_local,sum_dm,1,mpi_real,mpi_sum,0,mpi_comm_world,ierr)
     if (rank == 0) print *,'DM total mass=',sum_dm
@@ -1184,7 +1222,7 @@ contains
 
     integer :: i,j,k,kg
     integer :: k1,k2
-    real    :: kr,kx,ky,kz,w1,w2,pow
+    real    :: kr,kx,ky,kz,w1,w2,pow, x,y,z,sync_x, sync_y, sync_z,kernel
     real, dimension(3,nc,nc_slab) :: pkt
     real, dimension(3,nc) :: pktsum
 
@@ -1217,11 +1255,33 @@ contains
                 k2=k1+1
                 w1=k1-kr
                 w2=1-w1
+                x = pi*real(kx)/ncr
+                y = pi*real(ky)/ncr
+                z = pi*real(kz)/ncr
+
+                if(x==0) then
+                   sync_x = 1
+                else
+                   sync_x = sin(x)/x
+                endif
+                if(y==0) then
+                   sync_y = 1
+                else
+                   sync_y = sin(y)/y
+                endif
+                if(z==0) then
+                   sync_z = 1
+                else
+                   sync_z = sin(z)/z
+                endif
+
+                kernel = sync_x*sync_y*sync_z
+ 
 #ifdef NGP
                 w1=1
                 w2=0
 #endif                
-                pow=sum((delta(i:i+1,j,k)/ncr**3)**2)
+                pow=sum((delta(i:i+1,j,k)/ncr**3)**2)/kernel
                 pkt(1,k1,k)=pkt(1,k1,k)+w1*pow
                 pkt(2,k1,k)=pkt(2,k1,k)+w1*pow**2
                 pkt(3,k1,k)=pkt(3,k1,k)+w1

@@ -1,6 +1,6 @@
 !! reads in halo catalogues and compares to the predictions of the
 !! Press-Schechter approximation
-!! Compile with: ifort PS_vs_simul_new.f90 deltac.f growth.f sigma_cobe_CMBfast.f spline.f splint.f -o PSvsSim
+!! Compile with: ifort PS_vs_simul_new.f90 deltac.f growth.f sigma_cobe_CMBfast.f spline.f90 splint.f90 -o PSvsSim
 program PS_check
   implicit none
 
@@ -13,7 +13,7 @@ program PS_check
 
 !file path to redshift list of halo catalogs (from cubepm.par)
 
-  character(len=*), parameter :: halofinds=cubepm_root//'input/halofinds' 
+  character(len=*), parameter :: halofinds=cubepm_root//'input/halofinds_JD' 
 
 !file path to table data
   
@@ -34,8 +34,8 @@ program PS_check
   real(8), parameter :: np = (nc/2.0)**3
   real(8), parameter :: sim_mp = (real(nc)**3)/np
 
-  real*8,parameter :: omegabh2=0.02156,omega0=0.3,lambda0=0.7
-  real*8,parameter :: h=0.7,an=1.0d0,tcmb=2.73
+  real*8,parameter :: omegabh2=0.0226,omega0=0.279,lambda0=0.721
+  real*8,parameter :: h=0.701,an=0.96d0,tcmb=2.73
   real*8,parameter :: M_sun = 1.989d33, cm_to_Mpc=3.086d24
   real*8,parameter :: pi=3.1415927, grav_const=6.672d-8 !cm^3/g/s^2
 
@@ -61,6 +61,7 @@ program PS_check
   real(4) :: z_halofind(max_size)
   character(7) :: z_s
   character(MSL) :: ifile2,nfile2
+  real*4 reading_buffer(28)
 #ifdef PLPLOT
   real*8 :: pkplot(3,dim)
 #endif
@@ -117,7 +118,7 @@ program PS_check
 51  close(11)
   write(*,*) 'halofinds to recompose:'
   do i=1,num_halofinds
-    write(*,'(f5.1)') z_halofind(i)
+    write(*,'(f7.3)') z_halofind(i)
   enddo
 
 do cur_halofind=1,num_halofinds
@@ -173,8 +174,10 @@ do cur_halofind=1,num_halofinds
   m_min=1.0d20
   m_max=0.0d0
 
+  print *, 'Reading halo file'
   do l=1,max_halos
-     read(11,'(6f20.10)',end=100) xx,yy,zz,M,rho_max,r
+     read(11,'(28f20.4)',end=100)  reading_buffer! xx,yy,zz,M,rho_max,r
+     M = reading_buffer(17)
      nn=nn+1
      mass=M*M_grid_s
      mass_halos = mass_halos+mass

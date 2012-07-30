@@ -20,6 +20,8 @@ program cubep3m
 
   real(4) :: t_elapsed
   external t_elapsed
+  real(4) :: z_write
+  character(len=7) :: z_s
 
   call datestamp 
 
@@ -69,8 +71,15 @@ if (rank == 0) write(*,*) 'finished kernel init',t_elapsed(wc_counter)
     u(5,nx%m:nx%n,ny%m:ny%n,nz%m:nz%n)=0.0001
     print *,rank,sum(u(1,nx%m:nx%n,ny%m:ny%n,nz%m:nz%n))
     b=0.0
+  elseif (restart_ic)then
+      if (rank==0) z_write = z_checkpoint(restart_checkpoint)
+      call mpi_bcast(z_write,1,mpi_real,0,mpi_comm_world,ierr)
+
+      write(z_s,'(f7.3)') z_write
+      z_s=adjustl(z_s)
+      call mpi_tvd_mhd_restart(output_path, z_s)
   else
-    call mpi_tvd_mhd_ic(ic_path)
+      call mpi_tvd_mhd_ic(ic_path)
   endif
 
   if (rank == 0) write(*,*) 'finished reading mhd initial conditions',t_elapsed(wc_counter)
@@ -155,6 +164,10 @@ if (rank == 0) write(*,*) 'finished kernel init',t_elapsed(wc_counter)
     if (rank == 0) write(*,*) 'finished backward gas sweep',t_elapsed(wc_counter)
 #endif
 
+
+    !if(superposition_test)then
+    !    checkpoint_step = .true.
+    !endif
     if (checkpoint_step.or.projection_step.or.halofind_step) then
 
 !! advance the particles to the end of the current step.

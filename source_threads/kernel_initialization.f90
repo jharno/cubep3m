@@ -52,6 +52,19 @@
     endif
 
 #endif
+#ifdef FPPKCORR
+    write(*,*) 'Using fine mesh kernel modified to match pp/fine mesh force'
+    !! boost the fine grid neighbours for improved force plots, when averaged over multiple time steps
+    do k=1,4
+       do j=1,4
+          do i=1,4
+             if(sqrt(real(i-1)**2 + real(j-1)**2 + real(k-1)**2) .le. 1.0 )then
+               rho_f(i,j,k,1) = rho_f(i,j,k,1)*1.6
+             endif
+          enddo
+       enddo
+    enddo
+#endif
 
 !! Reflect accross y/2 plane
              
@@ -120,6 +133,20 @@
     endif
 
 #endif
+#ifdef FPPKCORR
+    !write(*,*) 'Using fine mesh kernel modified to match pp/fine mesh force'
+    !! boost the fine grid neighbours for improved force plots, when averaged over multiple time steps
+    do k=1,4
+       do j=1,4
+          do i=1,4
+             if(sqrt(real(i-1)**2 + real(j-1)**2 + real(k-1)**2) .le. 1.0 )then
+                rho_f(i,j,k,1) = rho_f(i,j,k,1)*1.6
+             endif
+          enddo
+       enddo
+    enddo
+#endif
+
 
 !! Reflect accross y/2 plane
 
@@ -188,6 +215,20 @@
     endif
 
 #endif
+#ifdef FPPKCORR
+    !write(*,*) 'Using fine mesh kernel modified to match pp/fine mesh force'
+    !! boost the fine grid neighbours for improved force plots, when averaged over multiple time steps
+    do k=1,4
+       do j=1,4
+          do i=1,4
+             if(sqrt(real(i-1)**2 + real(j-1)**2 + real(k-1)**2) .le. 1.0 )then
+                rho_f(i,j,k,1) = rho_f(i,j,k,1)*1.6
+             endif
+          enddo
+       enddo
+    enddo
+#endif
+
 
 !! Reflect accross y/2 plane
   

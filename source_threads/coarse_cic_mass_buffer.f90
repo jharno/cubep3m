@@ -21,9 +21,13 @@
       x(:) = (1.0/real(mesh_scale)) * xv(1:3,pp) - 0.5
       i1(:) = floor(x(:)) + 1
       i2(:) = i1(:) + 1
+#ifdef COARSE_NGP
+      dx1(:) = 0.0
+      dx2(:) = 1.0
+#else
       dx1(:) = i1(:) - x(:)
       dx2(:) = 1.0 - dx1(:)
-
+#endif
 #ifdef MHD
       dx1(1) = mass_p * dx1(1) * (1.0 - omega_b/omega_m)
       dx2(1) = mass_p * dx2(1) * (1.0 - omega_b/omega_m)

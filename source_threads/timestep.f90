@@ -123,9 +123,13 @@
         checkpoint_step=.false.
         projection_step=.false.
         halofind_step=.false.
+        
 
         am=min(a_checkpoint(cur_checkpoint),a_projection(cur_projection),a_halofind(cur_halofind))
  
+#ifdef debug_timestep
+        write(*,*) cur_checkpoint,a_checkpoint(cur_checkpoint),cur_projection, a_projection(cur_projection),cur_halofind, a_halofind(cur_halofind),am, a,da
+#endif
         if (a_checkpoint(cur_checkpoint)==am) then
           
           if (a+da > a_checkpoint(cur_checkpoint)) then

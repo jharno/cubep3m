@@ -117,8 +117,15 @@
       read(21) np_local,a,t,tau,nts,dt_f_acc,dt_c_acc,cur_checkpoint, &
                cur_projection,cur_halofind,mass_p
 #endif
-      if (rank == 0) print *,'restarting simulation from z=',z_checkpoint(cur_checkpoint-1)
 
+      !cur_projection = cur_projection+1
+      cur_halofind = cur_halofind + 1      
+      if (rank == 0) print *,'restarting simulation from z=',z_checkpoint(cur_checkpoint-1)
+      if (rank == 0) print *,'current checkpoint, proj and halo entries are:', cur_checkpoint, &
+               cur_projection,cur_halofind
+      !cur_projection = cur_projection+1
+      !cur_halofind = cur_halofind + 1
+      !cur_checkpoint = cur_checkpoint+1
       if (np_local > max_np) then
         write(*,*) 'too many particles to store'
         write(*,*) 'rank',rank,'np_local',np_local,'max_np',max_np

@@ -133,6 +133,55 @@
       close(186)
      
       end subroutine mpi_tvd_mhd_ic 
+
+!=======================================================================
+      subroutine mpi_tvd_mhd_restart(ic_dir,z_s)
+      implicit none
+
+      include 'mpif.h'
+
+      character(len=80) :: fn1,fn2,fn3
+      character(*) :: ic_dir
+      integer :: fstat,ierr
+!      real(4) :: z_write
+      character(len=7) :: z_s
+      character(len=4) :: rank_s
+      integer :: cur_iter
+      real :: cur_t
+  
+      u=0.0
+      b=0.0
+      if (comm_cart_rank==0) print *,'reading mhd restart checkpoint'
+!      if (comm_cart_rank==0) z_write = z_checkpoint(restart_checkpoint)
+      !call mpi_bcast(z_write,1,mpi_real,0,mpi_comm_world,ierr)
+
+!      write(z_s,'(f7.3)') z_write
+!      z_s=adjustl(z_s)
+
+      write(rank_s,'(i4)') comm_cart_rank
+      rank_s=adjustl(rank_s)
+
+      fn1=ic_dir(1:len_trim(ic_dir))//z_s(1:len_trim(z_s))//'mhd'
+      write(fn2,'(i10,".dat")'),comm_cart_rank
+      fn2=adjustl(fn2)
+      fn3=fn1(1:len_trim(fn1))//fn2(1:len_trim(fn2))
+#ifdef BINARY
+      open(186,file=fn3,form='binary',status='old',iostat=fstat)
+#else
+      open(186,file=fn3,form='unformatted',status='old',iostat=fstat)
+#endif
+      if (fstat /= 0) then
+        print *,'error opening mhd restart checkpoint'
+        print *,'rank',comm_cart_rank,'file:',fn3
+        call mpi_abort(mpi_comm_world,ierr,ierr)
+      endif
+      read(186) cur_iter,cur_t,nx,ny,nz
+      read(186) u(:,nx%m:nx%n,ny%m:ny%n,nz%m:nz%n)
+      read(186) b(:,nx%m:nx%n,ny%m:ny%n,nz%m:nz%n)
+      close(186)
+
+      end subroutine mpi_tvd_mhd_restart 
+
 !=======================================================================
       subroutine mpi_tvd_mhd_init(nc_in,comm_cart_in, &
                     comm_cart_rank_in,comm_cart_coord_in, &
