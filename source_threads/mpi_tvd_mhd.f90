@@ -9,6 +9,7 @@
 ! Comm_module & sweep written for cubic decomposition 04.2003 Matthias
 ! Optimized routines customized (no performance gain) 04.2003 Matthias
 ! Modularized 03.2005 Hugh
+! !$omp description added back 01.2012 Yu
 !
 ! B field is stored on the left side of each cell
 !
@@ -483,6 +484,7 @@
       integer j,k,jm,km,im,ip
       real, dimension(nx) :: fluxbx,b1x,vx
 
+      !$omp parallel do private(j,jm,vx,b1x,fluxbx)
       do k=1,nz
         do j=2,ny
           jm=j-1
@@ -496,8 +498,9 @@
         enddo
       enddo
       do k=2,nz
-        km=k-1
+        !$omp parallel do private(km,vx,b1x,fluxbx)
         do j=1,ny
+          km=k-1
           vx=(u(2,:,j,km)+u(2,:,j,k))/(u(1,:,j,km)+u(1,:,j,k))
           b1x=b(3,:,j,k)
           call tvdb(fluxbx,b1x,vx,nx,dt)
@@ -535,6 +538,7 @@
         call comm_mpistop(0)
       endif
       c=0
+      !$omp parallel do private(j,i,kp,jp,ip,b11,b21,b31,v,ps,p,temp5) reduction(max:c)
       do k=nz%m,nz%n
         kp=k+1
         do j=ny%m,ny%n
@@ -656,6 +660,7 @@
       real, dimension(nu,nx) :: u1x
       integer j,k,jp,kp
 
+      !$omp parallel do private(j,u1x,b3x,jp,kp)
       do k=1,nz-1
         kp = k+1
         do j=1,ny-1
@@ -794,6 +799,7 @@
       integer i,j,k
       real ut(nu,ny,nz,nx),bt(nb,ny,nz,nx)
 
+      !$omp parallel do default(none) shared(u,b,ut,bt,ny,nx,nz) private(i,j)
       do k=1,nz
         do j=1,ny
           do i=1,nx
@@ -817,6 +823,7 @@
       integer i,j,k
       real ut(nu,nz,nx,ny),bt(nb,nz,nx,ny)
 
+      !$omp parallel do default(none) shared(u,b,ut,bt,ny,nx,nz) private(i,j)
       do k=1,nz
         do j=1,ny
           do i=1,nx
