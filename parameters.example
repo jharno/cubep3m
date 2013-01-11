@@ -14,10 +14,10 @@ character(*), parameter :: cubepm_root    = '../cubep3m.threads.070515/'
 integer(4),   parameter :: nodes_dim      = 1 
 
 ! fine mesh tiles / node / dimension
-integer(4),   parameter :: tiles_node_dim = 1 
+integer(4),   parameter :: tiles_node_dim = 2 
 
 ! cores / node
-integer(4),   parameter :: cores = 1
+integer(4),   parameter :: cores = 8
 
 ! density buffer fraction (1.0 == no buffer, 2.0 == 2x avg density, etc)
 real(4), parameter :: density_buffer = 2.0 !1.5
@@ -40,7 +40,6 @@ real(4),      parameter :: z_i            = 200.0
 real(4),      parameter :: omega_l        = 0.76 
 real(4),      parameter :: omega_m        = 1.0 - omega_l
 real(4),      parameter :: omega_b        = 0.04 
-!real(4),      parameter :: omega_b        = omega_m
 real(4),      parameter :: omega_ch       = 0.7
 real(4),      parameter :: bias           = 1
 real(4),      parameter :: power_index    = 2.0 ! 1.0,1.5 and 2.0 for power law transfer function in initial condition generator.
