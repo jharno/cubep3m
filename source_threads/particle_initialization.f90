@@ -225,10 +225,10 @@
     
 
     ! If one needs to ensure that particles start in physical volume...
-    call link_list
-    call particle_pass
-    call delete_particles
-    write(*,*) 'np_local after delete', np_local, 'rank =', rank
+    !call link_list
+    !call particle_pass
+    !call delete_particles
+    !write(*,*) 'np_local after delete', np_local, 'rank =', rank
 
 
 
