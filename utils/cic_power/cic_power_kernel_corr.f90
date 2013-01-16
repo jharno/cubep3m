@@ -22,7 +22,7 @@ program cic_power
 
   !! np is the number of particles
   !! np should be set to nc (1:1), hc (1:2), or qc (1:4)
-  integer, parameter :: np=nc
+  integer, parameter :: np=hc
   real, parameter    :: npr=np
 
   !! internals
