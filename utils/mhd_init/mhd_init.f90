@@ -797,8 +797,8 @@ contains
         !! Econst stores the remaing numerical factors from Nprime and Ephys2sim
 
         Econst = (4. / 9.) * 1.e-10
-        Nprime = omega_b * box**3 / mu / mproton / (nc / 2)**3
-        Ephys2sim = a_i**2 * nc**5 / omega_m**2 / box**5
+        Nprime = omega_b * box**3 / mu / mproton / (ncr / 2)**3
+        Ephys2sim = a_i**2 * ncr**5 / omega_m**2 / box**5
 
 #ifdef CMB_coupling
         E_thermal = Econst * Nprime * k_B * T_CMB * (1. + z_i) * Ephys2sim
