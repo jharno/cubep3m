@@ -31,19 +31,36 @@
     real gaz(5),acc(3)
     real, parameter ::T_CMB = 2.725 ! in K
     real, parameter :: k_B = 1.38065E-23 ! in J/K
-    real,parameter  :: h = 0.701
-    real :: UnitConversion
+    real, parameter  :: h = 0.701
+    real, parameter :: mu = 1.22 ! reduced mass
+    real, parameter :: mproton = 1.6726E-27 ! in kg
+    real :: Nprime, Ephys2sim, Econst
     real    :: E_thermal
     real    :: z
 
-    !CMB coupling for z>150
-    z = 1.0/a-1.0
-    !call mpi_bcast(z,1,MPI_REAL,0,MPI_COMM_WORLD,ierr)
-    if(z<150.0)then
-       E_thermal = 0.0
+    !
+    ! Temperature coupling to CMB for z > z_dec = 150 
+    !
+
+    z = 1./a - 1.
+
+    if (z < 150.) then
+
+        !! No longer coupled to the CMB        
+        E_thermal = 0.
+    
     else
-       UnitConversion = (1+z)**(-5.0)*real(nc)**2/(box*h)**2/omega_m/4.2302E-16
-       E_thermal = 0.0! k_B*T_CMB*(1+z)*UnitConversion
+      
+        !! Nprime is the number of physical particles represented by each sim particle
+        !! Ephys2sim converts physical energy units (Joules) to simulation units
+        !! Econst stores the remaing numerical factors from Nprime and Ephys2sim
+
+        Econst = (4. / 9.) * 1.e-10
+        Nprime = omega_b * box**3 / mu / mproton / (nc / 2)**3
+        Ephys2sim = a**2 * nc**5 / omega_m**2 / box**5
+
+        E_thermal = Econst * Nprime * k_B * T_CMB * (1. + z) * Ephys2sim
+
     endif 
 
 #endif
