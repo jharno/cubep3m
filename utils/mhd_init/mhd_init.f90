@@ -788,6 +788,7 @@ contains
     real    :: x,y,z,dx1,dx2,dy1,dy2,dz1,dz2,vf,v(3)
     real    :: E_thermal
 
+    E_thermal = 0.
     if (z_i > 150.) then
 
         !! Nprime is the number of physical particles represented by each sim
@@ -803,6 +804,7 @@ contains
         E_thermal = Econst * Nprime * k_B * T_CMB * (1. + z_i) * Ephys2sim
 #endif
     endif
+
     do i=1,np_local
        x=xvp(1,i)!-0.5
        y=xvp(2,i)!-0.5

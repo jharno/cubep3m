@@ -43,6 +43,7 @@
     ! T_CMB(z) evolves as (1+z)*T_CMB 
 
     z = 1./a - 1.
+    E_thermal = 0.
 
     if (z > 150.) then
       
