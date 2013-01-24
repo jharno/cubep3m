@@ -38,18 +38,13 @@
     real    :: E_thermal
     real    :: z
 
-    !
+    
     ! Temperature coupling to CMB for z > z_dec = 150 
-    !
+    ! T_CMB(z) evolves as (1+z)*T_CMB 
 
     z = 1./a - 1.
 
-    if (z < 150.) then
-
-        !! No longer coupled to the CMB        
-        E_thermal = 0.
-    
-    else
+    if (z > 150.) then
       
         !! Nprime is the number of physical particles represented by each sim particle
         !! Ephys2sim converts physical energy units (Joules) to simulation units
@@ -59,7 +54,13 @@
         Nprime = omega_b * box**3 / mu / mproton / (nc / 2)**3
         Ephys2sim = a**2 * nc**5 / omega_m**2 / box**5
 
+#ifdef CMB_coupling
         E_thermal = Econst * Nprime * k_B * T_CMB * (1. + z) * Ephys2sim
+#endif
+
+        ! Else it is no longer coupled to the CMB. 
+        ! Setting E_thermal to zero would mean zero coupling AND zero
+        ! temperature in the baryons, which we don't usually want.             
 
     endif 
 
