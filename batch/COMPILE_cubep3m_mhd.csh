@@ -12,7 +12,7 @@ cd ../source_threads
 make clean
 #make -j8 -f Make_NOMHD_PP_THREADS
 # this version for threaded  inline
-make cubep3m  -f makefile_mhd_pp_scinet 
+make -j8 cubep3m  -f makefile_mhd 
 #make  -f Make_PP_THREADS -j8
 cd ../batch
 #exit 0
