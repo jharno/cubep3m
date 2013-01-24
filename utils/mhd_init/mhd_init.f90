@@ -802,7 +802,7 @@ contains
 #ifdef CMB_coupling
         E_thermal = Econst * Nprime * k_B * T_CMB * (1. + z_i) * Ephys2sim
 #endif
-
+    endif
     do i=1,np_local
        x=xvp(1,i)!-0.5
        y=xvp(2,i)!-0.5
