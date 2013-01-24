@@ -1,8 +1,10 @@
 !! add mass to coarse mesh density along nodal boundry
   subroutine coarse_cic_mass_boundry(pp)
     use omp_lib
+#ifdef FFTMKL 
+    use MKL_DFTI
+#endif
     implicit none
-
 #ifdef PPINT
     include 'cubep3m.fh'
 #else
@@ -56,47 +58,57 @@
 
       if (i1(3) >= 1 .and. i1(3) <= nc_node_dim) then
         if (i1(2) >= 1 .and. i1(2) <= nc_node_dim) then
-          if (i1(1) >= 1 .and. i1(1) <= nc_node_dim) &
+
+          if (i1(1) >= 1 .and. i1(1) <= nc_node_dim) then
 !$omp atomic
             rho_c(i1(1),i1(2),i1(3)) = rho_c(i1(1),i1(2),i1(3)) + &
                                        dx1(1) * dx1(2) * dx1(3)
-          if (i2(1) >= 1 .and. i2(1) <= nc_node_dim) &
+          endif
+          if (i2(1) >= 1 .and. i2(1) <= nc_node_dim) then
 !$omp atomic
             rho_c(i2(1),i1(2),i1(3)) = rho_c(i2(1),i1(2),i1(3)) + &
                                        dx2(1) * dx1(2) * dx1(3)
+          endif
         endif
+
         if (i2(2) >= 1 .and. i2(2) <= nc_node_dim) then
-          if (i1(1) >= 1 .and. i1(1) <= nc_node_dim) &
+          if (i1(1) >= 1 .and. i1(1) <= nc_node_dim) then
 !$omp atomic
             rho_c(i1(1),i2(2),i1(3)) = rho_c(i1(1),i2(2),i1(3)) + &
                                        dx1(1) * dx2(2) * dx1(3)
-          if (i2(1) >= 1 .and. i2(1) <= nc_node_dim) &
+          endif
+          if (i2(1) >= 1 .and. i2(1) <= nc_node_dim) then
 !$omp atomic
             rho_c(i2(1),i2(2),i1(3)) = rho_c(i2(1),i2(2),i1(3)) + &
                                        dx2(1) * dx2(2) * dx1(3)
+          endif
         endif
       endif
 
       if (i2(3) >= 1 .and. i2(3) <= nc_node_dim) then
         if (i1(2) >= 1 .and. i1(2) <= nc_node_dim) then
-          if (i1(1) >= 1 .and. i1(1) <= nc_node_dim) &
+          if (i1(1) >= 1 .and. i1(1) <= nc_node_dim) then
 !$omp atomic
             rho_c(i1(1),i1(2),i2(3)) = rho_c(i1(1),i1(2),i2(3)) + &
                                        dx1(1) * dx1(2) * dx2(3)
-          if (i2(1) >= 1 .and. i2(1) <= nc_node_dim) &
+          endif
+          if (i2(1) >= 1 .and. i2(1) <= nc_node_dim) then
 !$omp atomic
             rho_c(i2(1),i1(2),i2(3)) = rho_c(i2(1),i1(2),i2(3)) + &
                                        dx2(1) * dx1(2) * dx2(3)
+          endif
         endif
         if (i2(2) >= 1 .and. i2(2) <= nc_node_dim) then
-          if (i1(1) >= 1 .and. i1(1) <= nc_node_dim) &
+          if (i1(1) >= 1 .and. i1(1) <= nc_node_dim) then
 !$omp atomic
             rho_c(i1(1),i2(2),i2(3)) = rho_c(i1(1),i2(2),i2(3)) + &
                                        dx1(1) * dx2(2) * dx2(3)
-          if (i2(1) >= 1 .and. i2(1) <= nc_node_dim) &
+          endif
+          if (i2(1) >= 1 .and. i2(1) <= nc_node_dim) then
 !$omp atomic
             rho_c(i2(1),i2(2),i2(3)) = rho_c(i2(1),i2(2),i2(3)) + &
                                        dx2(1) * dx2(2) * dx2(3)
+          endif
         endif
       endif
 
