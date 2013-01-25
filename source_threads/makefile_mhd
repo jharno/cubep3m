@@ -51,7 +51,7 @@ coarse_force.o: coarse_force.f90
 coarse_force_buffer.o: coarse_force_buffer.f90
 	$(FC) $(FFLAGS) -c $<
 
-coarse_mass.o: coarse_mass.f90 
+coarse_mass.o: coarse_mass.f90 mpi_tvd_mhd.o 
 	$(FC) $(FFLAGS) -openmp -c $<
 
 coarse_max_dt.o: coarse_max_dt.f90
