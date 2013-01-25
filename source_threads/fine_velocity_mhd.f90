@@ -114,9 +114,11 @@
           acc= a_mid * G * dt * force_f(:,iff,jff,kff,thread)
           gaz=u(:,iu,ju,ku)
           v=gaz(2:4)/gaz(1)
+#ifdef CMB_coupling
 ! z>150,u(5)=E_k+E_t,in which E_t coupled with CMB
 ! z<150,u(5) evolves naturally 
           if (z > 150.) gaz(5)=gaz(1)*sum(v**2)/2 + E_thermal
+#endif
           cs=sqrt(abs(gg*(gaz(5)/gaz(1)-sum(v**2)/2)))
           c=cfactor*(abs(v+acc)+cs)
           cmax=max(cmax,maxval(c))
