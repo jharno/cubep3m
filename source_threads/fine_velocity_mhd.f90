@@ -36,34 +36,11 @@
     real, parameter :: mproton = 1.6726E-27 ! in kg
     real :: Nprime, Ephys2sim, Econst
     real    :: E_thermal
+    real    :: E_kinetic
     real    :: z
-
-    
-    ! Temperature coupling to CMB for z > z_dec = 150 
-    ! T_CMB(z) evolves as (1+z)*T_CMB 
 
     z = 1./a - 1.
     E_thermal = 0.
-
-    if (z > 150.) then
-      
-        !! Nprime is the number of physical particles represented by each sim particle
-        !! Ephys2sim converts physical energy units (Joules) to simulation units
-        !! Econst stores the remaing numerical factors from Nprime and Ephys2sim
-
-        Econst = (4. / 9.) * 1.e-10
-        Nprime = omega_b * box**3 / mu / mproton / (real(nc) / 2)**3
-        Ephys2sim = a**2 * real(nc)**5 / omega_m**2 / box**5
-
-#ifdef CMB_coupling
-        E_thermal = Econst * Nprime * k_B * T_CMB * (1. + z) * Ephys2sim
-#endif
-
-        ! Else it is no longer coupled to the CMB. 
-        ! Setting E_thermal to zero would mean zero coupling AND zero
-        ! temperature in the baryons, which we don't usually want.             
-
-    endif 
 
 #endif
 
@@ -114,9 +91,6 @@
           acc= a_mid * G * dt * force_f(:,iff,jff,kff,thread)
           gaz=u(:,iu,ju,ku)
           v=gaz(2:4)/gaz(1)
-! z>150,u(5)=E_k+E_t,in which E_t coupled with CMB
-! z<150,u(5) evolves naturally 
-          if (z > 150.) gaz(5)=gaz(1)*sum(v**2)/2 + E_thermal
           cs=sqrt(abs(gg*(gaz(5)/gaz(1)-sum(v**2)/2)))
           c=cfactor*(abs(v+acc)+cs)
           cmax=max(cmax,maxval(c))
@@ -132,9 +106,40 @@
           u(5,iu,ju,ku)=gaz(5)+sum((gaz(2:4)+gaz(1)*dv/2)*dv) 
           u(2:4,iu,ju,ku)=gaz(2:4)+gaz(1)*dv
 #endif
+
+#ifdef CMB_coupling
+    
+          ! Temperature coupling to CMB for z > z_dec = 150 
+          ! T_CMB(z) evolves as (1+z)*T_CMB 
+
+          if (z > 150.) then
+      
+            !! Nprime is the number of physical particles represented by each sim particle
+            !! Ephys2sim converts physical energy units (Joules) to simulation units
+            !! Econst stores the remaing numerical factors from Nprime and Ephys2sim
+
+            Econst = (4. / 9.) * 1.e-10
+            Nprime = omega_b * box**3 / mu / mproton / real(nc)**3
+            Ephys2sim = a**2 * real(nc)**5 / omega_m**2 / box**5
+            E_thermal = u(1,iu,ju,ku) * Econst * Nprime * k_B * T_CMB * (1. + z) * Ephys2sim
+
+            v=u(2:4,iu,ju,ku)/u(1,iu,ju,ku)
+            E_kinetic=u(1,iu,ju,ku)*sum(v**2)/2
+
+            u(5,iu,ju,ku) = E_kinetic + E_thermal
+
+
+            ! Else it is no longer coupled to the CMB. 
+            ! Setting E_thermal to zero would mean zero coupling AND zero
+            ! temperature in the baryons, which we don't usually want.             
+
+          endif 
+#endif
         enddo
       enddo
     enddo
+            ! using the line below to check the order of Kinetic/Thermal Energy
+            ! print*,'CMB coupling,E_k=',E_kinetic,'E_thermal=',E_thermal
 #endif
 #ifdef DM_VEL_OLD
 !! update dark matter velocity
