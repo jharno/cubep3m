@@ -82,7 +82,7 @@
       if (comm_cart_rank==0) print *,'writing out state',cur_iter,cur_t,z_write
 !      write(fn1,'(i10,"state")'),cur_iter
       fn1=z_write(1:len_trim(z_write))//'mhd'
-      write(fn2,'(i10,".dat")'),comm_cart_rank
+      write(fn2,'(i10,".dat")') comm_cart_rank
       fn1=adjustl(fn1)
       fn2=adjustl(fn2) 
       fn3=out_dir(1:len_trim(out_dir))//fn1(1:len_trim(fn1))//fn2(1:len_trim(fn2))
@@ -116,7 +116,7 @@
       b=0.0
       if (comm_cart_rank==0) print *,'reading in mhd initial conditions'
       fn1=ic_dir(1:len_trim(ic_dir))//'mhd_ic'
-      write(fn2,'(i10,".dat")'),comm_cart_rank
+      write(fn2,'(i10,".dat")') comm_cart_rank
       fn2=adjustl(fn2)
       fn3=fn1(1:len_trim(fn1))//fn2(1:len_trim(fn2))
 #ifdef BINARY
@@ -163,7 +163,7 @@
       rank_s=adjustl(rank_s)
 
       fn1=ic_dir(1:len_trim(ic_dir))//z_s(1:len_trim(z_s))//'mhd'
-      write(fn2,'(i10,".dat")'),comm_cart_rank
+      write(fn2,'(i10,".dat")') comm_cart_rank
       fn2=adjustl(fn2)
       fn3=fn1(1:len_trim(fn1))//fn2(1:len_trim(fn2))
 #ifdef BINARY
@@ -905,7 +905,7 @@
         tmp = df1*df0
         where (tmp.gt.0.)
           d1 = 2.*tmp/(df1+df0)
-        else where
+        elsewhere
           d1 = 0.
         end where
         flux1 = 0.5*(fr1-fl1+d1(:,2)-d1(:,1))
