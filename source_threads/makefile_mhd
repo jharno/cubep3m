@@ -22,7 +22,7 @@ cubep3m: $(OBJS)
 	$(FC) $(FFLAGS) -openmp  $^ -o $@ -L$(FFTWLIB) $(LDLIBS) 
 
 mpi_tvd_mhd.o: mpi_tvd_mhd.f90
-	$(FC) $(FFLAGS) -c $<
+	$(FC) $(FFLAGS) -openmp -c $<
 
 gas_density_buffer.o: gas_density_buffer.f90 mpi_tvd_mhd.o
 	$(FC) $(FFLAGS) -c $<

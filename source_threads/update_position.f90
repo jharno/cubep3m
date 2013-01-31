@@ -1,16 +1,20 @@
 !! update particle positions
   subroutine update_position
-    implicit none
+    use omp_lib
+#ifdef FFTMKL
+   use MKL_DFTI
+#endif
+implicit none
 #ifdef DISP_MESH 
     include 'mpif.h'
 #endif
     include 'cubepm.fh'
 
-#ifdef READ_SEED
     character(len=max_path) :: seedfile
     integer(4) :: seedsize
-    integer(4), allocatable, dimension(:) :: iseed
-#endif
+    integer(4), allocatable, dimension(:) :: iseed,old
+    integer k_seed, clock
+    integer, dimension(8) :: values
 
     integer(4) :: i,j
 #ifdef DISP_MESH 
@@ -18,14 +22,16 @@
 
     if (rank==0) then
        
-
-#ifdef READ_SEED
+!This will always use the same random number at each time step. 
+!It surely introduces a bias, but is good for testing code. 
        
-       !This will always use the same random number at each time step. 
-       ! It surely introduces a bias, but is good for testing code. 
        call random_seed
        call random_seed(size=seedsize)
+
        allocate(iseed(seedsize))
+       allocate(old(seedsize))
+
+#ifdef READ_SEED
 
        seedfile = ic_path//'seed0.init'  !or any other seed files available
        open(11,file=seedfile)
@@ -36,14 +42,18 @@
        close(11)
 
        call random_seed(put=iseed(1:seedsize))
+#else
+
+       call date_and_time(values=values)
+       !if(rank==0) write(*,*) values(7:8), iseed      
+       call random_seed(put=values(7:8)) 
 
 #endif
 
        call random_number(offset)
        offset=(offset-0.5)*mesh_scale
        shake_offset=shake_offset+offset
-       print *,'current shake offset:',offset(1:3)
-       print *,'cumulative offset:', shake_offset(1:3)
+       print *,'current shake offset:',shake_offset
     endif
     if (pair_infall_no_shake.and.pair_infall .or. pp_test) offset=0.0
     call mpi_bcast(offset,3,MPI_REAL,0,MPI_COMM_WORLD,ierr)
