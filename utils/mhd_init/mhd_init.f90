@@ -788,7 +788,8 @@ contains
     real    :: x,y,z,dx1,dx2,dy1,dy2,dz1,dz2,vf,v(3)
     real    :: E_thermal
 
-    E_thermal = 0.
+    E_thermal=0.
+
     if (z_i > 150.) then
 
         !! Nprime is the number of physical particles represented by each sim
@@ -797,7 +798,7 @@ contains
         !! Econst stores the remaing numerical factors from Nprime and Ephys2sim
 
         Econst = (4. / 9.) * 1.e-10
-        Nprime = omega_b * box**3 / mu / mproton / (ncr / 2)**3
+        Nprime = omega_b * box**3 / mu / mproton / ncr**3
         Ephys2sim = a_i**2 * ncr**5 / omega_m**2 / box**5
 
 #ifdef CMB_coupling
