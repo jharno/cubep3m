@@ -16,13 +16,13 @@ program cic_init_power
 
   !! np is the number of particles
   !! np should be set to nc (1:1), hc (1:2), or qc (1:4)
-  integer, parameter :: np= nc!hc
+  integer, parameter :: np= hc!nc
   real, parameter    :: npr=np
 
   !! internal parallelization parameters
   integer(4), parameter :: nc_node_dim = nc/nodes_dim
   integer(4), parameter :: np_node_dim = np/nodes_dim
-  integer(4), parameter :: np_buffer = np_node_dim**3
+  integer(4), parameter :: np_buffer = 0.35*np_node_dim**3
   integer(4), parameter :: max_np = np_node_dim**3 + np_buffer
   integer(4), parameter :: nodes = nodes_dim * nodes_dim * nodes_dim
   integer(4), parameter :: nodes_slab = nodes_dim * nodes_dim
@@ -44,6 +44,10 @@ program cic_init_power
  
   !! Other parameters
   real, parameter :: pi=3.14159
+
+#ifdef KAISER
+  real, parameter :: a = 1/(1+z_i)
+#endif
 
   !! Dark matter arrays
   real, dimension(6,max_np) :: xvp
@@ -197,8 +201,12 @@ contains
 
     rank_s=adjustl(rank_s)
     fn=scratch_path//'xv'//rank_s(1:len_trim(rank_s))//'.ic'
+#ifdef BINARY
     open(21,file=fn,status='old',form='binary',iostat=fstat)
-    if (fstat /= 0) then
+#else
+    open(21,file=fn,status='old',form='unformatted',iostat=fstat)
+#endif
+     if (fstat /= 0) then
       print *,'error opening:',fn
       call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
@@ -236,6 +244,27 @@ contains
 #endif
     enddo
     close(21)
+
+#ifdef KAISER
+
+    !Red Shift Distortion: x_z -> x_z +  v_z/H(Z)
+    !Converting seconds into simulation time units
+    !cancels the H0...
+
+    xvp(3,:)=xvp(3,:) + xvp(6,:)*1.5/sqrt(a*(1+a*(1-omega_m-omega_l)/omega_m + omega_l/omega_m*a**3))
+
+    call pass_particles
+
+    if(rank==0) then
+       write(*,*) '**********************'
+       write(*,*) 'Included Kaiser Effect'
+       write(*,*) 'Omega_m =', omega_m, 'a =', a
+       !write(*,*) '1/H(z) =', 1.5*sqrt(omegam/cubepm_a)
+       write(*,*) '1/H(z) =', 1.5/sqrt(a*(1+a*(1-omega_m-omega_l)/omega_m + omega_l/omega_m*a**3))
+       write(*,*) '**********************'
+    endif
+#endif
+
 
 #ifdef DEBUG
     do j=0,nodes-1
@@ -459,6 +488,7 @@ contains
 #endif
     real         :: kr
     character*512 :: fn
+    character*5  :: prefix
     character*7  :: z_write
     real time1,time2
     call cpu_time(time1)
@@ -469,15 +499,26 @@ contains
     !! 3rd is standard deviation
 
 #ifdef NGP
-    fn=output_path//'init_ngpps.dat'
+    prefix='ngpps'
 #else
-    fn=output_path//'init_cicps.dat'
+    prefix='cicps'
 #endif
+
+#ifdef KAISER
+    fn=output_path//'init_'//prefix//'-RSD.dat'
+#else
+    fn=output_path//'init_'//prefix//'.dat'
+#endif
+
     write(*,*) 'Writing ',fn
     open(11,file=fn,recl=500)
     do k=2,hc+1
        kr=2*pi*(k-1)/box
+#ifdef NGP
+       write(11,*) kr,pkdm(:,k-1)
+#else
        write(11,*) kr,pkdm(:,k)
+#endif
 #ifdef PLPLOT
        kp=k-1
        pkplot(1,kp)=real(kr,kind=8)
@@ -502,10 +543,12 @@ contains
   subroutine darkmatter
     implicit none
     integer :: i,j,k
-    integer :: i1,j1,k1
+    integer :: i1,j1,k1,fstat
     real    :: d,dmin,dmax,dmint,dmaxt
     real*8  :: dsum,dvar,dsumt,dvart,sum_dm_local,sum_dm
     real, dimension(3) :: dis
+    character(len=4) :: rank_string
+    character(len=100) :: check_name
 
     real time1,time2
     call cpu_time(time1)
@@ -517,10 +560,40 @@ contains
 
     !! Assign masses to grid to compute dm power spectrum
     call cicmass
+    if(rank.eq.0) then
+       write(*,*) 'Called cicmass'
+    endif
 
     !! have to accumulate buffer density 
     call mesh_buffer
     cube=den(1:nc_node_dim,1:nc_node_dim,1:nc_node_dim)
+
+#ifdef write_den
+!! generate checkpoint names on each node
+    if (rank==0) then
+       print *,'Wrinting density to file'
+    endif
+ 
+   write(rank_string,'(i4)') rank
+    rank_string=adjustl(rank_string)
+  
+    check_name=output_path//'den'// &
+               rank_string(1:len_trim(rank_string))//'.init'
+
+!! open and write density file   
+#ifdef BINARY
+    open(unit=21,file=check_name,status='replace',iostat=fstat,form='binary')
+#else
+    open(unit=21,file=check_name,status='replace',iostat=fstat,form='unformatted')
+#endif
+    if (fstat /= 0) then
+      write(*,*) 'error opening density file'
+      write(*,*) 'rank',rank,'file:',check_name
+      call mpi_abort(mpi_comm_world,ierr,ierr)
+    endif
+
+    write(21) cube
+#endif
 
 
     sum_dm_local=0.0
@@ -1078,12 +1151,18 @@ contains
           do i=1,nc+2,2
              kx=(i-1)/2
              kr=sqrt(kx**2+ky**2+kz**2)
+             if(kx.eq.0 .and. ky <=0 .and. kz <=0)cycle;
+             if(kx.eq.0 .and. ky >0 .and. kz <0)cycle;
              if (kr .ne. 0) then
                 k1=ceiling(kr)
                 k2=k1+1
                 w1=k1-kr
                 w2=1-w1
-                pow=sum((slab(i:i+1,j,k)/(real(ncr))**3)**2)
+#ifdef NGP
+                w1=1
+                w2=0
+#endif
+                 pow=sum((slab(i:i+1,j,k)/(real(ncr))**3)**2)
                 pktsum(1,k1)=pktsum(1,k1)+w1*pow
                 pktsum(2,k1)=pktsum(2,k1)+w1*pow**2
                 pktsum(3,k1)=pktsum(3,k1)+w1
@@ -1108,8 +1187,12 @@ contains
         else
           pkdm(:,k)=pksum(1:2,k)/pksum(3,k)
           pkdm(2,k)=sqrt(abs((pkdm(2,k)-pkdm(1,k)**2)/(pksum(3,k)-1)))
+#ifdef NGP
+          pkdm(1:2,k)=4*pi*(real(k))**3*pkdm(1:2,k)
+#else
           pkdm(1:2,k)=4*pi*(real(k)-1.)**3*pkdm(1:2,k)
-       endif
+#endif
+        endif
       enddo
     endif
 
@@ -1177,6 +1260,7 @@ subroutine mesh_buffer
 !! send to node in -x
 
     den_buf(:,:)=den(0,:,:)
+    write(*, *) "GOT HERE 1a"
     call mpi_sendrecv_replace(den_buf,buffer_size,mpi_real, &
                               cart_neighbor(5),tag,cart_neighbor(6), &
                               tag,mpi_comm_cart,status,ierr)
@@ -1184,8 +1268,10 @@ subroutine mesh_buffer
 
 !! send to node in +x
    
+
       den_buf(:,:)=den(nc_node_dim+1,:,:)
-      call mpi_sendrecv_replace(den_buf,buffer_size,mpi_real, &
+      write(*, *) "GOT HERE 1b"
+       call mpi_sendrecv_replace(den_buf,buffer_size,mpi_real, &
                               cart_neighbor(6),tag,cart_neighbor(5), &
                               tag,mpi_comm_cart,status,ierr)
       den(1,:,:)=den(1,:,:)+den_buf(:,:)
@@ -1193,6 +1279,7 @@ subroutine mesh_buffer
 !! send to node in -y
 
       den_buf(:,:)=den(:,0,:)
+      write(*, *) "GOT HERE 1c"
       call mpi_sendrecv_replace(den_buf,buffer_size,mpi_real, &
                               cart_neighbor(3),tag,cart_neighbor(4), &
                               tag,mpi_comm_cart,status,ierr)
@@ -1201,6 +1288,7 @@ subroutine mesh_buffer
 !! send to node in +y
 
       den_buf(:,:)=den(:,nc_node_dim+1,:)
+      write(*, *) "GOT HERE 1d"
       call mpi_sendrecv_replace(den_buf,buffer_size,mpi_real, &
                               cart_neighbor(4),tag,cart_neighbor(3), &
                               tag,mpi_comm_cart,status,ierr)
@@ -1209,7 +1297,8 @@ subroutine mesh_buffer
 !! send to node in -z
     
       den_buf(:,:)=den(:,:,0)
-      call mpi_sendrecv_replace(den_buf,buffer_size,mpi_real, &
+      write(*, *) "GOT HERE 1e"
+       call mpi_sendrecv_replace(den_buf,buffer_size,mpi_real, &
                               cart_neighbor(1),tag,cart_neighbor(2), &
                               tag,mpi_comm_cart,status,ierr)
       den(:,:,nc_node_dim)=den(:,:,nc_node_dim)+den_buf(:,:)
@@ -1217,7 +1306,8 @@ subroutine mesh_buffer
 !! send to node in +z
 
       den_buf(:,:)=den(:,:,nc_node_dim+1)
-      call mpi_sendrecv_replace(den_buf,buffer_size,mpi_real, &
+      write(*, *) "GOT HERE 1f"
+       call mpi_sendrecv_replace(den_buf,buffer_size,mpi_real, &
                               cart_neighbor(2),tag,cart_neighbor(1), &
                               tag,mpi_comm_cart,status,ierr)
 
