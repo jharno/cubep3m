@@ -120,7 +120,7 @@
 
 !! Increment projection counter 
 
-    cur_projection=cur_projection+1
+    !cur_projection=cur_projection+1
 
     projection_step=.false.
 

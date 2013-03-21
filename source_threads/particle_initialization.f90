@@ -119,7 +119,7 @@
 #endif
 
       !cur_projection = cur_projection+1
-      cur_halofind = cur_halofind + 1      
+      !cur_halofind = cur_halofind + 1      
       if (rank == 0) print *,'restarting simulation from z=',z_checkpoint(cur_checkpoint-1)
       if (rank == 0) print *,'current checkpoint, proj and halo entries are:', cur_checkpoint, &
                cur_projection,cur_halofind
