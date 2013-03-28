@@ -1,5 +1,9 @@
 !! calculate mass power spectrum using coarse mesh density
   subroutine coarse_power
+    use omp_lib
+#ifdef FFTMKL 
+    use MKL_DFTI
+#endif
     implicit none
   
     include 'mpif.h'
@@ -12,7 +16,7 @@
     integer(4), parameter :: hc=nc_dim/2
     integer(4) :: i,j,k,kg
     integer(4) :: k1, k2
-    real(4) :: kz,ky,kx,kr,w1,w2,pow
+    real(4) :: kz,ky,kx,kr,w1,w2,pow,x,y,z,sync_x, sync_y, sync_z,kernel
     character(len=7) :: z_s
     integer(4) :: fstat
     character(len=max_path) :: ofile
@@ -54,12 +58,39 @@
         do i=1,nc_dim+2,2
           kx=(i-1)/2.0
           kr=sqrt(kx**2+ky**2+kz**2)
+          if(kx.eq.0 .and. ky <=0 .and. kz <=0)cycle;
+          if(kx.eq.0 .and. ky >0 .and. kz <0)cycle;
           if (kr /= 0.0) then
             k1=ceiling(kr)
             k2=k1+1
             w1=k1-kr
             w2=1-w1
-            pow=(slab(i,j,k)/(real(nc_dim))**3)**2+(slab(i+1,j,k)/(real(nc_dim))**3)**2
+            x = pi*real(kx)/nc_dim
+            y = pi*real(ky)/nc_dim
+            z = pi*real(kz)/nc_dim
+                
+            if(x==0) then 
+               sync_x = 1
+            else
+               sync_x = sin(x)/x
+            endif
+            if(y==0) then 
+               sync_y = 1
+            else
+               sync_y = sin(y)/y
+            endif
+            if(z==0) then 
+               sync_z = 1
+            else
+               sync_z = sin(z)/z
+            endif
+
+            kernel = sync_x*sync_y*sync_z
+!#ifdef NGPPS
+            w1=1
+            w2=0
+!#endif                
+            pow=(slab(i,j,k)/(real(nc_dim))**3)**2+(slab(i+1,j,k)/(real(nc_dim))**3)**2/kernel**4
             ps_c(1,k1)=ps_c(1,k1)+w1
             ps_c(2,k1)=ps_c(2,k1)+w1*pow
             ps_c(1,k2)=ps_c(1,k2)+w2
