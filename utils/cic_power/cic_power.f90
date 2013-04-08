@@ -1,5 +1,13 @@
 !! cic_power.f90 Parallelized: Hugh Merz Jun 15, 2005
-!! Compile with: mpif77 -fpp -g -w -O3 -axN cic_power.f90 -o cic_power  -L/home/merz/lib/fftw-2.1.5_intel8/lib -I/home/merz/lib/fftw-2.1.5_intel8/include -lsrfftw_mpi -lsrfftw -lsfftw_mpi -lsfftw -lm -ldl
+!! Modified by Ilian Iliev and Joachim Harnois-Deraps 01/2013 to include NGP angle averaging,
+!! to make memory light with new equivalence statements, to apply a kernel
+!! correction that deconvolves the grid assignment scheme, and to include
+!! POisson noise.
+!! Also has the option to compute the Redshift space power with the -DKAISER
+!! compile flag, and if you include the initial redshift in the checkpoint file,
+!! it will correctly load up the xv*.ic files and compute its power as well.
+!! Compile (On Scinet) with: 
+!! mpif77 -shared-intel -fpp -g -O3 -xhost -DBINARY -DPPINT -DNGP  -mt_mpi cic_power.f90 -o ngp_power  -L$FFTWLIB -I$FFTWINC -lsrfftw_mpi -lsrfftw -lsfftw_mpi -lsfftw -lm -ldl
 
 program cic_power 
   implicit none
@@ -22,7 +30,7 @@ program cic_power
 
   !! np is the number of particles
   !! np should be set to nc (1:1), hc (1:2), or qc (1:4)
-  nteger, parameter :: np=nc
+  integer, parameter :: np=hc
   real, parameter    :: npr=np
 
   !! internals
@@ -32,11 +40,21 @@ program cic_power
 
   !! internal parallelization parameters
   integer(4), parameter :: nc_node_dim = nc/nodes_dim
-  integer(4), parameter :: np_node_dim = np/nodes_dim
+!  integer(4), parameter :: np_node_dim = np/nodes_dim
 !  integer(4), parameter :: np_buffer = 5*np_node_dim**3
 !  integer(4), parameter :: np_buffer = 0.35*np_node_dim**3
-  integer(4), parameter :: np_buffer = 4*np_node_dim**3
-  integer(4), parameter :: max_np = np_node_dim**3 + np_buffer
+
+!!$ II: Corrected back to original sizes from Hugh's code.
+
+!  integer(4), parameter :: np_buffer = 4*np_node_dim**3
+!  integer(4), parameter :: max_np = np_node_dim**3 + np_buffer
+
+
+  integer(4), parameter :: max_np = density_buffer * ( ((nf_tile-2*nf_buf)*tiles_node_dim/2)**3 + &
+                                  (8*nf_buf**3 + 6*nf_buf*(((nf_tile-2*nf_buf)*tiles_node_dim)**2) + &
+                                  12*(nf_buf**2)*((nf_tile-2*nf_buf)*tiles_node_dim))/8.0 )
+  integer(4), parameter :: np_buffer=int(2./3.*max_np)
+
   integer(4), parameter :: nodes = nodes_dim * nodes_dim * nodes_dim
   integer(4), parameter :: nodes_slab = nodes_dim * nodes_dim
   integer(4), parameter :: nc_slab = nc / nodes
@@ -62,9 +80,12 @@ program cic_power
   real, dimension(6,max_np) :: xvp
   real, dimension(3,np_buffer) :: xp_buf
   real, dimension(3*np_buffer) :: send_buf, recv_buf
+  real, dimension(0:nc_node_dim+1,0:nc_node_dim+1,0:nc_node_dim+1) :: den 
+  real, dimension(0:nc_node_dim+1,0:nc_node_dim+1) :: den_buf 
 
   !! Power spectrum arrays
-  real, dimension(2,nc) :: pkdm
+  real, dimension(3,nc) :: pkdm
+  real, dimension(3,nc) :: poisson
 #ifdef PLPLOT
   real*8, dimension(3,nc) :: pkplot
 #endif
@@ -74,18 +95,23 @@ program cic_power
   real, dimension(nc_node_dim,nc_node_dim,nc_slab,0:nodes_slab-1) :: recv_cube
   real, dimension(nc+2,nc,nc_slab) :: slab, slab_work
 
-  !! arrays
-  real, dimension(0:nc_node_dim+1,0:nc_node_dim+1,0:nc_node_dim+1) :: den 
-  real, dimension(0:nc_node_dim+1,0:nc_node_dim+1) :: den_buf 
 
   !! Equivalence arrays to save memory
-  equivalence (slab_work,recv_cube) 
+!!$ II: corrected back to original statements
+!  equivalence (slab_work,recv_cube) 
+  equivalence (den,slab_work,recv_cube,xp_buf) 
+!  equivalence (slab,xvp,cube)  !! merz --  not sure if xvp is larger than slab?????
+  equivalence (xvp,slab,cube)
+!  equivalence (slab,cube)
+
 
   !! Common block
 #ifdef PLPLOT
-  common xvp,send_buf,slab_work,den_buf,den,cube,slab,xp_buf,recv_buf,pkdm,pkplot
+!  common xvp,send_buf,slab_work,den_buf,den,cube,slab,xp_buf,recv_buf,pkdm,pkplot
+ common xvp,send_buf,den_buf,den,recv_buf,pkdm,pkplot
 #else
-  common xvp,send_buf,slab_work,den_buf,den,cube,slab,xp_buf,recv_buf,pkdm
+!  common xvp,send_buf,slab_work,den_buf,den,cube,slab,xp_buf,recv_buf,pkdm
+  common xvp,send_buf,den_buf,den,recv_buf,pkdm,poisson
 #endif
 
 !!---start main--------------------------------------------------------------!!
@@ -99,6 +125,7 @@ program cic_power
     call read_particles
     call pass_particles
     call darkmatter
+    call PoissonNoise
     if (rank == 0) call writepowerspectra
   enddo
   call cp_fftw(0)
@@ -224,7 +251,7 @@ contains
     implicit none
     
     real z_write,np_total
-    integer j,fstat
+    integer i,j,fstat, blocksize, nplow, nphigh, num_writes
     character(len=7) :: z_string
     character(len=4) :: rank_string
     character(len=100) :: check_name
@@ -247,9 +274,12 @@ contains
     write(rank_string,'(i4)') rank
     rank_string=adjustl(rank_string)
 
-    check_name=output_path//z_string(1:len_trim(z_string))//'xv'// &
+    if(z_write .eq. z_i) then
+       check_name=ic_path//'xv'//rank_string(1:len_trim(rank_string))//'.ic'
+    else
+       check_name=output_path//z_string(1:len_trim(z_string))//'xv'// &
                rank_string(1:len_trim(rank_string))//'.dat'
-
+    endif
 !! open checkpoint    
 #ifdef BINARY
     open(unit=21,file=check_name,status='old',iostat=fstat,form='binary')
@@ -263,6 +293,10 @@ contains
     endif
 
 !! read in checkpoint header data
+    if(z_write .eq. z_i)then
+       read(21) np_local
+       a = 1.0/(1.0 + z_i)
+    else
 #ifdef PPINT
     read(21) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint, &
                sim_projection,sim_halofind,mass_p
@@ -270,6 +304,7 @@ contains
     read(21) np_local,a,t,tau,nts,dt_f_acc,dt_c_acc,sim_checkpoint, &
                sim_projection,sim_halofind,mass_p
 #endif
+    endif
 
     if (np_local > max_np) then
       write(*,*) 'too many particles to store'
@@ -280,13 +315,31 @@ contains
 !! tally up total number of particles
     call mpi_reduce(real(np_local,kind=4),np_total,1,mpi_real, &
                          mpi_sum,0,mpi_comm_world,ierr)
-    if (rank == 0) write(*,*) 'number of particles =', int(np_total,4)
+    if (rank == 0) write(*,*) 'number of particles =', int(np_total,8)
 
-!! read in particles
-!    do j=1,np_local
-!      read(21) xvp(:,j)
-!    enddo
-    read(21) xvp(:,:np_local)
+    !--------------------
+    if(z_write .eq. z_i)then
+    !read as IC:
+       do j=1,np_local
+         read(21) xvp(:,j)
+       enddo
+    else
+#ifdef BINARY
+       read(21) xvp(:,:np_local)
+#else
+       blocksize = (32*1024*1024)/24
+       num_writes = np_local/blocksize+1
+       do i=1,num_writes
+         nplow=(i-1)*blocksize+1
+         nphigh=min(i*blocksize,np_local)
+   !!      print *,rank,nplow,nphigh,np_local
+         do j=nplow,nphigh
+           read(21) xvp(:,j)
+         enddo
+       enddo
+#endif
+    endif
+!----------
     close(21)
  
 #ifdef KAISER
@@ -295,8 +348,6 @@ contains
     !Converting seconds into simulation time units
     !cancels the H0...
     
-    !xv(3,ip+1:ip+nploc(i))=xv(3,ip+1:ip+nploc(i)) + xv(6,ip+1:ip+nploc(i))*1.5*sqrt(omegam/cubepm_a)
-    !xv(3,ip+1:ip+nploc(i))=xv(3,ip+1:ip+nploc(i)) + xv(6,ip+1:ip+nploc(i))*1.5/sqrt(cubepm_a*(1+cubepm_a*omegak/omegam + omegav/omegam*cubepm_a**3))
     xvp(3,:)=xvp(3,:) + xvp(6,:)*1.5/sqrt(a*(1+a*(1-omega_m-omega_l)/omega_m + omega_l/omega_m*a**3))  
 
     call pass_particles
@@ -387,6 +438,8 @@ contains
 
     num_elements = nc_node_dim * nc_node_dim * nc_slab
 
+    call mpi_barrier(mpi_comm_world,ierr)
+
 !! swap data
 
    do j = 0, nodes_dim - 1
@@ -432,9 +485,11 @@ contains
 
     if (firstfftw) then
       call rfftw3d_f77_mpi_create_plan(plan,mpi_comm_world,nc, &
-            nc,nc, FFTW_REAL_TO_COMPLEX, FFTW_MEASURE)
+!            nc,nc, FFTW_REAL_TO_COMPLEX, FFTW_MEASURE)
+            nc,nc, FFTW_REAL_TO_COMPLEX, FFTW_ESTIMATE)
       call rfftw3d_f77_mpi_create_plan(iplan,mpi_comm_world,nc, &
-            nc,nc, FFTW_COMPLEX_TO_REAL, FFTW_MEASURE)
+!            nc,nc, FFTW_COMPLEX_TO_REAL, FFTW_MEASURE)
+            nc,nc, FFTW_COMPLEX_TO_REAL, FFTW_ESTIMATE)
 #ifdef DEBUG_LOW
       print *,'finished initialization of fftw',rank
 #endif
@@ -528,8 +583,10 @@ contains
 
     !! Output power spectrum
     !! 1st column is k
-    !! 2nd is dm p(k)
+    !! 2nd is dm d2(k)
     !! 3rd is standard deviation
+    !! 4th is Poisson d2(k)
+    !! 5th is standard deviation on Poisson d2(k)
 
     write(z_write,'(f7.3)') z_checkpoint(cur_checkpoint)
     z_write=adjustl(z_write)
@@ -541,30 +598,19 @@ contains
 #endif
 
 #ifdef KAISER
-   fn=output_path//z_write(1:len_trim(z_write))//prefix//'-RSD.dat' 
+    fn=output_path//z_write(1:len_trim(z_write))//prefix//'-RSD.dat' 
 #else
-   fn=output_path//z_write(1:len_trim(z_write))//prefix//'.dat' 
+    fn=output_path//z_write(1:len_trim(z_write))//prefix//'.dat' 
 #endif
 
-!    fn=output_path//z_write(1:len_trim(z_write))//'cicps.dat'
-!#ifdef KAISER
-!    fn=output_path//z_write(1:len_trim(z_write))//'cicps-RSD.dat'
-!#ifdef NGP
-!    fn=output_path//z_write(1:len_trim(z_write))//'ngpps-RSD.dat'
-!#endif
-!#endif
-
-!#ifdef NGP
-!    fn=output_path//z_write(1:len_trim(z_write))//'ngpps.dat'
-!#endif
     write(*,*) 'Writing ',fn
     open(11,file=fn,recl=500)
     do k=2,hc+1
        kr=2*pi*(k-1)/box
 #ifdef NGP
-       write(11,*) kr,pkdm(:,k-1)
+       write(11,*) pkdm(3,k-1),pkdm(1:2,k-1) ,poisson(1:2,k-1)
 #else
-       write(11,*) kr,pkdm(:,k)
+       write(11,*) pkdm(3,k),pkdm(1:2,k),poisson(1:2,k)
 #endif
 #ifdef PLPLOT
        kp=k-1
@@ -589,16 +635,21 @@ contains
 
   subroutine darkmatter
     implicit none
-    integer :: i,j,k
+    integer :: i,j,k, fstat
     integer :: i1,j1,k1
-    real    :: d,dmin,dmax,sum_dm,sum_dm_local,dmint,dmaxt
+    real    :: d,dmin,dmax,sum_dm,sum_dm_local,dmint,dmaxt,z_write
     real*8  :: dsum,dvar,dsumt,dvart
     real, dimension(3) :: dis
+    character(len=7) :: z_string
+    character(len=4) :: rank_string
+    character(len=100) :: check_name
+
 
     real time1,time2
     call cpu_time(time1)
 
     !! Initialized density field to be zero
+    !! could do OMP loop here
     do k=0,nc_node_dim+1
        den(:,:,k)=0
     enddo
@@ -609,6 +660,43 @@ contains
     !! have to accumulate buffer density 
     call mesh_buffer
     cube=den(1:nc_node_dim,1:nc_node_dim,1:nc_node_dim)
+
+#ifdef write_den
+!! generate checkpoint names on each node
+    if (rank==0) then
+       z_write = z_checkpoint(cur_checkpoint)
+       print *,'Wrinting density to file for z = ',z_write
+    endif
+
+    call mpi_bcast(z_write,1,mpi_real,0,mpi_comm_world,ierr)
+
+    write(z_string,'(f7.3)') z_write
+    z_string=adjustl(z_string)
+    write(rank_string,'(i4)') rank
+    rank_string=adjustl(rank_string)
+
+#ifdef KAISER
+    check_name=output_path//z_string(1:len_trim(z_string))//'den'// &
+               rank_string(1:len_trim(rank_string))//'-rsd.dat'
+#else 
+    check_name=output_path//z_string(1:len_trim(z_string))//'den'// &
+               rank_string(1:len_trim(rank_string))//'.dat'
+#endif
+
+!! open and write density file   
+#ifdef BINARY
+    open(unit=21,file=check_name,status='replace',iostat=fstat,form='binary')
+#else
+    open(unit=21,file=check_name,status='replace',iostat=fstat,form='unformatted')
+#endif
+    if (fstat /= 0) then
+      write(*,*) 'error opening density file'
+      write(*,*) 'rank',rank,'file:',check_name
+      call mpi_abort(mpi_comm_world,ierr,ierr)
+    endif
+
+    write(21) cube
+#endif
 
     sum_dm_local=sum(cube) 
     call mpi_reduce(sum_dm_local,sum_dm,1,mpi_real,mpi_sum,0,mpi_comm_world,ierr)
@@ -639,13 +727,13 @@ contains
     call mpi_reduce(dmax,dmaxt,1,mpi_real,mpi_max,0,mpi_comm_world,ierr)
 
     if (rank==0) then
-      dsum=dsumt/nc**3
-      dvar=sqrt(dvart/nc**3)
+      dsum=dsumt/real(nc)**3
+      dvar=sqrt(dvart/real(nc)**3)
       write(*,*)
       write(*,*) 'DM min    ',dmint
       write(*,*) 'DM max    ',dmaxt
-      write(*,*) 'Delta sum ',real(dsum)
-      write(*,*) 'Delta var ',real(dvar)
+      write(*,*) 'Delta sum ',real(dsum,8)
+      write(*,*) 'Delta var ',real(dvar,8)
       write(*,*)
     endif
  
@@ -661,12 +749,94 @@ contains
     return
   end subroutine darkmatter
 
+!!------------------------------------------------------------------!!
+
+  subroutine PoissonNoise
+    implicit none
+    integer :: i,j,k, fstat
+    integer :: i1,j1,k1
+    real    :: d,dmin,dmax,sum_dm,sum_dm_local,dmint,dmaxt,z_write
+    real*8  :: dsum,dvar,dsumt,dvart
+    real, dimension(3) :: dis
+    real time1,time2
+
+    call cpu_time(time1)
+
+    !! Initialized density field to be zero
+    !! could do OMP loop here
+    do k=0,nc_node_dim+1
+       den(:,:,k)=0
+    enddo
+
+    ! Assign particles to random positions between 0 and nc_node_dim
+    call random_number(xvp(1:3,:))
+    xvp(1:3,:) = xvp(1:3,:)*nc_node_dim
+
+    !! Assign masses to grid to compute dm power spectrum
+    call cicmass
+
+    !! have to accumulate buffer density 
+    call mesh_buffer
+    cube=den(1:nc_node_dim,1:nc_node_dim,1:nc_node_dim)
+
+
+    sum_dm_local=sum(cube) 
+    call mpi_reduce(sum_dm_local,sum_dm,1,mpi_real,mpi_sum,0,mpi_comm_world,ierr)
+    if (rank == 0) print *,'DM total mass=',sum_dm
+
+    !! Convert dm density field to delta field
+    dmin=0
+    dmax=0
+    dsum=0
+    dvar=0
+
+    do k=1,nc_node_dim
+       do j=1,nc_node_dim
+          do i=1,nc_node_dim
+             cube(i,j,k)=cube(i,j,k)-1.0
+             d=cube(i,j,k)
+             dsum=dsum+d
+             dvar=dvar+d*d
+             dmin=min(dmin,d)
+             dmax=max(dmax,d)
+          enddo
+       enddo
+    enddo
+
+    call mpi_reduce(dsum,dsumt,1,mpi_double_precision,mpi_sum,0,mpi_comm_world,ierr)
+    call mpi_reduce(dvar,dvart,1,mpi_double_precision,mpi_sum,0,mpi_comm_world,ierr)
+    call mpi_reduce(dmin,dmint,1,mpi_real,mpi_min,0,mpi_comm_world,ierr)
+    call mpi_reduce(dmax,dmaxt,1,mpi_real,mpi_max,0,mpi_comm_world,ierr)
+
+    if (rank==0) then
+      dsum=dsumt/real(nc)**3
+      dvar=sqrt(dvart/real(nc)**3)
+      write(*,*)
+      write(*,*) 'DM min    ',dmint
+      write(*,*) 'DM max    ',dmaxt
+      write(*,*) 'Delta sum ',real(dsum,8)
+      write(*,*) 'Delta var ',real(dvar,8)
+      write(*,*)
+    endif
+ 
+    !! Forward FFT dm delta field
+    call cp_fftw(1)
+
+    !! Compute dm power spectrum
+    call powerspectrum(slab,poisson)
+
+    call cpu_time(time2)
+    time2=(time2-time1)
+    if (rank == 0) write(*,"(f8.2,a)") time2,'  Called dm'
+    return
+  end subroutine PoissonNoise
 !------------------------------------------------------------!
 
   subroutine pass_particles
     implicit none
 
-    integer i,pp,np_buf,np_exit,np_final,npo,npi
+    integer i,pp,np_buf,np_exit,npo,npi
+    integer*8 np_final
     real x(3),lb,ub
     integer, dimension(mpi_status_size) :: status,sstatus,rstatus
     integer :: tag,srequest,rrequest,sierr,rierr
@@ -1057,8 +1227,8 @@ contains
                     mpi_comm_world,ierr)
 
     if (rank == 0) then
-      print *,'total particles =',np_final
-      if (np_final /= np**3) then
+      print *,'total particles =',int(np_final,8)
+      if (np_final /= (int(np,8))**3) then
         print *,'ERROR: total number of particles incorrect after passing'
       endif
     endif
@@ -1079,7 +1249,7 @@ contains
 
   subroutine cicmass
     implicit none
-    real, parameter :: mp=(ncr/np)**3!*(1 - omega_b/omega_m)
+    real, parameter :: mp=(ncr/np)**3
 
     integer :: i,i1,i2,j1,j2,k1,k2
     real    :: x,y,z,dx1,dx2,dy1,dy2,dz1,dz2,vf,v(3)
@@ -1126,21 +1296,28 @@ contains
 
   subroutine powerspectrum(delta,pk)
     implicit none
-    real, dimension(2,nc)       :: pk
+    real, dimension(3,nc)       :: pk
     real, dimension(nc+2,nc,nc_slab) :: delta
 
     integer :: i,j,k,kg
     integer :: k1,k2
-    real    :: kr,kx,ky,kz,w1,w2,pow
+    real    :: kr,kx,ky,kz,w1,w2,pow, x,y,z,sync_x, sync_y,sync_z,kernel
     real, dimension(3,nc,nc_slab) :: pkt
     real, dimension(3,nc) :: pktsum
+    real, dimension(nc) :: kcen, kcount
+    real    :: kavg
 
     real time1,time2
     call cpu_time(time1)
 
     pkt=0.0
     pktsum=0.0
+
+    kcen(:)   = 0.
+    kcount(:) = 0.
+
     !! Compute power spectrum
+    !COULD OMP DO PARALLEL THIS LOOP?
     do k=1,nc_slab
        kg=k+nc_slab*rank
        if (kg .lt. hc+2) then
@@ -1164,17 +1341,45 @@ contains
                 k2=k1+1
                 w1=k1-kr
                 w2=1-w1
+                x = pi*real(kx)/ncr
+                y = pi*real(ky)/ncr
+                z = pi*real(kz)/ncr
+                
+                if(x==0) then 
+                   sync_x = 1
+                else
+                   sync_x = sin(x)/x
+                endif
+                if(y==0) then 
+                   sync_y = 1
+                else
+                   sync_y = sin(y)/y
+                endif
+                if(z==0) then 
+                   sync_z = 1
+                else
+                   sync_z = sin(z)/z
+                endif
+
+                kernel = sync_x*sync_y*sync_z
 #ifdef NGP
                 w1=1
                 w2=0
 #endif                
-                pow=sum((delta(i:i+1,j,k)/ncr**3)**2)
+                pow=sum((delta(i:i+1,j,k)/real(ncr)**3)**2)/kernel**4
                 pkt(1,k1,k)=pkt(1,k1,k)+w1*pow
                 pkt(2,k1,k)=pkt(2,k1,k)+w1*pow**2
                 pkt(3,k1,k)=pkt(3,k1,k)+w1
                 pkt(1,k2,k)=pkt(1,k2,k)+w2*pow
                 pkt(2,k2,k)=pkt(2,k2,k)+w2*pow**2
                 pkt(3,k2,k)=pkt(3,k2,k)+w2
+
+                kcen(k1) = kcen(k1) + w1 * kr
+                kcen(k2) = kcen(k2) + w2 * kr
+
+                kcount(k1) = kcount(k1) + w1
+                kcount(k2) = kcount(k2) + w2
+
              endif
           enddo
        enddo
@@ -1196,12 +1401,16 @@ contains
         if (pktsum(3,k) .eq. 0) then
           pk(:,k)=0
         else
-          pk(:,k)=pktsum(1:2,k)/pktsum(3,k)
+          pk(1:2,k)=pktsum(1:2,k)/pktsum(3,k)
           pk(2,k)=sqrt(abs((pk(2,k)-pk(1,k)**2)/(pktsum(3,k)-1)))
+
+          kavg = kcen(k) / kcount(k)
+          pk(3,k) = 2. * pi * kavg / box
+
 #ifdef NGP
-          pk(1:2,k)=4*pi*(k)**3*pk(1:2,k)
+          pk(1:2,k)=4.*pi*(kavg)**3*pk(1:2,k)
 #else
-          pk(1:2,k)=4*pi*(k-1)**3*pk(1:2,k)
+          pk(1:2,k)=4.*pi*(kavg-1.)**3*pk(1:2,k)
 #endif
        endif
       enddo
@@ -1247,8 +1456,10 @@ contains
     enddo
     do k=1,nc
        pkdm(:,k)=0
+    enddo    
+    do k=1,nc
+       poisson(:,k)=0
     enddo
-    
     call cpu_time(time2)
     time2=(time2-time1)
     if (rank == 0) write(*,"(f8.2,a)") time2,'  Called init var'
