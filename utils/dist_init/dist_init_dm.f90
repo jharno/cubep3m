@@ -556,6 +556,7 @@ contains
 #endif 
 
     call random_seed
+    call random_seed(generator=2)
     call random_seed(size=seedsize)
     allocate(iseed(seedsize))
     allocate(iseed_all(seedsize*nodes))
