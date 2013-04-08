@@ -1416,7 +1416,7 @@ contains
       enddo
     endif
 
-    call mpi_bcast(pk,2*nc,mpi_real,0,mpi_comm_world,ierr)
+    call mpi_bcast(pk,3*nc,mpi_real,0,mpi_comm_world,ierr)
 
     call cpu_time(time2)
     time2=(time2-time1)
