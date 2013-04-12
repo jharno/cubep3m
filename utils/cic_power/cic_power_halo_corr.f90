@@ -80,7 +80,8 @@ program cic_power_halo
   real, dimension(0:nc_node_dim+1,0:nc_node_dim+1) :: den_buf 
 
   !! Power spectrum arrays
-  real, dimension(2,nc) :: pkhh
+  real, dimension(3,nc) :: pkhh
+  real, dimension(3,nc) :: poisson
 #ifdef PLPLOT
   real*8, dimension(3,nc) :: pkplot
 #endif
@@ -99,10 +100,10 @@ program cic_power_halo
   !! Common block
 #ifdef PLPLOT
 !  common xvp,send_buf,slab_work,den_buf,den,cube,slab,xp_buf,recv_buf,pkhh,pkplot
-  common xvp,send_buf,den_buf,den,recv_buf,pkhh,pkplot
+  common xvp,send_buf,den_buf,den,recv_buf,pkhh,pkplot,poisson
 #else
 !  common xvp,send_buf,slab_work,den_buf,den,cube,slab,xp_buf,recv_buf,pkhh
-  common xvp,send_buf,den_buf,den,recv_buf,pkhh
+  common xvp,send_buf,den_buf,den,recv_buf,pkhh,poisson
 #endif
 
 !!---start main--------------------------------------------------------------!!
@@ -120,6 +121,7 @@ program cic_power_halo
     if (rank == 0)print*,'finished pass_halos'
     do cur_massbin=1,num_massbin
       call darkmatterhalo
+      call PoissonNoise
       if (rank == 0) call writepowerspectra
     enddo
   enddo
@@ -563,9 +565,10 @@ contains
     do k=2,hc+1
        kr=2*pi*(k-1)/box
 #ifdef NGP
-       write(11,*) kr,pkhh(:,k-1)
+       !write(11,*) kr,pkhh(:,k-1),poisson(:,k-1)
+       write(11,*) pkhh(3,k-1),pkhh(1:2,k-1),poisson(1:2,k-1)
 #else
-       write(11,*) kr,pkhh(:,k)
+       write(11,*) kr,pkhh(:,k),poisson(:,k)
 #endif
 #ifdef PLPLOT
        kp=k-1
@@ -674,6 +677,87 @@ contains
 
 !------------------------------------------------------------!
 
+  subroutine PoissonNoise
+    implicit none
+    integer :: i,j,k, fstat
+    integer :: i1,j1,k1
+    real    :: d,dmin,dmax,sum_dm,sum_dm_local,dmint,dmaxt,z_write
+    real*8  :: dsum,dvar,dsumt,dvart
+    real, dimension(3) :: dis
+    real time1,time2
+
+    call cpu_time(time1)
+
+    !! Initialized density field to be zero
+    !! could do OMP loop here
+    do k=0,nc_node_dim+1
+       den(:,:,k)=0
+    enddo
+
+    ! Assign particles to random positions between 0 and nc_node_dim
+    call random_number(xvp(1:3,:))
+    xvp(1:3,:) = xvp(1:3,:)*nc_node_dim
+
+    !! Assign masses to grid to compute dm power spectrum
+    call cicmass
+
+    !! have to accumulate buffer density 
+    call mesh_buffer
+    cube=den(1:nc_node_dim,1:nc_node_dim,1:nc_node_dim)
+
+
+    sum_dm_local=sum(cube) 
+    call mpi_reduce(sum_dm_local,sum_dm,1,mpi_real,mpi_sum,0,mpi_comm_world,ierr)
+    if (rank == 0) print *,'DM total mass=',sum_dm
+
+    !! Convert dm density field to delta field
+    dmin=0
+    dmax=0
+    dsum=0
+    dvar=0
+
+    do k=1,nc_node_dim
+       do j=1,nc_node_dim
+          do i=1,nc_node_dim
+             cube(i,j,k)=cube(i,j,k)-1.0
+             d=cube(i,j,k)
+             dsum=dsum+d
+             dvar=dvar+d*d
+             dmin=min(dmin,d)
+             dmax=max(dmax,d)
+          enddo
+       enddo
+    enddo
+
+    call mpi_reduce(dsum,dsumt,1,mpi_double_precision,mpi_sum,0,mpi_comm_world,ierr)
+    call mpi_reduce(dvar,dvart,1,mpi_double_precision,mpi_sum,0,mpi_comm_world,ierr)
+    call mpi_reduce(dmin,dmint,1,mpi_real,mpi_min,0,mpi_comm_world,ierr)
+    call mpi_reduce(dmax,dmaxt,1,mpi_real,mpi_max,0,mpi_comm_world,ierr)
+
+    if (rank==0) then
+      dsum=dsumt/real(nc)**3
+      dvar=sqrt(dvart/real(nc)**3)
+      write(*,*)
+      write(*,*) 'DM min    ',dmint
+      write(*,*) 'DM max    ',dmaxt
+      write(*,*) 'Delta sum ',real(dsum,8)
+      write(*,*) 'Delta var ',real(dvar,8)
+      write(*,*)
+    endif
+ 
+    !! Forward FFT dm delta field
+    call cp_fftw(1)
+
+    !! Compute dm power spectrum
+    call powerspectrum(slab,poisson)
+
+    call cpu_time(time2)
+    time2=(time2-time1)
+    if (rank == 0) write(*,"(f8.2,a)") time2,'  Called dm'
+    return
+  end subroutine PoissonNoise
+
+!!------------------------------------------------------------------!!
   subroutine pass_haloes
     implicit none
 
@@ -1157,7 +1241,7 @@ contains
 
   subroutine powerspectrum(delta,pk)
     implicit none
-    real, dimension(2,nc)       :: pk
+    real, dimension(3,nc)       :: pk
     real, dimension(nc+2,nc,nc_slab) :: delta
 
     real, parameter :: pi4=3.14159
@@ -1166,12 +1250,19 @@ contains
     real    :: kr,kx,ky,kz,w1,w2,pow, x,y,z,sync_x, sync_y, sync_z, kernel
     real, dimension(3,nc,nc_slab) :: pkt
     real, dimension(3,nc) :: pktsum
+    real, dimension(nc) :: kcen, kcount
+    real    :: kavg
 
     real time1,time2
     call cpu_time(time1)
 
     pkt=0.0
     pktsum=0.0
+
+    kcen(:)   = 0.
+    kcount(:) = 0.
+
+
     !! Compute power spectrum
     do k=1,nc_slab
        kg=k+nc_slab*rank
@@ -1225,13 +1316,21 @@ contains
                 w1=k1-kr
                 w2=1-w1
 #endif
-                pow=sum((delta(i:i+1,j,k)/real(ncr)**3)**2)/kernel
+                pow=sum((delta(i:i+1,j,k)/real(ncr)**3)**2)/kernel**4
                 pkt(1,k1,k)=pkt(1,k1,k)+w1*pow
                 pkt(2,k1,k)=pkt(2,k1,k)+w1*pow**2
                 pkt(3,k1,k)=pkt(3,k1,k)+w1
                 pkt(1,k2,k)=pkt(1,k2,k)+w2*pow
                 pkt(2,k2,k)=pkt(2,k2,k)+w2*pow**2
                 pkt(3,k2,k)=pkt(3,k2,k)+w2
+
+                kcen(k1) = kcen(k1) + w1 * kr
+                kcen(k2) = kcen(k2) + w2 * kr
+
+                kcount(k1) = kcount(k1) + w1
+                kcount(k2) = kcount(k2) + w2
+
+
              endif
           enddo
        enddo
@@ -1250,22 +1349,26 @@ contains
     !! pk(2,k) stores standard deviation
     if (rank == 0) then
       do k=1,nc
-	! TESTING
-	write(18,*) k,nc,pktsum(1,k),pktsum(2,k),pktsum(3,k)
+        ! TESTING
+        write(18,*) k,nc,pktsum(1,k),pktsum(2,k),pktsum(3,k)
         if (pktsum(3,k) .eq. 0) then
           pk(1:2,k)=0.
         else
           pk(1:2,k)=pktsum(1:2,k)/pktsum(3,k)
           pk(2,k)=sqrt(abs((pk(2,k)-pk(1,k)**2)/(pktsum(3,k)-1)))
-          write(19,*) k,nc,pk(1,k),pk(2,k)
+
+          kavg = kcen(k) / kcount(k)
+          pk(3,k) = 2. * pi * kavg / box
+
+          write(19,*) pk(3,k),nc,pk(1,k),pk(2,k)
 ! TESTING
 !          pk(1:2,k)=4.*pi*real(k-1)**3*pk(1:2,k)
 #ifdef NGP
-          pk(1:2,k)=4.*pi4*real(k)**3*pk(1:2,k)
+          pk(1:2,k)=4.*pi4*kavg**3*pk(1:2,k)
 #else
 	  pk(1:2,k)=4.*pi4*real(k-1)**3*pk(1:2,k)
 #endif
-          write(20,*) k,nc,pk(1,k),pk(2,k)
+          write(20,*) pk(3,k),nc,pk(1,k),pk(2,k)
        endif
       enddo
     endif
