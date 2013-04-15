@@ -20,6 +20,17 @@ program cubep3m
 
   real(4) :: t_elapsed
   external t_elapsed
+  real(4) :: z_write
+  character(len=7) :: z_s
+
+#ifdef CHECKPOINT_KILL
+  logical :: kill_step, kill_step_done
+  real, parameter :: kill_time = (48. - 1.) * 3600. ! Time in seconds to write checkpoint before being killed
+  real(8) :: sec1, sec2
+  
+  sec1 = mpi_wtime(ierr)
+  kill_step_done = .false.
+#endif
 
   call datestamp 
 
@@ -69,8 +80,15 @@ if (rank == 0) write(*,*) 'finished kernel init',t_elapsed(wc_counter)
     u(5,nx%m:nx%n,ny%m:ny%n,nz%m:nz%n)=0.0001
     print *,rank,sum(u(1,nx%m:nx%n,ny%m:ny%n,nz%m:nz%n))
     b=0.0
+  elseif (restart_ic)then
+      if (rank==0) z_write = z_checkpoint(restart_checkpoint)
+      call mpi_bcast(z_write,1,mpi_real,0,mpi_comm_world,ierr)
+
+      write(z_s,'(f7.3)') z_write
+      z_s=adjustl(z_s)
+      call mpi_tvd_mhd_restart(output_path, z_s)
   else
-    call mpi_tvd_mhd_ic(ic_path)
+      call mpi_tvd_mhd_ic(ic_path)
   endif
 
   if (rank == 0) write(*,*) 'finished reading mhd initial conditions',t_elapsed(wc_counter)
@@ -155,7 +173,23 @@ if (rank == 0) write(*,*) 'finished kernel init',t_elapsed(wc_counter)
     if (rank == 0) write(*,*) 'finished backward gas sweep',t_elapsed(wc_counter)
 #endif
 
+
+    !if(superposition_test)then
+    !    checkpoint_step = .true.
+    !endif
+#ifdef CHECKPOINT_KILL
+    !! Determine if it is time to write a checkpoint before being killed
+    kill_step = .false.
+    sec2 = mpi_wtime(ierr)
+    if (rank == 0) then
+        if ((sec2 - sec1) .ge. kill_time) kill_step = .true.
+    endif
+    call mpi_bcast(kill_step, 1, mpi_logical, 0, mpi_comm_world, ierr)
+
+    if (checkpoint_step.or.projection_step.or.halofind_step.or.kill_step) then
+#else
     if (checkpoint_step.or.projection_step.or.halofind_step) then
+#endif
 
 !! advance the particles to the end of the current step.
 
@@ -164,6 +198,17 @@ if (rank == 0) write(*,*) 'finished kernel init',t_elapsed(wc_counter)
 
 #ifdef MOVE_GRID_BACK
       call move_grid_back
+#endif
+
+#ifdef CHECKPOINT_KILL
+      if (kill_step .and. .not. kill_step_done) then
+
+        call checkpoint_kill
+        if (rank == 0) write(*,*) 'finished checkpoint_kill',t_elapsed(wc_counter)
+
+        kill_step_done = .true. ! Don't want to keep doing this
+
+      endif
 #endif
 
       !dt = 0.0

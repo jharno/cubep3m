@@ -117,8 +117,15 @@
       read(21) np_local,a,t,tau,nts,dt_f_acc,dt_c_acc,cur_checkpoint, &
                cur_projection,cur_halofind,mass_p
 #endif
-      if (rank == 0) print *,'restarting simulation from z=',z_checkpoint(cur_checkpoint-1)
 
+      !cur_projection = cur_projection+1
+      !cur_halofind = cur_halofind + 1      
+      if (rank == 0) print *,'restarting simulation from z=',z_checkpoint(cur_checkpoint-1)
+      if (rank == 0) print *,'current checkpoint, proj and halo entries are:', cur_checkpoint, &
+               cur_projection,cur_halofind
+      !cur_projection = cur_projection+1
+      !cur_halofind = cur_halofind + 1
+      !cur_checkpoint = cur_checkpoint+1
       if (np_local > max_np) then
         write(*,*) 'too many particles to store'
         write(*,*) 'rank',rank,'np_local',np_local,'max_np',max_np
@@ -127,6 +134,127 @@
 
       read(21) xv(:,:np_local)
       close(21)
+
+#ifdef PID_FLAG
+
+      ofile=output_path//z_s(1:len_trim(z_s))//'PID'// &
+            rank_s(1:len_trim(rank_s))//'.dat'
+
+#ifdef BINARY
+      open(unit=21,file=ofile,status='old',iostat=fstat,form='binary')
+#else
+      open(unit=21,file=ofile,status='old',iostat=fstat,form='unformatted')
+#endif
+
+      if (fstat /= 0) then
+        write(*,*) 'error opening checkpoint'
+        write(*,*) 'rank',rank,'file:',ofile
+        call mpi_abort(mpi_comm_world,ierr,ierr)
+      endif
+
+#ifdef PPINT
+      read(21) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
+               cur_projection,cur_halofind,mass_p
+#else
+      read(21) np_local,a,t,tau,nts,dt_f_acc,dt_c_acc,cur_checkpoint, &
+               cur_projection,cur_halofind,mass_p
+#endif
+
+      if (np_local > max_np) then
+        write(*,*) 'too many particles to store'
+        write(*,*) 'rank',rank,'np_local',np_local,'max_np',max_np
+        call mpi_abort(mpi_comm_world,ierr,ierr)
+      endif
+
+      read(21) PID(:np_local)
+      close(21)
+
+#endif
+
+#ifdef CHECKPOINT_KILL
+
+    elseif (restart_kill) then
+
+      write(rank_s,'(i4)') rank
+      rank_s=adjustl(rank_s)
+
+      ofile=output_path//reskill_prefix//'xvres'// &
+            rank_s(1:len_trim(rank_s))//'.dat'
+
+#ifdef BINARY
+      open(unit=21,file=ofile,status='old',iostat=fstat,form='binary')
+#else
+      open(unit=21,file=ofile,status='old',iostat=fstat,form='unformatted')
+#endif
+
+      if (fstat /= 0) then
+        write(*,*) 'error opening checkpoint'
+        write(*,*) 'rank',rank,'file:',ofile
+        call mpi_abort(mpi_comm_world,ierr,ierr)
+      endif
+
+#ifdef PPINT
+      read(21) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
+               cur_projection,cur_halofind,mass_p
+#else
+      read(21) np_local,a,t,tau,nts,dt_f_acc,dt_c_acc,cur_checkpoint, &
+               cur_projection,cur_halofind,mass_p
+#endif
+
+      !cur_projection = cur_projection+1
+      !cur_halofind = cur_halofind + 1      
+      if (rank == 0) print *,'restarting simulation from z=',z_checkpoint(cur_checkpoint-1)
+      if (rank == 0) print *,'current checkpoint, proj and halo entries are:', cur_checkpoint, &
+               cur_projection,cur_halofind
+      !cur_projection = cur_projection+1
+      !cur_halofind = cur_halofind + 1
+      !cur_checkpoint = cur_checkpoint+1
+      if (np_local > max_np) then
+        write(*,*) 'too many particles to store'
+        write(*,*) 'rank',rank,'np_local',np_local,'max_np',max_np
+        call mpi_abort(mpi_comm_world,ierr,ierr)
+      endif
+
+      read(21) xv(:,:np_local)
+      close(21)
+
+#ifdef PID_FLAG
+
+      ofile=output_path//reskill_prefix//'PIDres'// &
+            rank_s(1:len_trim(rank_s))//'.dat'
+
+#ifdef BINARY
+      open(unit=21,file=ofile,status='old',iostat=fstat,form='binary')
+#else
+      open(unit=21,file=ofile,status='old',iostat=fstat,form='unformatted')
+#endif
+
+      if (fstat /= 0) then
+        write(*,*) 'error opening checkpoint'
+        write(*,*) 'rank',rank,'file:',ofile
+        call mpi_abort(mpi_comm_world,ierr,ierr)
+      endif
+
+#ifdef PPINT
+      read(21) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
+               cur_projection,cur_halofind,mass_p
+#else
+      read(21) np_local,a,t,tau,nts,dt_f_acc,dt_c_acc,cur_checkpoint, &
+               cur_projection,cur_halofind,mass_p
+#endif
+
+      if (np_local > max_np) then
+        write(*,*) 'too many particles to store'
+        write(*,*) 'rank',rank,'np_local',np_local,'max_np',max_np
+        call mpi_abort(mpi_comm_world,ierr,ierr)
+      endif
+
+      read(21) PID(:np_local)
+      close(21)
+
+#endif
+
+#endif
 
     elseif (shake_test_ic) then
       np_local=1
@@ -166,11 +294,7 @@
       read(20) xv(:,:np_local)
       close(20)
 
-     
-   endif
-
 #ifdef PID_FLAG
-
 
     write(*,*) 'np_local before delete', np_local, 'rank =', rank
     !call delete_particles
@@ -216,12 +340,13 @@
 
 #endif
     
+   endif
 
     ! If one needs to ensure that particles start in physical volume...
-    call link_list
-    call particle_pass
-    call delete_particles
-    write(*,*) 'np_local after delete', np_local, 'rank =', rank
+    !call link_list
+    !call particle_pass
+    !call delete_particles
+    !write(*,*) 'np_local after delete', np_local, 'rank =', rank
 
 
 
