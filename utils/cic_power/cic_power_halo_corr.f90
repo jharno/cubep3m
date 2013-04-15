@@ -14,7 +14,7 @@ program cic_power_halo
 
   logical, parameter :: correct_kernel=.false.
 
-  character(len=*), parameter :: halofinds=cubepm_root//'/input/checkpoints_halos'
+  character(len=*), parameter :: halofinds=cubepm_root//'/input/checkpoints'
 !  character(len=*), parameter :: halofinds='../parameterfiles/checkpoints_halos'
 !  character(len=*), parameter :: halofinds=cubepm_root//'/input/halofinds'
 
@@ -64,7 +64,7 @@ program cic_power_halo
 
   integer(8) :: plan, iplan
 
-  logical :: firstfftw
+  logical :: firstfftw,do_poisson
 
 ! :: simulation variables
  
@@ -100,7 +100,7 @@ program cic_power_halo
   !! Common block
 #ifdef PLPLOT
 !  common xvp,send_buf,slab_work,den_buf,den,cube,slab,xp_buf,recv_buf,pkhh,pkplot
-  common xvp,send_buf,den_buf,den,recv_buf,pkhh,pkplot,poisson
+  common xvp,send_buf,den_buf,den,recv_buf,pkhh,pkplot,poisson,do_poisson
 #else
 !  common xvp,send_buf,slab_work,den_buf,den,cube,slab,xp_buf,recv_buf,pkhh
   common xvp,send_buf,den_buf,den,recv_buf,pkhh,poisson
@@ -119,8 +119,13 @@ program cic_power_halo
     if (rank == 0)print*,'finished read_halos'
     call pass_haloes
     if (rank == 0)print*,'finished pass_halos'
+    do_poisson=.false.
     do cur_massbin=1,num_massbin
       call darkmatterhalo
+      if (rank == 0) call writepowerspectra
+    enddo
+    do_poisson=.true.
+    do cur_massbin=1,num_massbin
       call PoissonNoise
       if (rank == 0) call writepowerspectra
     enddo
@@ -559,7 +564,11 @@ contains
     write(lmu_write,'(f5.3)') alog10(min_mass)+cur_massbin*dlmass
     lmu_write=adjustl(lmu_write)
 !    fn=output_path//z_write(1:len_trim(z_write))//'cicps_halo_'//lmo_write(1:len_trim(lmo_write))//'_'lmu_write(1:len_trim(lmu_write))//'.dat'
-    fn=output_path//z_write(1:len_trim(z_write))//'ngpps_halo_'//lmo_write(1:len_trim(lmo_write))//'_'//lmu_write(1:len_trim(lmu_write))//'.dat'
+    if(do_poisson) then
+       fn=output_path//z_write(1:len_trim(z_write))//'ngpps_halo_'//lmo_write(1:len_trim(lmo_write))//'_'//lmu_write(1:len_trim(lmu_write))//'-poisson.dat'
+    else
+       fn=output_path//z_write(1:len_trim(z_write))//'ngpps_halo_'//lmo_write(1:len_trim(lmo_write))//'_'//lmu_write(1:len_trim(lmu_write))//'.dat'
+    endif
     write(*,*) 'Writing ',fn
     open(11,file=fn,recl=500)
     do k=2,hc+1
@@ -681,12 +690,14 @@ contains
     implicit none
     integer :: i,j,k, fstat
     integer :: i1,j1,k1
-    real    :: d,dmin,dmax,sum_dm,sum_dm_local,dmint,dmaxt,z_write
-    real*8  :: dsum,dvar,dsumt,dvart
+    real    :: d,dmin,dmax,sum_dm,sum_dm_local,dmint,dmaxt,z_write, sum_halo,sum_halo_local
+    real*8  :: dsum,dvar,dsumt,dvart, vfactor
     real, dimension(3) :: dis
     real time1,time2
 
     call cpu_time(time1)
+
+    write(*,*) 'Calculate Poisson Noise'
 
     !! Initialized density field to be zero
     !! could do OMP loop here
@@ -706,50 +717,63 @@ contains
     cube=den(1:nc_node_dim,1:nc_node_dim,1:nc_node_dim)
 
 
-    sum_dm_local=sum(cube) 
-    call mpi_reduce(sum_dm_local,sum_dm,1,mpi_real,mpi_sum,0,mpi_comm_world,ierr)
-    if (rank == 0) print *,'DM total mass=',sum_dm
+    sum_halo_local=sum(cube) 
+    call mpi_reduce(sum_halo_local,sum_halo,1,mpi_real,mpi_sum,0,mpi_comm_world,ierr)
+    if (rank == 0) vfactor=dble(sum_halo)/dble(nc)**3
+    if (rank == 0) print*,rank,'sum_halo=',sum_halo
+    if (rank == 0) print*,rank,'nc=',nc
+    if (rank == 0) print*,rank,'vfactor=',vfactor
+    call mpi_bcast(vfactor,1,mpi_double_precision,0,mpi_comm_world,ierr)
+    call mpi_bcast(sum_halo,1,mpi_real,0,mpi_comm_world,ierr)
 
-    !! Convert dm density field to delta field
-    dmin=0
-    dmax=0
-    dsum=0
-    dvar=0
+    if (sum_halo > 0) then
 
-    do k=1,nc_node_dim
-       do j=1,nc_node_dim
-          do i=1,nc_node_dim
-             cube(i,j,k)=cube(i,j,k)-1.0
-             d=cube(i,j,k)
-             dsum=dsum+d
-             dvar=dvar+d*d
-             dmin=min(dmin,d)
-             dmax=max(dmax,d)
-          enddo
-       enddo
-    enddo
+      sum_dm_local=sum(cube) 
+      call mpi_reduce(sum_dm_local,sum_dm,1,mpi_real,mpi_sum,0,mpi_comm_world,ierr)
+      if (rank == 0) print *,'DM total mass=',sum_dm
 
-    call mpi_reduce(dsum,dsumt,1,mpi_double_precision,mpi_sum,0,mpi_comm_world,ierr)
-    call mpi_reduce(dvar,dvart,1,mpi_double_precision,mpi_sum,0,mpi_comm_world,ierr)
-    call mpi_reduce(dmin,dmint,1,mpi_real,mpi_min,0,mpi_comm_world,ierr)
-    call mpi_reduce(dmax,dmaxt,1,mpi_real,mpi_max,0,mpi_comm_world,ierr)
+      !! Convert dm density field to delta field
+      dmin=0
+      dmax=0
+      dsum=0
+      dvar=0
 
-    if (rank==0) then
-      dsum=dsumt/real(nc)**3
-      dvar=sqrt(dvart/real(nc)**3)
-      write(*,*)
-      write(*,*) 'DM min    ',dmint
-      write(*,*) 'DM max    ',dmaxt
-      write(*,*) 'Delta sum ',real(dsum,8)
-      write(*,*) 'Delta var ',real(dvar,8)
-      write(*,*)
-    endif
+      do k=1,nc_node_dim
+         do j=1,nc_node_dim
+            do i=1,nc_node_dim
+               cube(i,j,k)=cube(i,j,k)/vfactor-1.0
+               d=cube(i,j,k)
+               dsum=dsum+d
+               dvar=dvar+d*d
+               dmin=min(dmin,d)
+               dmax=max(dmax,d)
+            enddo
+         enddo
+      enddo
+
+      call mpi_reduce(dsum,dsumt,1,mpi_double_precision,mpi_sum,0,mpi_comm_world,ierr)
+      call mpi_reduce(dvar,dvart,1,mpi_double_precision,mpi_sum,0,mpi_comm_world,ierr)
+      call mpi_reduce(dmin,dmint,1,mpi_real,mpi_min,0,mpi_comm_world,ierr)
+      call mpi_reduce(dmax,dmaxt,1,mpi_real,mpi_max,0,mpi_comm_world,ierr)
+
+      if (rank==0) then
+        dsum=dsumt/real(nc)**3
+        dvar=sqrt(dvart/real(nc)**3)
+        write(*,*)
+        write(*,*) 'Poisson DM min    ',dmint
+        write(*,*) 'Poisson DM max    ',dmaxt
+        write(*,*) 'Poisson Delta sum ',real(dsum,8)
+        write(*,*) 'Poisson Delta var ',real(dvar,8)
+        write(*,*)
+      endif
  
-    !! Forward FFT dm delta field
-    call cp_fftw(1)
+      !! Forward FFT dm delta field
+      call cp_fftw(1)
 
-    !! Compute dm power spectrum
-    call powerspectrum(slab,poisson)
+      !! Compute dm power spectrum
+      call powerspectrum(slab,poisson)
+
+    endif
 
     call cpu_time(time2)
     time2=(time2-time1)
@@ -1181,9 +1205,9 @@ contains
 
     if (rank == 0) print*,'halo mass range = ',l_lmass,u_lmass
 
-    print*,rank,'starting cic interpolation for',np_local,' haloes'	
+    print*,rank,'starting cic interpolation for',np_local,' haloes'
 
-    if(np_local>=1)then		
+    if(np_local>=1)then
 
     do i=1,np_local
 
@@ -1230,7 +1254,7 @@ contains
 
     enddo
 
-    end if		
+    end if
 
     print*,rank,'done cic interpolation'
 
