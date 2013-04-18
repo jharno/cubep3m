@@ -1,12 +1,13 @@
 !! initialize particle list
   subroutine particle_initialize
+    !use omp_lib
     implicit none
 
     include 'mpif.h'
     include 'cubepm.fh'
 
     real(4) :: rnum,z_write
-    integer(4) :: i,j,k,pp,fstat
+    integer(4) :: i,j,k,pp,fstat,blocksize,num_writes,nplow,nphigh
     integer*8 :: np_total,npl8
     character(len=max_path) :: ofile
     character(len=4) :: rank_s
@@ -117,23 +118,76 @@
       read(21) np_local,a,t,tau,nts,dt_f_acc,dt_c_acc,cur_checkpoint, &
                cur_projection,cur_halofind,mass_p
 #endif
-
-      !cur_projection = cur_projection+1
-      !cur_halofind = cur_halofind + 1      
       if (rank == 0) print *,'restarting simulation from z=',z_checkpoint(cur_checkpoint-1)
-      if (rank == 0) print *,'current checkpoint, proj and halo entries are:', cur_checkpoint, &
-               cur_projection,cur_halofind
-      !cur_projection = cur_projection+1
-      !cur_halofind = cur_halofind + 1
-      !cur_checkpoint = cur_checkpoint+1
+
       if (np_local > max_np) then
         write(*,*) 'too many particles to store'
         write(*,*) 'rank',rank,'np_local',np_local,'max_np',max_np
         call mpi_abort(mpi_comm_world,ierr,ierr)
       endif
 
-      read(21) xv(:,:np_local)
+!     blocksize=(2047*1024*1024)/24
+!     reduced to 32MB chunks because of intel compiler
+      blocksize=(32*1024*1024)/24
+      num_writes=np_local/blocksize+1
+
+
+      !read(21) xv(:,:np_local)
+      do i = 1,num_writes
+         nplow=(i-1)*blocksize+1
+         nphigh=min(i*blocksize,np_local)
+!!       print *,rank,nplow,nphigh,np_local
+         do j=nplow,nphigh
+            read(21) xv(:,j)
+         enddo
+      enddo
+ 
       close(21)
+
+#ifdef PID_FLAG
+
+      ofile=output_path//z_s(1:len_trim(z_s))//'PID'// &
+            rank_s(1:len_trim(rank_s))//'.dat'
+
+#ifdef BINARY
+      open(unit=21,file=ofile,status='old',iostat=fstat,form='binary')
+#else
+      open(unit=21,file=ofile,status='old',iostat=fstat,form='unformatted')
+#endif
+
+      if (fstat /= 0) then
+        write(*,*) 'error opening checkpoint'
+        write(*,*) 'rank',rank,'file:',ofile
+        call mpi_abort(mpi_comm_world,ierr,ierr)
+      endif
+
+#ifdef PPINT
+      read(21) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
+               cur_projection,cur_halofind,mass_p
+#else
+      read(21) np_local,a,t,tau,nts,dt_f_acc,dt_c_acc,cur_checkpoint, &
+               cur_projection,cur_halofind,mass_p
+#endif
+
+      if (np_local > max_np) then
+        write(*,*) 'too many particles to store'
+        write(*,*) 'rank',rank,'np_local',np_local,'max_np',max_np
+        call mpi_abort(mpi_comm_world,ierr,ierr)
+      endif
+
+      !read(21) PID(:np_local)
+      do i = 1,num_writes
+         nplow=(i-1)*blocksize+1
+         nphigh=min(i*blocksize,np_local)
+!!       print *,rank,nplow,nphigh,np_local
+         do j=nplow,nphigh
+            read(21) PID(j)
+         enddo
+      enddo
+      close(21)
+
+#endif
+
 
     elseif (shake_test_ic) then
       np_local=1
@@ -146,7 +200,6 @@
       rank_s=adjustl(rank_s)
 
       ofile=ic_path//'xv'//rank_s(1:len_trim(rank_s))//'.ic'
-!      ofile=ic_path//'xvp.init' 
       print *,'opening particle list:',ofile(1:len_trim(ofile))
 #ifdef BINARY
       open(unit=20,file=ofile,form='binary',iostat=fstat,status='old')
@@ -165,45 +218,40 @@
          write(*,*) 'rank',rank,'np_local',np_local,'max_np',max_np
          call mpi_abort(mpi_comm_world,ierr,ierr)
       endif
+#ifndef BINARY
       ! this was for the old initial condition generator 
-      !      read(20) xv(:3,:np_local)
-      !      do i=1,np_local
-      !        read(20) xv(:,i)
-      !      enddo
+       !     read(20) xv(:3,:np_local)
+            do i=1,np_local
+              read(20) xv(:,i)
+            enddo
+#else
       read(20) xv(:,:np_local)
+#endif
       close(20)
 
-     
-   endif
-
 #ifdef PID_FLAG
+      write(*,*) 'np_local before delete', np_local, 'rank =', rank
+      !call delete_particles
+      !write(*,*) 'np_local after delete', np_local, 'rank =', rank
 
 
-    write(*,*) 'np_local before delete', np_local, 'rank =', rank
-    !call delete_particles
+      do i=1,np_local
+         ! Assign a uniqe ID to particles in physical volumes.        
+         ! This assumes that every node starts with the same np_local
+         !PID(i) = int(i + rank*np_local,kind=8)
+         PID(i) = int(i,kind=8) + int(rank*np_local,kind=8)
+      enddo
 
-    do i=1,np_local
-       ! Assign a uniqe ID to particles in physical volumes.        
-       ! This assumes that no more than 1 particle is present in each cell initially
-       ! The numerical factor (0.5 now) should match (particle to fine grid) ratio (see dist_init.f90)
-       !PID(i) = int(i + (rank)*(0.5*nc/nodes_dim)**3,kind=8)
-       PID(i) = int(i,kind=8) + int(rank*np_local,kind=8)
-#ifdef DEBUG_PID_INTENSE
-       !write(*,*) i,'PID=', PID(i), 'xv', xv(1:3,i) ! useful to discover the grids!!!
-       !pause
-#endif
-    enddo
-
-#ifdef DEBUG_PID
-    write(*,*) 'np_local=',np_local
-    write(*,*) 'xv', xv(1:3,np_local), 'PID', PID(np_local) ! should be non-zero
-    write(*,*) 'xv', xv(1:3,np_local+1), 'PID', PID(np_local+1) ! should be zero
+#ifdef DEBUG_PID_INIT
+      write(*,*) 'np_local=',np_local
+      write(*,*) 'xv',xv(1:3,1:10), 'PID', PID(1:10) !
+      write(*,*) 'xv',xv(1:3,np_local), 'PID', PID(np_local) ! should be non-zero
+      write(*,*) 'xv',xv(1:3,np_local+1), 'PID', PID(np_local+1) ! should be zero
 #endif
 
     if(rank==0)write(*,*) 'PID initialized' 
-    
-    ! Write initial PIDs to a file:
 
+    ! Write initial PIDs to a file:
     fstat = 0
 
 #ifdef BINARY
@@ -223,14 +271,7 @@
 
 #endif
     
-
-    ! If one needs to ensure that particles start in physical volume...
-    !call link_list
-    !call particle_pass
-    !call delete_particles
-    !write(*,*) 'np_local after delete', np_local, 'rank =', rank
-
-
+   endif
 
 !! calculate total number of particles and particle mass
 
@@ -248,11 +289,7 @@
        elseif (pp_test) then
           mass_p=10000.0/4.
        else
-#ifdef MHD
-          mass_p = (real(nf_physical_dim)**3 / real(np_total))!*(1-omega_b/omega_m)
-#else
           mass_p = real(nf_physical_dim)**3 / real(np_total)
-#endif
        endif
     endif
 
