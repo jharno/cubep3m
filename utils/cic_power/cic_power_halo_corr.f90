@@ -254,13 +254,14 @@ contains
   subroutine read_haloes
     implicit none
     
-    real z_write,np_total
+    real z_write,np_total,a
     integer(4) :: j,fstat,np_buf,cube_rank
     integer(4),dimension(3) :: cube_coord
     character(len=7) :: z_string
     character(len=4) :: rank_string
     character(len=255) :: check_name
-    real, dimension(17) :: halo_input_buffer
+    real, dimension(28) :: halo_input_buffer
+    !real, dimension(17) :: halo_input_buffer
 
 !! generate checkpoint names on each node
     if (rank==0) then
@@ -308,7 +309,8 @@ contains
 !      xvp(3,np_buf)=halo_input_buffer(3)-cube_coord(3)*nc_node_dim
       xvp(1:3,np_buf)=modulo(halo_input_buffer(1:3),real(nc_node_dim))
       !! mass in fine grid units
-      xvp(4,np_buf)=halo_input_buffer(15)
+      xvp(4,np_buf)=halo_input_buffer(17)    !28 coluns
+      !xvp(4,np_buf)=halo_input_buffer(15)   !17 columns
       !! velocity
       xvp(5:7,np_buf)=halo_input_buffer(7:9)
     enddo
@@ -319,6 +321,28 @@ contains
     call mpi_reduce(real(np_local,kind=4),np_total,1,mpi_real, &
                          mpi_sum,0,mpi_comm_world,ierr)
     if (rank == 0) write(*,*) 'number of haloes =', int(np_total,8)
+
+#ifdef KAISER
+
+    !Red Shift Distortion: x_z -> x_z +  v_z/H(Z)   
+    !Converting seconds into simulation time units
+    !cancels the H0...
+   
+    a = 1.0/(1.0 + z_write)
+ 
+    xvp(3,1:np_local)=xvp(3,1:np_local) + xvp(7,1:np_local)*1.5/sqrt(a*(1+a*(1-omega_m-omega_l)/omega_m + omega_l/omega_m*a**3))  
+
+    call pass_haloes
+
+    if(rank==0) then
+       write(*,*) '**********************'
+       write(*,*) 'Included Kaiser Effect'
+       write(*,*) 'Omega_m =', omega_m, 'a =', a
+       !write(*,*) '1/H(z) =', 1.5*sqrt(omegam/cubepm_a)
+       write(*,*) '1/H(z) =', 1.5/sqrt(a*(1+a*(1-omega_m-omega_l)/omega_m + omega_l/omega_m*a**3))
+       write(*,*) '**********************'
+    endif
+#endif
 
   end subroutine read_haloes
 
@@ -564,11 +588,19 @@ contains
     write(lmu_write,'(f5.3)') alog10(min_mass)+cur_massbin*dlmass
     lmu_write=adjustl(lmu_write)
 !    fn=output_path//z_write(1:len_trim(z_write))//'cicps_halo_'//lmo_write(1:len_trim(lmo_write))//'_'lmu_write(1:len_trim(lmu_write))//'.dat'
+#ifdef KAISER
+    if(do_poisson) then
+       fn=output_path//z_write(1:len_trim(z_write))//'ngpps_halo_'//lmo_write(1:len_trim(lmo_write))//'_'//lmu_write(1:len_trim(lmu_write))//'-RSD-poisson.dat'
+    else
+       fn=output_path//z_write(1:len_trim(z_write))//'ngpps_halo_'//lmo_write(1:len_trim(lmo_write))//'_'//lmu_write(1:len_trim(lmu_write))//'-RSD.dat'
+    endif
+#else
     if(do_poisson) then
        fn=output_path//z_write(1:len_trim(z_write))//'ngpps_halo_'//lmo_write(1:len_trim(lmo_write))//'_'//lmu_write(1:len_trim(lmu_write))//'-poisson.dat'
     else
        fn=output_path//z_write(1:len_trim(z_write))//'ngpps_halo_'//lmo_write(1:len_trim(lmo_write))//'_'//lmu_write(1:len_trim(lmu_write))//'.dat'
     endif
+#endif
     write(*,*) 'Writing ',fn
     open(11,file=fn,recl=500)
     do k=2,hc+1
@@ -671,6 +703,7 @@ contains
  
       !! Forward FFT halo delta field
       call cp_fftw(1)
+      if(rank==0) write(*,*) 'Done FFT'
 
       !! Compute halo power spectrum
       call powerspectrum(slab,pkhh)
@@ -1374,7 +1407,7 @@ contains
     if (rank == 0) then
       do k=1,nc
         ! TESTING
-        write(18,*) k,nc,pktsum(1,k),pktsum(2,k),pktsum(3,k)
+        !write(18,*) k,nc,pktsum(1,k),pktsum(2,k),pktsum(3,k)
         if (pktsum(3,k) .eq. 0) then
           pk(1:2,k)=0.
         else
@@ -1384,7 +1417,7 @@ contains
           kavg = kcen(k) / kcount(k)
           pk(3,k) = 2. * pi * kavg / box
 
-          write(19,*) pk(3,k),nc,pk(1,k),pk(2,k)
+          !write(19,*) pk(3,k),nc,pk(1,k),pk(2,k)
 ! TESTING
 !          pk(1:2,k)=4.*pi*real(k-1)**3*pk(1:2,k)
 #ifdef NGP
@@ -1392,7 +1425,7 @@ contains
 #else
 	  pk(1:2,k)=4.*pi4*real(k-1)**3*pk(1:2,k)
 #endif
-          write(20,*) pk(3,k),nc,pk(1,k),pk(2,k)
+          !write(20,*) pk(3,k),nc,pk(1,k),pk(2,k)
        endif
       enddo
     endif
