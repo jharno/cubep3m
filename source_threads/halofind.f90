@@ -566,6 +566,8 @@
 
     real(4),dimension(3) :: x,fx,x0
 
+    logical :: valid_halo
+
     real(4) :: para_inter 
     external para_inter 
 
@@ -669,6 +671,7 @@
       ix0=ipeak(1,iloc)
       iy0=ipeak(2,iloc)
       iz0=ipeak(3,iloc)
+      valid_halo = .false.
       amtot=0
       do i=1,irtot
         ix=ix0+idist(1,i)
@@ -685,6 +688,7 @@
            actual_odc=amtot/(real(i))!remember what the actual overdensity inside the found halo is
            if (amtot >= min_halo_particles*mass_p) then
               nhalo=nhalo+1
+              valid_halo = .true.
               if (nhalo > max_maxima) then
                  print *,'too many halos to store',rank,nhalo,max_maxima
                  stop
@@ -699,7 +703,7 @@
         write(*,*) 'ran out of irtot'
       endif
 
-      if (nhalo > 0) then
+      if (valid_halo) then
         halo_pos(:,nhalo)=peak_pos(:,iloc)+offset !(/os_x,os_y,os_z/)
         halo_mass1(nhalo)=amtot
 !        write(*,*) 'check mass rescaling 0',overdens(5),mass_rescaling(5)
