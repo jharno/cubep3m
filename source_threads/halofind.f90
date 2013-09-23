@@ -468,15 +468,26 @@
                     v_wrt_halo = xv(4:,pp) - v_mean
                     v2_wrt_halo = v2_wrt_halo + v_wrt_halo(:)**2
                     dist = sqrt(r_wrt_halo(1)**2 +r_wrt_halo(2)**2 + r_wrt_halo(3)**2)
-                    I_ij(1) = I_ij(1)+r_wrt_halo(1)*r_wrt_halo(1)
-                    I_ij(2) = I_ij(2)+r_wrt_halo(1)*r_wrt_halo(2)
-                    I_ij(3) = I_ij(3)+r_wrt_halo(1)*r_wrt_halo(3)
-                    I_ij(4) = I_ij(4)+r_wrt_halo(2)*r_wrt_halo(2)
-                    I_ij(5) = I_ij(5)+r_wrt_halo(2)*r_wrt_halo(3)
-                    I_ij(6) = I_ij(6)+r_wrt_halo(3)*r_wrt_halo(3)
-                    
+ 
                     speed = sqrt(v_wrt_halo(1)**2 +v_wrt_halo(2)**2 + v_wrt_halo(3)**2)
                     E_tmp = 0.5*(speed)**2 - halo_mass(hi)*G/dist
+
+
+                    ! I should clean up unbound particles here: 
+
+                    ! I_ij = [ I_ij(1) I_ij(2) I_ij(3) ]
+                    !        | I_ij(2) I_ij(4) I_ij(5) |
+                    !        | I_ij(3) I_ij(5) I_ij(6) ]
+                    ! with the inertia matrix/tensor defined as:
+                    ! I_ij = sum_n [m_n (x_n**2 + y_n**2 + z_n**2) * delta_kronecker_ij - m_n * x_i,n * x_j,n]
+
+                    I_ij(1) = I_ij(1)+r_wrt_halo(2)**2 + r_wrt_halo(3)**2  ! I_xx
+                    I_ij(2) = I_ij(2)-r_wrt_halo(1)*r_wrt_halo(2)          ! I_xy
+                    I_ij(3) = I_ij(3)-r_wrt_halo(1)*r_wrt_halo(3)          ! I_xz
+                    I_ij(4) = I_ij(4)+r_wrt_halo(1)**2 + r_wrt_halo(3)**2  ! I_yy
+                    I_ij(5) = I_ij(5)-r_wrt_halo(2)*r_wrt_halo(3)          ! I_yz
+                    I_ij(6) = I_ij(6)+r_wrt_halo(1)**2 + r_wrt_halo(3)**2  ! I_zz
+                    
                     
                    
 
@@ -516,10 +527,11 @@
 
 
 #ifdef PID_FLAG
-     if (halo_write .and. imass>0 .and. halo_mass(hi)>160) write(12) halo_pos(:,hi),x_mean,v_mean,l_CM,v2_wrt_halo,radius_calc,halo_mass(hi),imass*mass_p,halo_mass1(hi), var_x, pid_halo,xv_halo
+     if (halo_write .and. imass>0 .and. halo_mass(hi)>160) write(12) halo_pos(:,hi)-shake_offset(:), x_mean - shake_offset,v_mean,l_CM,v2_wrt_halo,radius_calc,halo_mass(hi),imass*mass_p,halo_mass1(hi), var_x, pid_halo,xv_halo
      
 #else
-     if (halo_write .and. imass>0 .and. halo_mass(hi)>160) write(12) halo_pos(:,hi),x_mean,v_mean,l_CM,v2_wrt_halo,radius_calc,halo_mass(hi),imass*mass_p,halo_mass1(hi),var_x,I_ij
+     !if (halo_write .and. imass>0 .and. halo_mass(hi)>160) write(12) halo_pos(:,hi), x_mean,v_mean,l_CM,v2_wrt_halo,radius_calc,halo_mass(hi),imass*mass_p,halo_mass1(hi),var_x,I_ij
+     if (halo_write .and. imass>0 .and. halo_mass(hi)>160) write(12) halo_pos(:,hi)-shake_offset, x_mean -shake_offset ,v_mean,l_CM,v2_wrt_halo,radius_calc,halo_mass(hi),imass*mass_p,halo_mass1(hi),var_x,I_ij
 #endif
      
      !! these plus nhalo should be passed to C^2Ray for each iteration
@@ -565,6 +577,8 @@
     real(4)    :: denmax,r,amass,amtot,fcf,fcf2
 
     real(4),dimension(3) :: x,fx,x0
+
+    logical :: valid_halo
 
     real(4) :: para_inter 
     external para_inter 
@@ -669,6 +683,7 @@
       ix0=ipeak(1,iloc)
       iy0=ipeak(2,iloc)
       iz0=ipeak(3,iloc)
+      valid_halo = .false.
       amtot=0
       do i=1,irtot
         ix=ix0+idist(1,i)
@@ -685,6 +700,7 @@
            actual_odc=amtot/(real(i))!remember what the actual overdensity inside the found halo is
            if (amtot >= min_halo_particles*mass_p) then
               nhalo=nhalo+1
+              valid_halo = .true.
               if (nhalo > max_maxima) then
                  print *,'too many halos to store',rank,nhalo,max_maxima
                  stop
@@ -699,7 +715,7 @@
         write(*,*) 'ran out of irtot'
       endif
 
-      if (nhalo > 0) then
+      if (valid_halo) then
         halo_pos(:,nhalo)=peak_pos(:,iloc)+offset !(/os_x,os_y,os_z/)
         halo_mass1(nhalo)=amtot
 !        write(*,*) 'check mass rescaling 0',overdens(5),mass_rescaling(5)
