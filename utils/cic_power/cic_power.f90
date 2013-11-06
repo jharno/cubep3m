@@ -2,7 +2,8 @@
 !! Modified by Ilian Iliev and Joachim Harnois-Deraps 01/2013 to include NGP angle averaging,
 !! to make memory light with new equivalence statements, to apply a kernel
 !! correction that deconvolves the grid assignment scheme, and to include
-!! POisson noise.
+!! Poisson noise.
+!! Corrects for the k_shell as well.
 !! Also has the option to compute the Redshift space power with the -DKAISER
 !! compile flag, and if you include the initial redshift in the checkpoint file,
 !! it will correctly load up the xv*.ic files and compute its power as well.
@@ -18,10 +19,10 @@ program cic_power
 
   logical, parameter :: correct_kernel=.false.
 
-  character(len=*), parameter ::checkpoints=cubepm_root//'/input/checkpoints'
-  !character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints_LargePID'!bao_600Mpc'
-  !character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints_bao_600Mpc'
-  !character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints_UBC_FAR'
+  character(len=*), parameter ::checkpoints=cubepm_root//'/input/checkpoints_KiDS'
+  !character(len=*), parameter ::checkpoints=cubepm_root//'/input/checkpoints_KiDS_100Mpc'
+  !character(len=*), parameter ::checkpoints=cubepm_root//'/input/checkpoints_0.042'
+  !character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints_high'
 
   !! nc is the number of cells per box length
   integer, parameter :: hc=nc/2
@@ -600,7 +601,7 @@ contains
 #ifdef KAISER
     fn=output_path//z_write(1:len_trim(z_write))//prefix//'-RSD.dat' 
 #else
-    fn=output_path//z_write(1:len_trim(z_write))//prefix//'.dat' 
+    fn=output_path//z_write(1:len_trim(z_write))//prefix//'_new.dat' 
 #endif
 
     write(*,*) 'Writing ',fn
@@ -812,10 +813,10 @@ contains
       dsum=dsumt/real(nc)**3
       dvar=sqrt(dvart/real(nc)**3)
       write(*,*)
-      write(*,*) 'DM min    ',dmint
-      write(*,*) 'DM max    ',dmaxt
-      write(*,*) 'Delta sum ',real(dsum,8)
-      write(*,*) 'Delta var ',real(dvar,8)
+      write(*,*) 'Poisson DM min    ',dmint
+      write(*,*) 'Poisson DM max    ',dmaxt
+      write(*,*) 'Poisson Delta sum ',real(dsum,8)
+      write(*,*) 'Poisson Delta var ',real(dvar,8)
       write(*,*)
     endif
  
@@ -1416,7 +1417,7 @@ contains
       enddo
     endif
 
-    call mpi_bcast(pk,2*nc,mpi_real,0,mpi_comm_world,ierr)
+    call mpi_bcast(pk,3*nc,mpi_real,0,mpi_comm_world,ierr)
 
     call cpu_time(time2)
     time2=(time2-time1)
