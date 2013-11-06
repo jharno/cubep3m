@@ -1,6 +1,10 @@
 !!  cubep3m - cubical decomposition 2-level particle mesh algorithm with particle-particle interactions
 !! Hugh Merz :: merz@cita.utoronto.ca :: 2006 11 02 
+!! Joachim Harnois-Deraps :: jharno@cita.utoronto.ca :: 2013 01 10
+!! Now has particle ID, extended pp force available, and MHD has been awaken
+!! from the grave, and is now compatible with the threaded version.
 program cubep3m
+  use omp_lib
 
 #ifdef MHD
   use mpi_tvd_mhd
@@ -15,13 +19,22 @@ program cubep3m
 #endif
 
 #ifdef MHD
-  integer(4) :: nc_to_mhd(3)
+  integer(4) :: nc_to_mhd(3),i,j,k
+  real(4)    :: total_baryon, local_baryon
 #endif
 
   real(4) :: t_elapsed
   external t_elapsed
   real(4) :: z_write
   character(len=7) :: z_s
+
+#ifdef CHECKPOINT_KILL
+  logical :: kill_step, kill_step_done
+  ! Time in seconds to write checkpoint before being killed:
+  !real, parameter :: kill_time = 5.*60               ! 5 minutes
+  real, parameter :: kill_time = (48. - 2.) * 3600. ! 46 hours
+  real(8) :: sec1, sec2
+#endif
 
   call datestamp 
 
@@ -32,6 +45,12 @@ program cubep3m
   call memory_usage
 
   call variable_initialize
+
+  
+#ifdef CHECKPOINT_KILL
+  sec1 = mpi_wtime(ierr)
+  kill_step_done = .false.
+#endif
 
   if (rank == 0) write(*,*) 'finished variable init',t_elapsed(wc_counter)
 
@@ -72,17 +91,42 @@ if (rank == 0) write(*,*) 'finished kernel init',t_elapsed(wc_counter)
     print *,rank,sum(u(1,nx%m:nx%n,ny%m:ny%n,nz%m:nz%n))
     b=0.0
   elseif (restart_ic)then
-      if (rank==0) z_write = z_checkpoint(restart_checkpoint)
-      call mpi_bcast(z_write,1,mpi_real,0,mpi_comm_world,ierr)
+    if (rank==0) z_write = z_checkpoint(restart_checkpoint)
+    call mpi_bcast(z_write,1,mpi_real,0,mpi_comm_world,ierr)
 
-      write(z_s,'(f7.3)') z_write
-      z_s=adjustl(z_s)
-      call mpi_tvd_mhd_restart(output_path, z_s)
+    write(z_s,'(f7.3)') z_write
+    z_s=adjustl(z_s)
+    call mpi_tvd_mhd_restart(output_path, z_s)
   else
-      call mpi_tvd_mhd_ic(ic_path)
+    call mpi_tvd_mhd_ic(ic_path)
   endif
 
   if (rank == 0) write(*,*) 'finished reading mhd initial conditions',t_elapsed(wc_counter)
+  local_baryon = sum(u(1,:,:,:))
+  call mpi_reduce(local_baryon,total_baryon,1,MPI_REAL, mpi_sum,0,mpi_comm_world,ierr)
+  if (rank == 0) write(*,*) 'total baryon mass = ', total_baryon
+  call mpi_bcast(total_baryon,1,MPI_REAL,0,mpi_comm_world,ierr)
+
+#ifdef MHD_DEBUG
+  write(*,*) rank, 'mean local mass = ' , sum(u(1,:,:,:))/nf_physical_node_dim**3
+  write(*,*) rank, 'min/max den = ', minval( u(1,nx%m:nx%n,ny%m:ny%n,nz%m:nz%n)), maxval(u(1,nx%m:nx%n,ny%m:ny%n,nz%m:nz%n))
+  write(*,*) rank, 'mean local den*vx = ' , sum(u(2,:,:,:))/nf_physical_node_dim**3
+  write(*,*) rank, 'min/max den*vx = ', minval(u(2,nx%m:nx%n,ny%m:ny%n,nz%m:nz%n)), maxval(u(2,nx%m:nx%n,ny%m:ny%n,nz%m:nz%n)) 
+  write(*,*) rank, 'mean local den*vy = ' , sum(u(3,:,:,:))/nf_physical_node_dim**3
+  write(*,*) rank, 'min/max den*vy = ', minval( u(3,nx%m:nx%n,ny%m:ny%n,nz%m:nz%n)), maxval( u(3,nx%m:nx%n,ny%m:ny%n,nz%m:nz%n))
+  write(*,*) rank, 'mean local den*vz = ' , sum(u(4,:,:,:))/nf_physical_node_dim**3
+  write(*,*) rank, 'min/max den*vz = ', minval( u(4,nx%m:nx%n,ny%m:ny%n,nz%m:nz%n)), maxval( u(4,nx%m:nx%n,ny%m:ny%n,nz%m:nz%n))
+  write(*,*) rank, 'mean local E = ' , sum(u(5,:,:,:))/nf_physical_node_dim**3
+  write(*,*) rank, 'min/max E = ', minval( u(5,nx%m:nx%n,ny%m:ny%n,nz%m:nz%n)), maxval(u(5,nx%m:nx%n,ny%m:ny%n,nz%m:nz%n))
+  do k=nz%m,nz%n
+    do j=ny%m,ny%n
+      do i=nx%m,nx%n
+         if(abs(u(3,i,j,k)) > 20) write(*,*) 'velocity too high at ' ,rank, i,j,k,u(3,i,j,k)
+  
+      enddo
+    enddo
+  enddo
+#endif
 
   call comm_bufferupdate(u,b,nx,ny,nz)
   call transposef(u,b,nx%l,ny%l,nz%l)
@@ -94,10 +138,28 @@ if (rank == 0) write(*,*) 'finished kernel init',t_elapsed(wc_counter)
   if (rank == 0) write(*,*) 'finished updating buffers with initial conditions',t_elapsed(wc_counter)
 #endif
 
- !if(rank ==0) write(*,*)'Calling init_projection.f90'
- call link_list
- call init_projection
+#ifdef init_proj_only
+  if(rank ==0) write(*,*)'Calling init_projection.f90'
+    call particle_pass
+    call link_list
+    call init_projection
+    call cubepm_fftw(0)
+  do ierr=1,cores
+    call cubepm_fftw2('q',ierr)
+  enddo
+  call mpi_finalize(ierr)
+  call datestamp
+  if(rank==0) write(*,*)'Quiting after projecting'
+#endif
 
+#ifdef proj_only_restart
+  if (rank == 0) write(*,*) 'Entering finer projection then quit'
+  call link_list
+  call particle_pass
+  call projection
+  call mpi_finalize(ierr)
+  call datestamp
+#endif
 
   if (rank == 0) write(*,*) 'starting main loop'
   do 
@@ -164,11 +226,19 @@ if (rank == 0) write(*,*) 'finished kernel init',t_elapsed(wc_counter)
     if (rank == 0) write(*,*) 'finished backward gas sweep',t_elapsed(wc_counter)
 #endif
 
+#ifdef CHECKPOINT_KILL
+    !! Determine if it is time to write a checkpoint before being killed
+    kill_step = .false.
+    sec2 = mpi_wtime(ierr)
+    if (rank == 0) then
+        if ((sec2 - sec1) .ge. kill_time) kill_step = .true.
+    endif
+    call mpi_bcast(kill_step, 1, mpi_logical, 0, mpi_comm_world, ierr)
 
-    !if(superposition_test)then
-    !    checkpoint_step = .true.
-    !endif
+    if (checkpoint_step.or.projection_step.or.halofind_step.or.kill_step) then
+#else
     if (checkpoint_step.or.projection_step.or.halofind_step) then
+#endif
 
 !! advance the particles to the end of the current step.
 
@@ -177,6 +247,17 @@ if (rank == 0) write(*,*) 'finished kernel init',t_elapsed(wc_counter)
 
 #ifdef MOVE_GRID_BACK
       call move_grid_back
+#endif
+
+#ifdef CHECKPOINT_KILL
+      if (kill_step .and. .not. kill_step_done) then
+
+        call checkpoint_kill
+        if (rank == 0) write(*,*) 'finished checkpoint_kill',t_elapsed(wc_counter)
+
+        kill_step_done = .true. ! Don't want to keep doing this
+
+      endif
 #endif
 
       !dt = 0.0
@@ -198,6 +279,8 @@ if (rank == 0) write(*,*) 'finished kernel init',t_elapsed(wc_counter)
           call halofind
           if (rank == 0) write(*,*) 'finished halofind',t_elapsed(wc_counter)
         endif
+
+        call mpi_barrier(mpi_comm_world,ierr)
 
         if (projection_step) then
           call projection

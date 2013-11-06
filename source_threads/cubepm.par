@@ -48,6 +48,10 @@ integer(4), parameter   :: max_nts = 4000
 logical, parameter	:: restart_ic =  .false.
 integer(4), parameter   :: restart_checkpoint = 1 ! line number in input/checkpoint 
 
+! To restart from a checkpoint kill compile with CHECKPOINT_KILL and set restart_kill = .true.
+logical, parameter :: restart_kill = .true. 
+character(*), parameter :: reskill_prefix = '0.482'
+
 ! other internal initial conditions for testing, if all ic flags are
 ! set .false. cubepm assumes it is starting with initial conditions
 ! from dist_init

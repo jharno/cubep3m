@@ -1,6 +1,6 @@
 !! initialize particle list
   subroutine particle_initialize
-    !use omp_lib
+    use omp_lib
     implicit none
 
     include 'mpif.h'
@@ -189,6 +189,108 @@
 #endif
 
 
+#ifdef CHECKPOINT_KILL
+
+    elseif (restart_kill) then
+
+      write(rank_s,'(i4)') rank
+      rank_s=adjustl(rank_s)
+
+      ofile=output_path//reskill_prefix//'xvres'// &
+            rank_s(1:len_trim(rank_s))//'.dat'
+
+#ifdef BINARY
+      open(unit=21,file=ofile,status='old',iostat=fstat,form='binary')
+#else
+      open(unit=21,file=ofile,status='old',iostat=fstat,form='unformatted')
+#endif
+
+      if (fstat /= 0) then
+        write(*,*) 'error opening checkpoint'
+        write(*,*) 'rank',rank,'file:',ofile
+        call mpi_abort(mpi_comm_world,ierr,ierr)
+      endif
+
+#ifdef PPINT
+      read(21) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
+               cur_projection,cur_halofind,mass_p
+#else
+      read(21) np_local,a,t,tau,nts,dt_f_acc,dt_c_acc,cur_checkpoint, &
+               cur_projection,cur_halofind,mass_p
+#endif
+
+      if (rank == 0) print *,'restarting simulation from z=', reskill_prefix
+      !if (rank == 0) print *,'restarting simulation from z=',z_checkpoint(cur_checkpoint-1)
+      if (rank == 0) print *,'current checkpoint, proj and halo entries are:', cur_checkpoint, &
+               cur_projection,cur_halofind
+      if (np_local > max_np) then
+        write(*,*) 'too many particles to store'
+        write(*,*) 'rank',rank,'np_local',np_local,'max_np',max_np
+        call mpi_abort(mpi_comm_world,ierr,ierr)
+      endif
+
+!     blocksize=(2047*1024*1024)/24
+!     reduced to 32MB chunks because of intel compiler
+      blocksize=(32*1024*1024)/24
+      num_writes=np_local/blocksize+1
+
+      !read(21) xv(:,:np_local)
+      do i = 1,num_writes
+         nplow=(i-1)*blocksize+1
+         nphigh=min(i*blocksize,np_local)
+!!       print *,rank,nplow,nphigh,np_local
+         do j=nplow,nphigh
+            read(21) xv(:,j)
+         enddo
+      enddo
+      close(21)
+
+#ifdef PID_FLAG
+
+      ofile=output_path//reskill_prefix//'PIDres'// &
+            rank_s(1:len_trim(rank_s))//'.dat'
+
+#ifdef BINARY
+      open(unit=21,file=ofile,status='old',iostat=fstat,form='binary')
+#else
+      open(unit=21,file=ofile,status='old',iostat=fstat,form='unformatted')
+#endif
+
+      if (fstat /= 0) then
+        write(*,*) 'error opening checkpoint'
+        write(*,*) 'rank',rank,'file:',ofile
+        call mpi_abort(mpi_comm_world,ierr,ierr)
+      endif
+
+#ifdef PPINT
+      read(21) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
+               cur_projection,cur_halofind,mass_p
+#else
+      read(21) np_local,a,t,tau,nts,dt_f_acc,dt_c_acc,cur_checkpoint, &
+               cur_projection,cur_halofind,mass_p
+#endif
+
+      if (np_local > max_np) then
+        write(*,*) 'too many particles to store'
+        write(*,*) 'rank',rank,'np_local',np_local,'max_np',max_np
+        call mpi_abort(mpi_comm_world,ierr,ierr)
+      endif
+
+      !read(21) PID(:np_local)
+      do i = 1,num_writes
+         nplow=(i-1)*blocksize+1
+         nphigh=min(i*blocksize,np_local)
+!!       print *,rank,nplow,nphigh,np_local
+         do j=nplow,nphigh
+            read(21) PID(j)
+         enddo
+      enddo
+      close(21)
+
+#endif
+
+#endif
+
     elseif (shake_test_ic) then
       np_local=1
       xv(:,1)=(/0.0,0.0,0.0,0.,0.,0./) 
@@ -289,7 +391,11 @@
        elseif (pp_test) then
           mass_p=10000.0/4.
        else
+!#ifdef MHD
+!          mass_p = (real(nf_physical_dim)**3 / real(np_total))!*(1-omega_b/omega_m)
+!#else
           mass_p = real(nf_physical_dim)**3 / real(np_total)
+!#endif
        endif
     endif
 
