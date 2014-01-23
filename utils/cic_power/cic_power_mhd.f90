@@ -64,7 +64,7 @@ program cic_power
   real, dimension(3*np_buffer) :: send_buf, recv_buf
 
   !! Power spectrum arrays
-  real, dimension(2,nc) :: pkdm
+  real, dimension(3,nc) :: pkdm
 #ifdef PLPLOT
   real*8, dimension(3,nc) :: pkplot
 #endif
@@ -577,9 +577,9 @@ contains
     do k=2,hc+1
        kr=2*pi*(k-1)/box
 #ifdef NGP
-       write(11,*) kr,pkdm(:,k-1)
+       write(11,*) pkdm(3,k-1),pkdm(1:2,k-1) 
 #else
-       write(11,*) kr,pkdm(:,k)
+       write(11,*) pkdm(3,k),pkdm(1:2,k)
 #endif
 #ifdef PLPLOT
        kp=k-1
@@ -667,7 +667,7 @@ contains
 !! generate checkpoint names on each node
     if (rank==0) then
        z_write = z_checkpoint(cur_checkpoint)
-       print *,'wrinting baryon density for z=',z_write
+       print *,'Wrinting density to file for z = ',z_write
     endif
 
     call mpi_bcast(z_write,1,mpi_real,0,mpi_comm_world,ierr)
@@ -678,10 +678,10 @@ contains
     rank_string=adjustl(rank_string)
 
 #ifdef KAISER
-    check_name=output_path//z_string(1:len_trim(z_string))//'den-mhd'// &
+    check_name=output_path//z_string(1:len_trim(z_string))//'den_mhd'// &
                rank_string(1:len_trim(rank_string))//'-rsd.dat'
 #else 
-    check_name=output_path//z_string(1:len_trim(z_string))//'den-mhd'// &
+    check_name=output_path//z_string(1:len_trim(z_string))//'den_mhd'// &
                rank_string(1:len_trim(rank_string))//'.dat'
 #endif
 
@@ -699,7 +699,6 @@ contains
 
     write(21) cube
 #endif
-
 
     sum_dm_local=sum(cube) 
     call mpi_reduce(sum_dm_local,sum_dm,1,mpi_real,mpi_sum,0,mpi_comm_world,ierr)
@@ -1217,20 +1216,26 @@ contains
 
   subroutine powerspectrum(delta,pk)
     implicit none
-    real, dimension(2,nc)       :: pk
+    real, dimension(3,nc)       :: pk
     real, dimension(nc+2,nc,nc_slab) :: delta
 
     integer :: i,j,k,kg
     integer :: k1,k2
-    real    :: kr,kx,ky,kz,w1,w2,pow, x,y,z,sync_x, sync_y, sync_z,kernel
+    real    :: kr,kx,ky,kz,w1,w2,pow
     real, dimension(3,nc,nc_slab) :: pkt
     real, dimension(3,nc) :: pktsum
+    real, dimension(nc) :: kcen, kcount
+    real    :: kavg
 
     real time1,time2
     call cpu_time(time1)
 
     pkt=0.0
     pktsum=0.0
+
+    kcen(:)   = 0.
+    kcount(:) = 0.
+
     !! Compute power spectrum
     do k=1,nc_slab
        kg=k+nc_slab*rank
@@ -1255,39 +1260,24 @@ contains
                 k2=k1+1
                 w1=k1-kr
                 w2=1-w1
-                x = pi*real(kx)/ncr
-                y = pi*real(ky)/ncr
-                z = pi*real(kz)/ncr
-
-                if(x==0) then
-                   sync_x = 1
-                else
-                   sync_x = sin(x)/x
-                endif
-                if(y==0) then
-                   sync_y = 1
-                else
-                   sync_y = sin(y)/y
-                endif
-                if(z==0) then
-                   sync_z = 1
-                else
-                   sync_z = sin(z)/z
-                endif
-
-                kernel = sync_x*sync_y*sync_z
- 
 #ifdef NGP
                 w1=1
                 w2=0
 #endif                
-                pow=sum((delta(i:i+1,j,k)/ncr**3)**2)/kernel
+                pow=sum((delta(i:i+1,j,k)/ncr**3)**2)
                 pkt(1,k1,k)=pkt(1,k1,k)+w1*pow
                 pkt(2,k1,k)=pkt(2,k1,k)+w1*pow**2
                 pkt(3,k1,k)=pkt(3,k1,k)+w1
                 pkt(1,k2,k)=pkt(1,k2,k)+w2*pow
                 pkt(2,k2,k)=pkt(2,k2,k)+w2*pow**2
                 pkt(3,k2,k)=pkt(3,k2,k)+w2
+
+                kcen(k1) = kcen(k1) + w1 * kr
+                kcen(k2) = kcen(k2) + w2 * kr
+
+                kcount(k1) = kcount(k1) + w1
+                kcount(k2) = kcount(k2) + w2
+
              endif
           enddo
        enddo
@@ -1309,18 +1299,22 @@ contains
         if (pktsum(3,k) .eq. 0) then
           pk(:,k)=0
         else
-          pk(:,k)=pktsum(1:2,k)/pktsum(3,k)
+          pk(1:2,k)=pktsum(1:2,k)/pktsum(3,k)
           pk(2,k)=sqrt(abs((pk(2,k)-pk(1,k)**2)/(pktsum(3,k)-1)))
+
+          kavg = kcen(k) / kcount(k)
+          pk(3,k) = 2. * pi * kavg / box
+
 #ifdef NGP
-          pk(1:2,k)=4*pi*(k)**3*pk(1:2,k)
+          pk(1:2,k)=4.*pi*(kavg)**3*pk(1:2,k)
 #else
-          pk(1:2,k)=4*pi*(k-1)**3*pk(1:2,k)
+          pk(1:2,k)=4.*pi*(kavg-1.)**3*pk(1:2,k)
 #endif
        endif
       enddo
     endif
 
-    call mpi_bcast(pk,2*nc,mpi_real,0,mpi_comm_world,ierr)
+    call mpi_bcast(pk,3*nc,mpi_real,0,mpi_comm_world,ierr)
 
     call cpu_time(time2)
     time2=(time2-time1)

@@ -51,7 +51,7 @@ implicit none
 #endif
 
        call random_number(offset)
-       offset=(offset-0.5)*mesh_scale*4.0 - shake_offset
+       offset=(offset-0.5)*mesh_scale!*16.0 - shake_offset  !Uncomment the end of this line to run without the -DISP_MESH flag   
        shake_offset=shake_offset+offset
        print *,'current shake offset:',shake_offset
     endif

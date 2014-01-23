@@ -220,6 +220,12 @@
     firstfftw=.true.
     firstfftw2=.true.
 
+    ! NEW TRICK BY JHD TO REMOVE MEMORY RACING CONDITION ON THREADED PLAN
+    ! CREATION. 
+    do i = 1,cores 
+      call cubepm_fftw2('o',i)
+    enddo
+
 ! Initialize halo finding arrays
 
     call initialize_halofind
