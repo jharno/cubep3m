@@ -23,6 +23,12 @@
     call mpi_comm_rank(mpi_comm_world,rank,ierr)
     if (ierr /= mpi_success) call mpi_abort(mpi_comm_world,ierr,ierr)
 
+    if (mod(nc_dim,nodes) /= 0) then
+      write(*,*) 'cannot evenly decompose mesh into slabs'
+      write(*,*) 'nc=',nf_physical_dim, 'nc coarse=',nc_dim,'nodes=',nodes,'mod(nc,nodes)=', mod(nc_dim, nodes)
+      call mpi_abort(mpi_comm_world,ierr,ierr)
+    endif
+
 #ifdef DIAG
     if (rank==0) then
       write(*,*) 'cubepm running on',nodes,'nodes with',cores,'cores per node'
