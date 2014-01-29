@@ -19,10 +19,10 @@ program cic_power
 
   logical, parameter :: correct_kernel=.false.
 
-  character(len=*), parameter ::checkpoints=cubepm_root//'/input/checkpoints_KiDS'
+  !character(len=*), parameter ::checkpoints=cubepm_root//'/input/checkpoints_KiDS'
   !character(len=*), parameter ::checkpoints=cubepm_root//'/input/checkpoints_KiDS_100Mpc'
   !character(len=*), parameter ::checkpoints=cubepm_root//'/input/checkpoints_0.042'
-  !character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints_high'
+  character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints_ppext2'
 
   !! nc is the number of cells per box length
   integer, parameter :: hc=nc/2
@@ -759,6 +759,9 @@ contains
     real    :: d,dmin,dmax,sum_dm,sum_dm_local,dmint,dmaxt,z_write
     real*8  :: dsum,dvar,dsumt,dvart
     real, dimension(3) :: dis
+    character(len=7) :: z_string
+    character(len=4) :: rank_string
+    character(len=100) :: check_name
     real time1,time2
 
     call cpu_time(time1)
@@ -769,9 +772,12 @@ contains
        den(:,:,k)=0
     enddo
 
+    ! Randomize positions across all nodes, hence np_local should be equal
+    np_local = (nc_node_dim/2)**3
+
     ! Assign particles to random positions between 0 and nc_node_dim
-    call random_number(xvp(1:3,:))
-    xvp(1:3,:) = xvp(1:3,:)*nc_node_dim
+    call random_number(xvp(1:3,:np_local))
+    xvp(1:3,:np_local) = xvp(1:3,:np_local)*nc_node_dim
 
     !! Assign masses to grid to compute dm power spectrum
     call cicmass
@@ -780,6 +786,42 @@ contains
     call mesh_buffer
     cube=den(1:nc_node_dim,1:nc_node_dim,1:nc_node_dim)
 
+#ifdef write_den
+!! generate checkpoint names on each node
+    if (rank==0) then
+       z_write = z_checkpoint(cur_checkpoint)
+       print *,'Wrinting density to file for z = ',z_write
+    endif
+
+    call mpi_bcast(z_write,1,mpi_real,0,mpi_comm_world,ierr)
+
+    write(z_string,'(f7.3)') z_write
+    z_string=adjustl(z_string)
+    write(rank_string,'(i4)') rank
+    rank_string=adjustl(rank_string)
+
+#ifdef KAISER
+    check_name=output_path//z_string(1:len_trim(z_string))//'den-poisson'// &
+               rank_string(1:len_trim(rank_string))//'-rsd.dat'
+#else 
+    check_name=output_path//z_string(1:len_trim(z_string))//'den-poisson'// &
+               rank_string(1:len_trim(rank_string))//'.dat'
+#endif
+
+!! open and write density file   
+#ifdef BINARY
+    open(unit=21,file=check_name,status='replace',iostat=fstat,form='binary')
+#else
+    open(unit=21,file=check_name,status='replace',iostat=fstat,form='unformatted')
+#endif
+    if (fstat /= 0) then
+      write(*,*) 'error opening density file'
+      write(*,*) 'rank',rank,'file:',check_name
+      call mpi_abort(mpi_comm_world,ierr,ierr)
+    endif
+
+    write(21) cube
+#endif
 
     sum_dm_local=sum(cube) 
     call mpi_reduce(sum_dm_local,sum_dm,1,mpi_real,mpi_sum,0,mpi_comm_world,ierr)
