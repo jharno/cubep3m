@@ -14,7 +14,7 @@ program cic_power_halo
 
   logical, parameter :: correct_kernel=.false.
 
-  character(len=*), parameter :: halofinds=cubepm_root//'/input/checkpoints'
+  character(len=*), parameter :: halofinds=cubepm_root//'/input/checkpoints_ppext2'
 !  character(len=*), parameter :: halofinds='../parameterfiles/checkpoints_halos'
 !  character(len=*), parameter :: halofinds=cubepm_root//'/input/halofinds'
 
@@ -33,7 +33,7 @@ program cic_power_halo
   real, dimension(max_checkpoints) :: z_checkpoint
   integer num_checkpoints, cur_checkpoint
   integer, parameter :: num_massbin=4
-  integer            :: cur_massbin
+  integer            :: cur_massbin, ntotal_massbin(num_massbin), nlocal_massbin(num_massbin)
   real, parameter    :: min_mass=160. ! 20 particles in fine grid unit
 !  real, parameter    :: dlmass=0.5
   real, parameter    :: dlmass=1.0
@@ -587,6 +587,10 @@ contains
     lmo_write=adjustl(lmo_write)
     write(lmu_write,'(f5.3)') alog10(min_mass)+cur_massbin*dlmass
     lmu_write=adjustl(lmu_write)
+
+
+!---- Specify the filename here:
+
 !    fn=output_path//z_write(1:len_trim(z_write))//'cicps_halo_'//lmo_write(1:len_trim(lmo_write))//'_'lmu_write(1:len_trim(lmu_write))//'.dat'
 #ifdef KAISER
     if(do_poisson) then
@@ -601,22 +605,51 @@ contains
        fn=output_path//z_write(1:len_trim(z_write))//'ngpps_halo_'//lmo_write(1:len_trim(lmo_write))//'_'//lmu_write(1:len_trim(lmu_write))//'.dat'
     endif
 #endif
+
     write(*,*) 'Writing ',fn
     open(11,file=fn,recl=500)
+
+    if(do_poisson) then
+
     do k=2,hc+1
        kr=2*pi*(k-1)/box
 #ifdef NGP
        !write(11,*) kr,pkhh(:,k-1),poisson(:,k-1)
-       write(11,*) pkhh(3,k-1),pkhh(1:2,k-1),poisson(1:2,k-1)
+       write(11,*) pkhh(3,k-1),poisson(1:2,k-1)
 #else
-       write(11,*) kr,pkhh(:,k),poisson(:,k)
+       write(11,*) kr,poisson(:,k)
 #endif
+
+#ifdef PLPLOT
+       kp=k-1
+       pkplot(1,kp)=real(kr,kind=8)
+       pkplot(2:3,kp)=real(poisson(:,k),kind=8)
+#endif
+    enddo
+
+    else
+
+    do k=2,hc+1
+       kr=2*pi*(k-1)/box
+#ifdef NGP
+       !write(11,*) kr,pkhh(:,k-1),poisson(:,k-1)
+       write(11,*) pkhh(3,k-1),pkhh(1:2,k-1)
+#else
+       write(11,*) kr,pkhh(:,k)
+#endif
+
 #ifdef PLPLOT
        kp=k-1
        pkplot(1,kp)=real(kr,kind=8)
        pkplot(2:3,kp)=real(pkhh(:,k),kind=8)
 #endif
     enddo
+
+    endif
+
+
+
+
     close(11)
 
 #ifdef PLPLOT
@@ -650,6 +683,13 @@ contains
 
     !! Assign masses to grid to compute halo power spectrum
     call cicmass
+    write(*,*) 'nhalos', cur_massbin, nlocal_massbin(cur_massbin), rank
+
+    call mpi_barrier(mpi_comm_world,ierr)
+
+    call mpi_reduce(nlocal_massbin(cur_massbin),ntotal_massbin(cur_massbin),1,mpi_int,mpi_sum,0,mpi_comm_world,ierr) 
+    call mpi_bcast(ntotal_massbin(cur_massbin),1,mpi_int,0,mpi_comm_world,ierr)
+    if(rank==0) write(*,*) '*** Total number of halos in the bin ***', cur_massbin, ntotal_massbin(cur_massbin)
 
     !! have to accumulate buffer density 
     call mesh_buffer
@@ -738,7 +778,10 @@ contains
        den(:,:,k)=0
     enddo
 
-    ! Assign particles to random positions between 0 and nc_node_dim
+    ! Share evenly the halos amongst nodes
+    np_local = ntotal_massbin(cur_massbin)/nodes
+
+    ! Assign Halos to random positions between 0 and nc_node_dim
     call random_number(xvp(1:3,:))
     xvp(1:3,:) = xvp(1:3,:)*nc_node_dim
 
@@ -1248,9 +1291,10 @@ contains
  
 !!       print*,'inside loop',lmass,np_local
 
-       if (lmass.ge.l_lmass.and.lmass.lt.u_lmass) then 
+       if ((lmass.ge.l_lmass.and.lmass.lt.u_lmass) .or. ntotal_massbin(cur_massbin) .gt. 0) then 
 
 !!          print*,'inside loop: if',lmass,l_lmass, u_lmass	
+          nlocal_massbin(cur_massbin) = nlocal_massbin(cur_massbin) + 1
 
           x=xvp(1,i)-0.5
           y=xvp(2,i)-0.5
@@ -1471,7 +1515,10 @@ contains
     do k=1,nc
        pkhh(:,k)=0
     enddo
-    
+
+    nlocal_massbin(:)=0   
+    ntotal_massbin(:)=0   
+ 
     call cpu_time(time2)
     time2=(time2-time1)
     if (rank == 0) write(*,"(f8.2,a)") time2,'  Called init var'
