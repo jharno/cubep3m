@@ -13,7 +13,7 @@
    include 'cubepm.fh'
 #endif
 
-   integer(4) :: i,j,k,pp,ii,jj,kk
+   integer(4) :: i,j,k,k0,pp,ii,jj,kk
    integer(4), dimension(3) :: i1,i2
    real(4), dimension(3) :: x,dx1,dx2
 
@@ -79,24 +79,24 @@
 
 #endif
 
-! unfortunately even unrolling this didn't prevent shared accesses to rho_c
-! unroll it more.  do every third. Still didn't work
-!$omp parallel do default(shared) private(i,j,k,pp)
-   do k = 0, nc_node_dim + 1 !,2
-     do j = 0, nc_node_dim + 1
-       do i = 0, nc_node_dim + 1
-         pp=hoc(i,j,k)
-         if (i <= 1 .or. i >= nc_node_dim .or. &
-             j <= 1 .or. j >= nc_node_dim .or. &
-             k <= 1 .or. k >= nc_node_dim) then
-           call coarse_cic_mass_boundry(pp)
-         else
-           call coarse_cic_mass(pp)
-         endif
-       enddo
-     enddo
-   enddo
-!$omp end parallel do
+    do k0 = 0, mesh_scale-1 
+        !$omp parallel do schedule(dynamic) default(shared) private(i,j,k,pp)
+        do k = k0, nc_node_dim + 1, mesh_scale 
+            do j = 0, nc_node_dim + 1
+                do i = 0, nc_node_dim + 1
+                    pp=hoc(i,j,k)
+                    if (i <= 1 .or. i >= nc_node_dim .or. &
+                        j <= 1 .or. j >= nc_node_dim .or. &
+                        k <= 1 .or. k >= nc_node_dim) then
+                      call coarse_cic_mass_boundry(pp)
+                    else
+                        call coarse_cic_mass(pp)
+                    endif
+                enddo
+            enddo
+        enddo
+        !$omp end parallel do
+    enddo
 
 #ifdef DEBUG_VEL
    do k=1,nc_node_dim

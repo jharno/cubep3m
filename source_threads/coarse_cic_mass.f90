@@ -41,28 +41,28 @@
 !      endif
 #endif
 
-!$omp atomic
+
       rho_c(i1(1),i1(2),i1(3)) = rho_c(i1(1),i1(2),i1(3)) &
                                + dx1(1) * dx1(2) * dx1(3)
-!$omp atomic
+
       rho_c(i2(1),i1(2),i1(3)) = rho_c(i2(1),i1(2),i1(3)) &
                                + dx2(1) * dx1(2) * dx1(3)
-!$omp atomic
+
       rho_c(i1(1),i2(2),i1(3)) = rho_c(i1(1),i2(2),i1(3)) &
                                + dx1(1) * dx2(2) * dx1(3)
-!$omp atomic
+
       rho_c(i2(1),i2(2),i1(3)) = rho_c(i2(1),i2(2),i1(3)) &
                                + dx2(1) * dx2(2) * dx1(3)
-!$omp atomic
+
       rho_c(i1(1),i1(2),i2(3)) = rho_c(i1(1),i1(2),i2(3)) &
                                + dx1(1) * dx1(2) * dx2(3)
-!$omp atomic
+
       rho_c(i2(1),i1(2),i2(3)) = rho_c(i2(1),i1(2),i2(3)) &
                                + dx2(1) * dx1(2) * dx2(3)
-!$omp atomic
+
       rho_c(i1(1),i2(2),i2(3)) = rho_c(i1(1),i2(2),i2(3)) &
                                + dx1(1) * dx2(2) * dx2(3)
-!$omp atomic
+
       rho_c(i2(1),i2(2),i2(3)) = rho_c(i2(1),i2(2),i2(3)) &
                                + dx2(1) * dx2(2) * dx2(3)
 
