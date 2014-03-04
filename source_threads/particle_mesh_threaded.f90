@@ -1,5 +1,6 @@
 !! main particle mesh subroutine
   subroutine particle_mesh
+    use omp_lib
     implicit none
     include 'mpif.h'
     include 'cubepm.fh'
@@ -10,8 +11,8 @@
     real(4) :: f_force_max_node
     real(4) :: pp_force_max_node
     real(4) :: pp_ext_force_max_node
-    integer(4) :: omp_get_thread_num
-    external omp_get_thread_num
+    !integer(4) :: omp_get_thread_num
+    !external omp_get_thread_num
 
 ! these are for fine mesh
     integer(4) :: pp,ii,im,i3
@@ -135,9 +136,9 @@
 !    offset(:)= - tile(:) * nf_physical_tile_dim + nf_buf - 0.5
 
             do; if (pp == 0) exit
-              !x(:) = xv(1:3,pp) + offset(:)
-              tmpx(:) = real(xv(1:3,pp), kind=8) + real(offset(:), kind=8)
-              x = real(tmpx,kind=4)
+              x(:) = xv(1:3,pp) + offset(:)
+              !tmpx(:) = real(xv(1:3,pp), kind=8) + real(offset(:), kind=8) ! 
+              !x = real(tmpx,kind=4)   ! Up cast to real(8) used for PMFAST, not CUBEP3M
               i1(:) = floor(tmpx(:)) + 1
               !i1(:) = floor(x(:)) + 1
 
@@ -209,7 +210,11 @@
         do k=nf_buf-1,nf_tile-nf_buf+1
           do j=nf_buf-1,nf_tile-nf_buf+1
             do i=nf_buf-1,nf_tile-nf_buf+1
-              force_mag=sqrt(force_f(1,i,j,k,thread)**2 &
+              !force_mag=sqrt(force_f(1,i,j,k,thread)**2 &
+              !    +force_f(2,i,j,k,thread)**2+force_f(3,i,j,k,thread)**2)
+              ! reduce the square root operations to speed up the code. Now
+              ! force_mag and f_force_max hold force**2
+              force_mag=(force_f(1,i,j,k,thread)**2 &
                   +force_f(2,i,j,k,thread)**2+force_f(3,i,j,k,thread)**2)
               if (force_mag > f_force_max(thread)) f_force_max(thread)=force_mag
             enddo
@@ -366,7 +371,7 @@
 #ifdef MHD
     !write(*,*)  'Calling fine_velocity for MHD'
     call fine_velocity(tile,cmax,nerr,thread)
-    write(*,*)  'Called fine_velocity for MHD on tile', cur_tile
+    !write(*,*)  'Called fine_velocity for MHD on tile', cur_tile
 #endif
 
 
@@ -635,7 +640,8 @@
 
 !! calculate maximum dt from fine mesh force
 
-    f_force_max_node=maxval(f_force_max)
+    f_force_max_node=sqrt(maxval(f_force_max)) ! Take the sqrt here instead...
+    !f_force_max_node=maxval(f_force_max)
 
     call mpi_reduce(f_force_max_node,dt_f_acc,1,mpi_real,mpi_max,0, &
                     mpi_comm_world,ierr)
