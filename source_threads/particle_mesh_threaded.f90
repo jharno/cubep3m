@@ -139,8 +139,8 @@
               x(:) = xv(1:3,pp) + offset(:)
               !tmpx(:) = real(xv(1:3,pp), kind=8) + real(offset(:), kind=8) ! 
               !x = real(tmpx,kind=4)   ! Up cast to real(8) used for PMFAST, not CUBEP3M
-              i1(:) = floor(tmpx(:)) + 1
-              !i1(:) = floor(x(:)) + 1
+              !i1(:) = floor(tmpx(:)) + 1
+              i1(:) = floor(x(:)) + 1
 
 #ifdef MHD
               rho_f(i1(1),i1(2),i1(3),thread) = rho_f(i1(1),i1(2),i1(3),thread)+mass_p*(1.0-omega_b/omega_m)
@@ -242,11 +242,11 @@
             ipl=0
 #endif
             do; if (pp == 0) exit
-              tmpx(:) = real(xv(1:3,pp), kind=8) + real(offset(:), kind=8)
-              x = real(tmpx,kind=4)
-              i1(:) = floor(tmpx(:)) + 1
-              !x(:) = xv(1:3,pp) + offset(:)
-              !i1(:) = floor(x(:)) + 1
+              !tmpx(:) = real(xv(1:3,pp), kind=8) + real(offset(:), kind=8)
+              !x = real(tmpx,kind=4)
+              !i1(:) = floor(tmpx(:)) + 1
+              x(:) = xv(1:3,pp) + offset(:)
+              i1(:) = floor(x(:)) + 1
 
 ! arghh!!
 

@@ -1,0 +1,173 @@
+SHELL = /bin/sh
+
+#FC=scalasca -instrument mpif77
+FC=mpif77
+
+#FFTWLIB=$(SCINET_FFTW_LIB)   #$(MCKENZIE_FFTW_LIB_PATH) #/home/merz/lib/fftw-2.1.5_intel8/lib
+FFTWLIB= /scinet/gpc/lib/fftw/intel-intelmpi-3.2.2-medium/lib 
+FFTWINC= -I/scinet/gpc/lib/fftw/intel-intelmpi-3.2.2-medium/include 
+#FFTWINC=-I$(SCINET_FFTW_INC)   #$(MCKENZIE_FFTW_INC_PATH) #/home/merz/lib/fftw-2.1.5_intel8/include
+
+#FFTWLIB=$(MKLPATH)
+
+#LDLIBS= -lsrfftw_mpi -lsrfftw -lsfftw_mpi -lsfftw -lm -ldl
+LDLIBS= -lfftw3f_mpi -lfftw3f -lfftw3f_omp  -lm -ldl
+#LDLIBS= -lfftw2x_cdft_SINGLE -lmkl_scalapack_lp64 $(MKLPATH)/libmkl_solver_lp64.a -Wl,--start-group -lmkl_intel_lp64 -lmkl_intel_thread -lmkl_core -lmkl_blacs_intelmpi_lp64 -Wl,--end-group -openmp -lpthread -lm -ldl
+
+FFLAGS=-shared-intel -fpp -g  -O3   -fpic -xhost -i_dynamic -mcmodel=medium -mt_mpi -DDIAG -DBINARY -DNGP -DPPINT -DOPENMP  -DMPI_TIME  -DLRCKCORR -DNGPH -DDISP_MESH -DNESTED_OMP #-Dproj_only_restart #-Dproj_half #-DPP_EXT -DCHECKPOINT_KILL #-Dproj_half -DPP_EXT #-DDEBUG_PP_MESH #-DDEBUG_COARSE_MESH #-DPP_EXT -DPID_FLAG #-DDEBUG_PP_EXT #-DREAD_SEED #-DDISP_MESH -DPID_FLAG #-DDEBUG 
+#FFLAGS=-shared-intel -fpp -g  -O3  -fpic -xhost -i_dynamic -mcmodel=medium -mt_mpi -DDIAG -DBINARY -DNGP -DPPINT -DOPENMP  -DMPI_TIME  -DLRCKCORR -DNGPH -DDISP_MESH -DPP_EXT -DCHECKPOINT_KILL
+#FFLAGS=-dyncom "divar,ivar,rvar,C2RAY_HALO,lvar" -fpp -g -CB -O3 -fpic -xT -DDIAG -DBINARY -DNGP -DPPINT -DDISP_MESH -DMPI_TIME #-DDEBUG 
+#-DSCALED_IC #-DDEBUG_VEL -fpe3 -check bounds -DDEBUG #-DMHD #-check bounds -DDEBUG #-DDEBUG_LOW #-DDEBUG_VEL -DDEBUG_CCIC -DDEBUG_RHOC -openmp -DDEBUG_LOW
+#FFLAGS=-fpp -g -O0 -CB -DDIAG -DBINARY -DNGP -DPPINT -DDISP_MESH -DMPI_TIME -DDEBUG 
+#OPTIONAL FLAGS :: -DMHD -DDEBUG_CCIC -DDEBUG_CRHO -DDEBUG_RHOC -DPOINTSRC ##-DBFTEST -DXDRIFT -DPID_FLAG -DPP_EXT -DREAD_SEED -DDEBUG_PP_EXT -DChaplygin
+
+#OBJS=   checkpoint.o checkpoint_kill.o coarse_cic_mass.o coarse_cic_mass_buffer.o coarse_force.o coarse_force_buffer.o coarse_mass.o coarse_max_dt.o coarse_mesh.o coarse_power.o coarse_velocity.o cubepm.o delete_particles.o fftw3ds.o fine_cic_mass.o fine_cic_mass_buffer.o fine_mesh.o fine_ngp_mass.o fine_velocity.o halofind.o fftw2.o init_projection.o kernel_initialization.o link_list.o move_grid_back.o mpi_initialization.o particle_initialization.o particle_mesh_threaded.o particle_pass.o projection.o  report_pair.o report_force.o set_pair.o indexedsort.o timers.o timestep.o update_position.o variable_initialization.o 
+OBJS=   checkpoint.o checkpoint_kill.o coarse_cic_mass.o coarse_cic_mass_buffer.o coarse_force.o coarse_force_buffer.o coarse_mass.o coarse_max_dt.o coarse_mesh.o coarse_power.o coarse_velocity.o cubepm.o delete_particles.o fine_cic_mass.o fine_cic_mass_buffer.o  fine_ngp_mass.o halofind.o fft_coarse.o fft_fine.o init_projection.o kernel_initialization.o link_list.o move_grid_back.o mpi_initialization.o particle_initialization.o particle_mesh_threaded_nested.o particle_pass.o projection.o projection_half.o projection_half_finer.o report_pair.o report_force.o set_pair.o indexedsort.o timers.o timestep.o update_position.o variable_initialization.o 
+
+run: cubep3m
+
+cubep3m: $(OBJS)
+	$(FC) $(FFLAGS) -openmp  $^ -o $@ -L$(FFTWLIB) $(LDLIBS) 
+
+cubepm.o: cubepm.f90 
+	$(FC) $(FFLAGS) -openmp -c $<  
+
+checkpoint.o: checkpoint.f90 
+	$(FC) $(FFLAGS) -c $<
+
+checkpoint_kill.o: checkpoint_kill.f90 
+	$(FC) $(FFLAGS) -c $<
+
+coarse_cic_mass.o: coarse_cic_mass.f90
+	$(FC) $(FFLAGS) -openmp -c $<
+
+coarse_cic_mass_buffer.o: coarse_cic_mass_buffer.f90
+	$(FC) $(FFLAGS) -openmp -c $<
+
+coarse_force.o: coarse_force.f90
+	$(FC) $(FFLAGS) -openmp -c $<
+
+coarse_force_buffer.o: coarse_force_buffer.f90
+	$(FC) $(FFLAGS) -c $<
+
+coarse_mass.o: coarse_mass.f90 
+	$(FC) $(FFLAGS) -openmp -c $<
+
+coarse_max_dt.o: coarse_max_dt.f90
+	$(FC) $(FFLAGS) -c $<
+
+coarse_mesh.o: coarse_mesh.f90
+	$(FC) $(FFLAGS) -c $<
+
+coarse_power.o: coarse_power.f90
+	$(FC) $(FFLAGS) -c $<
+
+coarse_velocity.o: coarse_velocity.f90 
+	$(FC) $(FFLAGS) -openmp -c $<
+
+delete_particles.o: delete_particles.f90
+	$(FC) $(FFLAGS) -c $<
+
+#fftw3ds.o: fftw3ds.f90
+#	$(FC) $(FFLAGS) $(FFTWINC) -c $<
+
+fine_cic_mass.o: fine_cic_mass.f90
+	$(FC) $(FFLAGS) -c $<
+
+fine_cic_mass_buffer.o: fine_cic_mass_buffer.f90
+	$(FC) $(FFLAGS) -c $<
+
+fine_mesh.o: fine_mesh.f90 
+	$(FC) $(FFLAGS) -openmp -c $<
+
+fine_ngp_mass.o: fine_ngp_mass.f90
+	$(FC) $(FFLAGS) -c $<
+
+fine_velocity.o: fine_velocity.f90 
+	$(FC) $(FFLAGS) -c $<
+
+halofind.o: halofind.f90
+	$(FC) $(FFLAGS) -c $<
+
+halofind_new_peaks.o: halofind_new_peaks.f90
+	$(FC) $(FFLAGS) -c $<
+
+halofind_new.o: halofind_new.f90
+	$(FC) $(FFLAGS) -c $<
+
+#fftw2.o: fftw2.f90
+#	$(FC) $(FFLAGS) $(FFTWINC) -openmp -c $<
+
+fft_coarse.o: fft_coarse.f90
+	$(FC) $(FFLAGS) $(FFTINC) -c $<
+
+fft_fine.o: fft_fine.f90
+	$(FC) $(FFLAGS) -I$(SCINET_FFTW_INC) -openmp -c $<
+	#$(FC) $(FFLAGS) $(FFTINC) -openmp -c $<
+
+init_projection.o: init_projection.f90
+	$(FC) $(FFLAGS) -c $<
+
+kernel_initialization.o: kernel_initialization.f90
+	$(FC) $(FFLAGS) -c $<
+
+link_list.o: link_list.f90
+	$(FC) $(FFLAGS) -c $<
+
+move_grid_back.o: move_grid_back.f90
+	$(FC) $(FFLAGS) -c $<
+
+mpi_initialization.o: mpi_initialization.f90
+	$(FC) $(FFLAGS) -c $<
+
+particle_initialization.o: particle_initialization.f90
+	$(FC) $(FFLAGS) -c $<
+
+particle_mesh_threaded_nested.o: particle_mesh_threaded_nested.f90
+	$(FC) $(FFLAGS) -openmp -c $<
+
+particle_pass.o: particle_pass.f90
+	$(FC) $(FFLAGS) -c $<
+
+projection.o: projection.f90
+	$(FC) $(FFLAGS) -c $<
+
+projection_half.o: projection_half.f90
+	$(FC) $(FFLAGS) -c $<
+
+projection_half_finer.o: projection_half_finer.f90
+	$(FC) $(FFLAGS) -c $<
+
+report_pair.o: report_pair.f90
+	$(FC) $(FFLAGS) -c $<
+
+report_force.o: report_force.f90
+	$(FC) $(FFLAGS) -c $<
+
+set_pair.o: set_pair.f90
+	$(FC) $(FFLAGS) -c $<
+
+indexedsort.o: indexedsort.f90
+	$(FC) $(FFLAGS) -c $<
+
+timers.o: timers.f90
+	$(FC) $(FFLAGS) -c $<
+
+timestep.o: timestep.f90 
+	$(FC) $(FFLAGS) -c $<
+
+update_position.o: update_position.f90
+	$(FC) $(FFLAGS) -openmp -c $<
+
+variable_initialization.o: variable_initialization.f90
+	$(FC) $(FFLAGS) -c $<
+
+clean:
+	rm -f *.o *.pc cubep3m 
+
+tar_source:
+	tar -cvjf source_threads.tar.bz2  *.par *.fh *.f90 *.i Make_PP_THREADS
+
+# use make clean before!!!
+tar_code:
+	tar -cvjf cubep3m.tar.bz2  --recursive ../../*

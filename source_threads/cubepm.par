@@ -25,7 +25,7 @@ real(4), parameter      :: A_ch = 1
 
 real(4), parameter      :: dt_scale = 1.0
 real(4), parameter 	:: dt_max = 1.0
-real(4), parameter 	:: ra_max = 0.05
+real(4), parameter 	:: ra_max = 0.01
 real(4), parameter 	:: da_max = 0.01
 real(4), parameter      :: a_i = 1.0 / ( z_i + 1.0)
 real(4), parameter      :: cfactor = 1.05

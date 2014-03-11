@@ -18,6 +18,7 @@ integer(4),   parameter :: tiles_node_dim = 2
 
 ! cores / node
 integer(4),   parameter :: cores = 8
+integer(4),   parameter :: nested_threads = 2
 
 ! density buffer fraction (1.0 == no buffer, 2.0 == 2x avg density, etc)
 real(4), parameter :: density_buffer = 2.0 !1.5
