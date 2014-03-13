@@ -20,7 +20,7 @@ integer(8) :: plan, iplan, fftw2_plan(cores), fftw2_iplan(cores)
 !type(handleptr) :: fftmkl2_handle(cores)
 !type(DFTI_DESCRIPTOR), POINTER:: fftmkl3_handle
 
-logical :: firstfftw
+logical :: firstfftw, firstfftw_nest
 logical, dimension(cores) :: firstfftw2
 !integer (kind=omp_lock_kind) :: lockfftw2
 

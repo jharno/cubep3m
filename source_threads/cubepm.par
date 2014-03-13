@@ -4,15 +4,15 @@ include '../parameters'
 
 !! files / paths 
 
-character(*), parameter :: checkpoints=cubepm_root//'input/checkpoints'
-character(*), parameter :: projections=cubepm_root//'input/projections'!_Lensing'
-character(*), parameter :: halofinds=  cubepm_root//'input/halofinds'!_Lensing'
+character(*), parameter :: checkpoints=cubepm_root//'input/checkpoints_high'!_0.042' !KiDS_100Mpc'!0.042'!_0.025'
+character(*), parameter :: projections=cubepm_root//'input/checkpoints_high'!_KiDS'!_Lensing'
+character(*), parameter :: halofinds=  cubepm_root//'input/checkpoints_high'!_KiDS'!_Halos'!_Lensing'
 character(*), parameter :: kernel_path=cubepm_root//'kernels/'
 
 !! cosmological parameters
 
 ! turn this off for pair-wise force tests
-logical, parameter 	:: cosmo = .true.
+logical, parameter 	:: cosmo = .true.!.false.
 
 ! equation of state for dark energy w parameter
 
@@ -22,10 +22,11 @@ real(4), parameter      :: alpha_ch = 0
 real(4), parameter      :: A_ch = 1
 
 ! timestep parameters
+!real(4),     parameter::
 
 real(4), parameter      :: dt_scale = 1.0
 real(4), parameter 	:: dt_max = 1.0
-real(4), parameter 	:: ra_max = 0.01
+real(4), parameter 	:: ra_max = 0.01 !0.05
 real(4), parameter 	:: da_max = 0.01
 real(4), parameter      :: a_i = 1.0 / ( z_i + 1.0)
 real(4), parameter      :: cfactor = 1.05
@@ -44,12 +45,11 @@ integer(4), parameter   :: max_nts = 4000
 !integer(4), parameter   :: restart_checkpoint = 1
 
 !for restart:
-
 logical, parameter	:: restart_ic =  .false.
-integer(4), parameter   :: restart_checkpoint = 1 ! line number in input/checkpoint 
+integer(4), parameter   :: restart_checkpoint = 20 ! line number in input/checkpoint 
 
 ! To restart from a checkpoint kill compile with CHECKPOINT_KILL and set restart_kill = .true.
-logical, parameter :: restart_kill = .true. 
+logical, parameter :: restart_kill = .false. 
 character(*), parameter :: reskill_prefix = '0.482'
 
 ! other internal initial conditions for testing, if all ic flags are
@@ -81,7 +81,7 @@ real(4), parameter      :: pp_bias = 1.00 !0.85 !0.1 !0.4642
 
 ! testing flags
 
-logical, parameter :: ngp_fmesh_force = .true. 
+logical, parameter :: ngp_fmesh_force = .true.!.true. 
 logical, parameter :: pp_force_flag = .true.!.true.
 logical, parameter :: pp_ext_force_flag = .true.!.true.
 logical, parameter :: coarse_vel_update = .true.!.true.
@@ -91,11 +91,14 @@ logical, parameter :: PID_flag = .true.
 ! Number of fine cell layers, for extended pp force calculation:
 integer(4), parameter   :: pp_range = 2
 
+! for finer projections
+integer(4), parameter :: proj_finer_factor = 4
+
 !! additional simulation analysis
 
 ! set this .true. to generate coarse mesh mass power spectrum each timestep
 
-logical, parameter      :: coarse_ps = .false. !.true. ! .false.
+logical, parameter      :: coarse_ps = .false.
 
 ! halo finding parameters 
 
@@ -122,7 +125,7 @@ real(4), parameter      :: den_peak_cutoff = 100.0
 
 ! lower mass cutoff for cataloging a halo, in particles
 
-real(4), parameter      :: min_halo_particles = 100 !20.0
+real(4), parameter      :: min_halo_particles = 20.0
 
 ! set .true. to use parabolic interpolation for halo centers, otherwise
 ! nearest grid point is used
@@ -168,7 +171,8 @@ integer(4), parameter :: max_np = density_buffer * ( ((nf_tile-2*nf_buf)*tiles_n
                                   (8*nf_buf**3 + 6*nf_buf*(((nf_tile-2*nf_buf)*tiles_node_dim)**2) + &
                                   12*(nf_buf**2)*((nf_tile-2*nf_buf)*tiles_node_dim))/8.0 )
 
-integer(4), parameter   :: max_buf = 2 * max_np  !+ (nf_tile/2)**3 
+!integer(4), parameter   :: max_buf = 2*max_np/4 !2 * max_np  !+ (nf_tile/2)**3 
+integer(4), parameter   :: max_buf = 2.2*max_np !2 * max_np  !+ (nf_tile/2)**3 
 integer(4), parameter   :: max_tag = max_np / 10
 
 ! this can probably be decreased like mega
@@ -203,4 +207,9 @@ integer(4), parameter   :: hoc_nc_h = nc_node_dim &
                                     + nc_buf
 integer(4), parameter   :: hoc_pass_depth = 2 * nc_buf
 
-!real(4), dimension(3,nc_dim+2,nc_dim,nc_slab)                           :: tmp_kern_c
+! needed for p3dfft
+
+integer(4), parameter   :: nodes_pen = nodes_dim
+integer(4), parameter   :: nc_pen = nc_node_dim / nodes_dim
+integer(4), parameter   :: dim_y = nodes_dim
+integer(4), parameter   :: dim_z = nodes_dim**2

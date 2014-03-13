@@ -11,7 +11,7 @@ FFTWINC= -I/scinet/gpc/lib/fftw/intel-intelmpi-3.2.2-medium/include
 #FFTWLIB=$(MKLPATH)
 
 #LDLIBS= -lsrfftw_mpi -lsrfftw -lsfftw_mpi -lsfftw -lm -ldl
-LDLIBS= -lfftw3f_mpi -lfftw3f  -lm -ldl
+LDLIBS= -lfftw3f_mpi -lfftw3f -lfftw3f_omp  -lm -ldl
 #LDLIBS= -lfftw2x_cdft_SINGLE -lmkl_scalapack_lp64 $(MKLPATH)/libmkl_solver_lp64.a -Wl,--start-group -lmkl_intel_lp64 -lmkl_intel_thread -lmkl_core -lmkl_blacs_intelmpi_lp64 -Wl,--end-group -openmp -lpthread -lm -ldl
 
 FFLAGS=-shared-intel -fpp -g  -O3   -fpic -xhost -i_dynamic -mcmodel=medium -mt_mpi -DDIAG -DBINARY -DNGP -DPPINT -DOPENMP  -DMPI_TIME  -DLRCKCORR -DNGPH -DDISP_MESH #-Dproj_only_restart #-Dproj_half #-DPP_EXT -DCHECKPOINT_KILL #-Dproj_half -DPP_EXT #-DDEBUG_PP_MESH #-DDEBUG_COARSE_MESH #-DPP_EXT -DPID_FLAG #-DDEBUG_PP_EXT #-DREAD_SEED #-DDISP_MESH -DPID_FLAG #-DDEBUG 
