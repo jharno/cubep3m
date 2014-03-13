@@ -63,10 +63,14 @@
       z_s=adjustl(z_s)
 
       ofile=output_path//z_s(1:len_trim(z_s))//'init_proj_xy.dat'
+#ifdef STREAM
+      open(unit=12, file=ofile, status="replace", iostat=fstat, access="stream")
+#else
 #ifdef BINARY
       open (unit=12,file=ofile,status='replace',iostat=fstat,form='binary')
 #else
       open (unit=12,file=ofile,status='replace',iostat=fstat,form='unformatted')
+#endif
 #endif
       if (fstat /= 0) then
         write(*,*) 'error opening projection file for write'
@@ -75,10 +79,14 @@
       endif
 
       ofile=output_path//z_s(1:len_trim(z_s))//'init_proj_xz.dat'
+#ifdef STREAM
+      open(unit=13, file=ofile, status="replace", iostat=fstat, access="stream")
+#else
 #ifdef BINARY
       open (unit=13,file=ofile,status='replace',iostat=fstat,form='binary')
 #else
       open (unit=13,file=ofile,status='replace',iostat=fstat,form='unformatted')
+#endif
 #endif
       if (fstat /= 0) then
         write(*,*) 'error opening projection file for write'
@@ -87,10 +95,14 @@
       endif
 
       ofile=output_path//z_s(1:len_trim(z_s))//'init_proj_yz.dat'
+#ifdef STREAM
+      open(unit=14, file=ofile, status="replace", iostat=fstat, access="stream")
+#else
 #ifdef BINARY
       open (unit=14,file=ofile,status='replace',iostat=fstat,form='binary')
 #else
       open (unit=14,file=ofile,status='replace',iostat=fstat,form='unformatted')
+#endif
 #endif
       if (fstat /= 0) then
         write(*,*) 'error opening projection file for write'

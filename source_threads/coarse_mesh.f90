@@ -41,7 +41,7 @@
     call mpi_reduce(sumrhof,sumrhoc,1,mpi_double_precision, &
                     mpi_sum,0,mpi_comm_world,ierr)
     if (rank == 0) write(*,*) 'sum of rho_c=',sumrhoc
-    write(*,*) 'rank', rank, 'min/max rho_c =', minval(rho_c), maxval(rho_c)
+    if (rank == 0) write(*,*) 'rank', rank, 'min/max rho_c =', minval(rho_c), maxval(rho_c)
 #endif
 
 #ifdef DEBUG

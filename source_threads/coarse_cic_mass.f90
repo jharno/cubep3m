@@ -12,6 +12,9 @@
     integer(4) :: pp
     integer(4), dimension(3) :: i1,i2
     real(4), dimension(3) :: x,dx1,dx2
+#ifdef NEUTRINOS
+    real(4) :: fpp
+#endif
 
     do
       if (pp == 0) exit
@@ -29,8 +32,17 @@
       dx1(1) = mass_p * dx1(1)*(1.0-omega_b/omega_m)
       dx2(1) = mass_p * dx2(1)*(1.0-omega_b/omega_m)
 #else
+
+#ifdef NEUTRINOS
+      fpp = mpfac_dm
+      if (PID(pp) > np_dm_total) fpp = mpfac_nt
+      dx1(1) = mass_p * dx1(1) * fpp
+      dx2(1) = mass_p * dx2(1) * fpp
+#else
       dx1(1) = mass_p * dx1(1)
       dx2(1) = mass_p * dx2(1)
+#endif
+
 #endif
 
 #ifdef DEBUG_CCIC

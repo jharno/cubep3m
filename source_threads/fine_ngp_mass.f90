@@ -12,6 +12,8 @@
 ! removed the half-cell offset so that fine mesh cells will line up with coarse mesh cells
 !    offset(:)= - tile(:) * nf_physical_tile_dim + nf_buf - 0.5
 
+#ifndef NEUTRINOS
+
     do
       if (pp == 0) exit
       x(:) = xv(1:3,pp) + offset(:)
@@ -19,5 +21,37 @@
       rho_f(i1(1),i1(2),i1(3),thread) = rho_f(i1(1),i1(2),i1(3),thread)+mass_p
       pp = ll(pp)
     enddo
+
+#else
+
+    if (.not. doing_halofind) then 
+
+      do
+        if (pp == 0) exit
+        x(:) = xv(1:3,pp) + offset(:)
+        i1(:) = floor(x(:)) + 1
+        if (PID(pp) > np_dm_total) then !! This is a neutrino
+          rho_f(i1(1),i1(2),i1(3),thread) = rho_f(i1(1),i1(2),i1(3),thread)+mass_p*mpfac_nt
+        else !! This is a dark matter particle
+          rho_f(i1(1),i1(2),i1(3),thread) = rho_f(i1(1),i1(2),i1(3),thread)+mass_p*mpfac_dm
+        endif
+        pp = ll(pp)
+      enddo
+
+    else !! When doing halofind we don't want to include neutrinos in the search for density peaks
+
+      do
+        if (pp == 0) exit
+        x(:) = xv(1:3,pp) + offset(:)
+        i1(:) = floor(x(:)) + 1
+        if (PID(pp) <= np_dm_total) then !! This is a dark matter particle 
+          rho_f(i1(1),i1(2),i1(3),thread) = rho_f(i1(1),i1(2),i1(3),thread)+mass_p
+        endif
+        pp = ll(pp)
+      enddo
+
+    endif
+
+#endif
 
   end subroutine fine_ngp_mass

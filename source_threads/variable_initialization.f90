@@ -221,6 +221,10 @@
     firstfftw_nest=.true.
     firstfftw2=.true.
 
+#ifdef NEUTRINOS
+    doing_halofind=.false.
+#endif
+
     ! NEW TRICK BY JHD TO REMOVE MEMORY RACING CONDITION ON THREADED PLAN
     ! CREATION. 
     do i = 1,cores 

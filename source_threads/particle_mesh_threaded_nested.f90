@@ -41,6 +41,7 @@
     integer(4) :: ipl_n(mesh_scale, mesh_scale, mesh_scale)
     real(4), dimension(3) :: sep_n, force_pp_n
     real(4) :: pp_force_mag_n, force_mag_n, rmag_n, dVc_n, pp_ext_sum_k_n
+    real(4) :: fpp1_n, fpp2_n !! Only used for neutrino simulations
 
 !! start of particle mesh.  All particles are within (1:nc_node_dim]
 
@@ -73,7 +74,7 @@
     !$omp  parallel num_threads(cores) default(shared) &
     !$omp& private(cur_tile, i, j, k, k0, tile, thread, i3, cic_l, cic_h, offset, force_mag, pp_ext_sum, &
     !$omp&         thread_n, pp_n, pp1_n, pp2_n, ii_n, im_n, jm_n, km_n, x_n, dx1_n, dx2_n, dVc_n, i2_n, i1_n, offset_n, &
-    !$omp&         ip_n, jp_n, kp_n, ipl_n, sep_n, force_pp_n, rmag_n, force_mag_n, pp_force_mag_n, n_pairs_n, &
+    !$omp&         ip_n, jp_n, kp_n, ipl_n, sep_n, force_pp_n, rmag_n, force_mag_n, pp_force_mag_n, n_pairs_n, fpp1_n, fpp2_n, &
     !$omp&         pp_ext_sum_k_n, i_n, j_n, k_n, ip_min_n, ip_max_n, jp_min_n, jp_max_n, kp_min_n, kp_max_n, jj_n, kk_n)
 #endif
     thread = 1
@@ -151,7 +152,17 @@
 #ifdef MHD
                         rho_f(i1_n(1),i1_n(2),i1_n(3),thread) = rho_f(i1_n(1),i1_n(2),i1_n(3),thread)+mass_p*(1.0-omega_b/omega_m)
 #else
+
+#ifdef NEUTRINOS
+                        if (PID(pp_n) > np_dm_total) then !! This is a neutrino
+                            rho_f(i1_n(1),i1_n(2),i1_n(3),thread) = rho_f(i1_n(1),i1_n(2),i1_n(3),thread) + mass_p*mpfac_nt
+                        else !! This is a dark matter particle
+                            rho_f(i1_n(1),i1_n(2),i1_n(3),thread) = rho_f(i1_n(1),i1_n(2),i1_n(3),thread) + mass_p*mpfac_dm
+                        endif
+#else
                         rho_f(i1_n(1),i1_n(2),i1_n(3),thread) = rho_f(i1_n(1),i1_n(2),i1_n(3),thread)+mass_p
+#endif
+
 #endif
                         pp_n = ll(pp_n)
 
@@ -268,7 +279,8 @@
     do k0 = 0, mesh_scale-1 
       !$omp  parallel num_threads(nested_threads) default(shared) &
       !$omp& private(i_n, j_n, k_n, pp_n, x_n, i1_n, im_n, jm_n, km_n, i2_n, force_mag_n, dx1_n, dx2_n, dVc_n, &
-      !$omp&         ipl_n, ip_n, jp_n, kp_n, pp1_n, pp2_n, sep_n, rmag_n, force_pp_n, pp_force_mag_n, thread_n)
+      !$omp&         ipl_n, ip_n, jp_n, kp_n, pp1_n, pp2_n, sep_n, rmag_n, force_pp_n, pp_force_mag_n, thread_n, &
+      !$omp&         fpp1_n, fpp2_n)
       thread_n = 1
       thread_n = omp_get_thread_num() + 1
       !$omp do
@@ -365,6 +377,11 @@
                   pp_force_accum(:, :ipl_n(im_n,jm_n,km_n), thread, thread_n) = 0.
                   do ip_n = 1, ipl_n(im_n,jm_n,km_n) - 1
                     pp1_n = llf(ip_n, im_n, jm_n, km_n, thread, thread_n)
+#ifdef NEUTRINOS
+                    !! Determine is partilce pp1_n is a neutrino or dark matter
+                    fpp1_n = mpfac_dm
+                    if (PID(pp1_n) > np_dm_total) fpp1_n = mpfac_nt
+#endif
                     do jp_n = ip_n+1, ipl_n(im_n,jm_n,km_n)
                       pp2_n = llf(jp_n, im_n, jm_n, km_n, thread, thread_n)
                       sep_n = xv(:3,pp1_n) - xv(:3,pp2_n)                      
@@ -375,11 +392,24 @@
 #else          
                         force_pp_n = mass_p*(sep_n/(rmag_n*pp_bias)**3)  !mass_p divides out below
 #endif
+#ifdef NEUTRINOS
+                        !! Determine if particle pp2_n is a neutrino or dark matter
+                        fpp2_n = mpfac_dm
+                        if (PID(pp2_n) > np_dm_total) fpp2_n = mpfac_nt
+                        pp_force_accum(:, ip_n, thread, thread_n) = pp_force_accum(:, ip_n, thread, thread_n) - force_pp_n*fpp2_n
+                        pp_force_accum(:, jp_n, thread, thread_n) = pp_force_accum(:, jp_n, thread, thread_n) + force_pp_n*fpp1_n
+#else
                         pp_force_accum(:, ip_n, thread, thread_n) = pp_force_accum(:, ip_n, thread, thread_n) - force_pp_n
                         pp_force_accum(:, jp_n, thread, thread_n) = pp_force_accum(:, jp_n, thread, thread_n) + force_pp_n
+#endif
                         if (pp_force_flag) then
+#ifdef NEUTRINOS
+                          xv(4:,pp1_n) = xv(4:,pp1_n) - force_pp_n*a_mid*G*dt*fpp2_n
+                          xv(4:,pp2_n) = xv(4:,pp2_n) + force_pp_n*a_mid*G*dt*fpp1_n
+#else
                           xv(4:,pp1_n) = xv(4:,pp1_n) - force_pp_n*a_mid*G*dt
                           xv(4:,pp2_n) = xv(4:,pp2_n) + force_pp_n*a_mid*G*dt
+#endif
                         endif
                       endif
                     enddo

@@ -15,6 +15,16 @@
 #ifdef CHECK_IP
     real(8) :: xva(6)
 #endif
+#ifdef NEUTRINOS
+    integer(4) :: np_dm, np_nu
+
+    !! Check that the PID flag is also defined
+#ifndef PID_FLAG
+    write(*,*) "ERROR: Using Neutrinos but PID is not enabled !!"
+    call mpi_abort(mpi_comm_world,ierr,ierr)
+#endif
+
+#endif
 
     fstat=0
 
@@ -87,6 +97,10 @@
 
     elseif (restart_ic) then
 
+! ---------------------------------------------------------------------------------------------
+! Read in checkpoint
+! ---------------------------------------------------------------------------------------------
+
       if (rank == 0) z_write = z_checkpoint(restart_checkpoint)
       call mpi_bcast(z_write,1,mpi_real,0,mpi_comm_world,ierr)
 
@@ -99,10 +113,14 @@
       ofile=output_path//z_s(1:len_trim(z_s))//'xv'// &
             rank_s(1:len_trim(rank_s))//'.dat'
 
+#ifdef STREAM
+      open(unit=21, file=ofile, status="old", iostat=fstat, access="stream")
+#else
 #ifdef BINARY
       open(unit=21,file=ofile,status='old',iostat=fstat,form='binary')
 #else
       open(unit=21,file=ofile,status='old',iostat=fstat,form='unformatted')
+#endif
 #endif
 
       if (fstat /= 0) then
@@ -126,17 +144,14 @@
         call mpi_abort(mpi_comm_world,ierr,ierr)
       endif
 
-!     blocksize=(2047*1024*1024)/24
 !     reduced to 32MB chunks because of intel compiler
       blocksize=(32*1024*1024)/24
       num_writes=np_local/blocksize+1
-
 
       !read(21) xv(:,:np_local)
       do i = 1,num_writes
          nplow=(i-1)*blocksize+1
          nphigh=min(i*blocksize,np_local)
-!!       print *,rank,nplow,nphigh,np_local
          do j=nplow,nphigh
             read(21) xv(:,j)
          enddo
@@ -144,15 +159,70 @@
  
       close(21)
 
+#ifdef NEUTRINOS
+        ofile=output_path//z_s(1:len_trim(z_s))//'xv'// &
+            rank_s(1:len_trim(rank_s))//'_nu.dat'
+
+#ifdef STREAM
+        open(unit=21, file=ofile, status="old", iostat=fstat, access="stream")
+#else
+#ifdef BINARY
+        open(unit=21,file=ofile,status='old',iostat=fstat,form='binary')
+#else
+        open(unit=21,file=ofile,status='old',iostat=fstat,form='unformatted')
+#endif
+#endif
+
+        if (fstat /= 0) then
+            write(*,*) 'error opening checkpoint'
+            write(*,*) 'rank',rank,'file:',ofile
+            call mpi_abort(mpi_comm_world,ierr,ierr)
+        endif
+
+#ifdef PPINT
+        read(21) np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
+               cur_projection,cur_halofind,mass_p
+#else
+        read(21) np_nu,a,t,tau,nts,dt_f_acc,dt_c_acc,cur_checkpoint, &
+               cur_projection,cur_halofind,mass_p
+#endif
+      
+        if (rank == 0) print *,'neutrinos restarting simulation from z=',z_checkpoint(cur_checkpoint-1)
+
+        if (np_local+np_nu > max_np) then
+            write(*,*) 'too many particles to store'
+            write(*,*) 'rank',rank,'np_local',np_local,'max_np',max_np
+            call mpi_abort(mpi_comm_world,ierr,ierr)
+        endif
+
+!       reduced to 32MB chunks because of intel compiler
+        blocksize=(32*1024*1024)/24
+        num_writes=np_nu/blocksize+1
+
+        do i = 1,num_writes
+            nplow=(i-1)*blocksize+1 + np_local
+            nphigh=min(i*blocksize,np_nu) + np_local
+            do j=nplow,nphigh
+                read(21) xv(:,j)
+            enddo
+        enddo
+
+        close(21)
+#endif
+
 #ifdef PID_FLAG
 
       ofile=output_path//z_s(1:len_trim(z_s))//'PID'// &
             rank_s(1:len_trim(rank_s))//'.dat'
 
+#ifdef STREAM
+      open(unit=21, file=ofile, status="old", iostat=fstat, access="stream")
+#else
 #ifdef BINARY
       open(unit=21,file=ofile,status='old',iostat=fstat,form='binary')
 #else
       open(unit=21,file=ofile,status='old',iostat=fstat,form='unformatted')
+#endif
 #endif
 
       if (fstat /= 0) then
@@ -175,21 +245,78 @@
         call mpi_abort(mpi_comm_world,ierr,ierr)
       endif
 
-      !read(21) PID(:np_local)
+!     reduced to 32MB chunks because of intel compiler
+      blocksize=(32*1024*1024)/24
+      num_writes=np_local/blocksize+1
+
       do i = 1,num_writes
          nplow=(i-1)*blocksize+1
          nphigh=min(i*blocksize,np_local)
-!!       print *,rank,nplow,nphigh,np_local
          do j=nplow,nphigh
             read(21) PID(j)
          enddo
       enddo
       close(21)
 
+#ifdef NEUTRINOS
+        ofile=output_path//z_s(1:len_trim(z_s))//'PID'// &
+            rank_s(1:len_trim(rank_s))//'_nu.dat'
+
+#ifdef STREAM
+        open(unit=21, file=ofile, status="old", iostat=fstat, access="stream")
+#else
+#ifdef BINARY
+        open(unit=21,file=ofile,status='old',iostat=fstat,form='binary')
+#else
+        open(unit=21,file=ofile,status='old',iostat=fstat,form='unformatted')
+#endif
 #endif
 
+        if (fstat /= 0) then
+            write(*,*) 'error opening checkpoint'
+            write(*,*) 'rank',rank,'file:',ofile
+            call mpi_abort(mpi_comm_world,ierr,ierr)
+        endif
+
+#ifdef PPINT
+        read(21) np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
+               cur_projection,cur_halofind,mass_p
+#else
+        read(21) np_nu,a,t,tau,nts,dt_f_acc,dt_c_acc,cur_checkpoint, &
+               cur_projection,cur_halofind,mass_p
+#endif
+
+        if (np_local+np_nu > max_np) then
+            write(*,*) 'too many particles to store'
+            write(*,*) 'rank',rank,'np_local',np_local,'max_np',max_np
+            call mpi_abort(mpi_comm_world,ierr,ierr)
+        endif
+
+!       reduced to 32MB chunks because of intel compiler
+        blocksize=(32*1024*1024)/24
+        num_writes=np_nu/blocksize+1
+
+        do i = 1,num_writes
+            nplow=(i-1)*blocksize+1 + np_local
+            nphigh=min(i*blocksize,np_nu) + np_local
+            do j=nplow,nphigh
+                read(21) PID(j)
+            enddo
+        enddo
+        close(21)
+#endif
+
+#endif
+
+! ---------------------------------------------------------------------------------------------
+! Done read in checkpoint
+! ---------------------------------------------------------------------------------------------
 
 #ifdef CHECKPOINT_KILL
+
+! ---------------------------------------------------------------------------------------------
+! Read in checkpoint kill
+! ---------------------------------------------------------------------------------------------
 
     elseif (restart_kill) then
 
@@ -199,10 +326,14 @@
       ofile=output_path//reskill_prefix//'xvres'// &
             rank_s(1:len_trim(rank_s))//'.dat'
 
+#ifdef STREAM
+      open(unit=21, file=ofile, status="old", iostat=fstat, access="stream")
+#else
 #ifdef BINARY
       open(unit=21,file=ofile,status='old',iostat=fstat,form='binary')
 #else
       open(unit=21,file=ofile,status='old',iostat=fstat,form='unformatted')
+#endif
 #endif
 
       if (fstat /= 0) then
@@ -245,15 +376,70 @@
       enddo
       close(21)
 
+#ifdef NEUTRINOS
+        ofile=output_path//reskill_prefix//'xvres'// &
+            rank_s(1:len_trim(rank_s))//'_nu.dat'
+
+#ifdef STREAM
+        open(unit=21, file=ofile, status="old", iostat=fstat, access="stream")
+#else
+#ifdef BINARY
+        open(unit=21,file=ofile,status='old',iostat=fstat,form='binary')
+#else
+        open(unit=21,file=ofile,status='old',iostat=fstat,form='unformatted')
+#endif
+#endif
+
+        if (fstat /= 0) then
+            write(*,*) 'error opening checkpoint'
+            write(*,*) 'rank',rank,'file:',ofile
+            call mpi_abort(mpi_comm_world,ierr,ierr)
+        endif
+
+#ifdef PPINT
+        read(21) np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
+               cur_projection,cur_halofind,mass_p
+#else
+        read(21) np_nu,a,t,tau,nts,dt_f_acc,dt_c_acc,cur_checkpoint, &
+               cur_projection,cur_halofind,mass_p
+#endif
+
+        if (rank == 0) print *,'neutrinos restarting simulation from z=',reskill_prefix
+
+        if (np_local+np_nu > max_np) then
+            write(*,*) 'too many particles to store'
+            write(*,*) 'rank',rank,'np_local',np_local,'max_np',max_np
+            call mpi_abort(mpi_comm_world,ierr,ierr)
+        endif
+
+!       reduced to 32MB chunks because of intel compiler
+        blocksize=(32*1024*1024)/24
+        num_writes=np_nu/blocksize+1
+
+        do i = 1,num_writes
+            nplow=(i-1)*blocksize+1 + np_local
+            nphigh=min(i*blocksize,np_nu) + np_local
+            do j=nplow,nphigh
+                read(21) xv(:,j)
+            enddo
+        enddo
+
+        close(21)
+#endif
+
 #ifdef PID_FLAG
 
       ofile=output_path//reskill_prefix//'PIDres'// &
             rank_s(1:len_trim(rank_s))//'.dat'
 
+#ifdef STREAM
+      open(unit=21, file=ofile, status="old", iostat=fstat, access="stream")
+#else
 #ifdef BINARY
       open(unit=21,file=ofile,status='old',iostat=fstat,form='binary')
 #else
       open(unit=21,file=ofile,status='old',iostat=fstat,form='unformatted')
+#endif
 #endif
 
       if (fstat /= 0) then
@@ -276,7 +462,10 @@
         call mpi_abort(mpi_comm_world,ierr,ierr)
       endif
 
-      !read(21) PID(:np_local)
+!     reduced to 32MB chunks because of intel compiler
+      blocksize=(32*1024*1024)/24
+      num_writes=np_local/blocksize+1
+
       do i = 1,num_writes
          nplow=(i-1)*blocksize+1
          nphigh=min(i*blocksize,np_local)
@@ -287,7 +476,59 @@
       enddo
       close(21)
 
+#ifdef NEUTRINOS
+        ofile=output_path//reskill_prefix//'PIDres'// &
+            rank_s(1:len_trim(rank_s))//'_nu.dat'
+
+#ifdef STREAM
+        open(unit=21, file=ofile, status="old", iostat=fstat, access="stream")
+#else
+#ifdef BINARY
+        open(unit=21,file=ofile,status='old',iostat=fstat,form='binary')
+#else
+        open(unit=21,file=ofile,status='old',iostat=fstat,form='unformatted')
 #endif
+#endif
+
+        if (fstat /= 0) then
+            write(*,*) 'error opening checkpoint'
+            write(*,*) 'rank',rank,'file:',ofile
+            call mpi_abort(mpi_comm_world,ierr,ierr)
+        endif
+
+#ifdef PPINT
+        read(21) np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
+               cur_projection,cur_halofind,mass_p
+#else
+        read(21) np_nu,a,t,tau,nts,dt_f_acc,dt_c_acc,cur_checkpoint, &
+               cur_projection,cur_halofind,mass_p
+#endif
+
+        if (np_local+np_nu > max_np) then
+            write(*,*) 'too many particles to store'
+            write(*,*) 'rank',rank,'np_local',np_local,'max_np',max_np
+            call mpi_abort(mpi_comm_world,ierr,ierr)
+        endif
+
+!       reduced to 32MB chunks because of intel compiler
+        blocksize=(32*1024*1024)/24
+        num_writes=np_nu/blocksize+1
+
+        do i = 1,num_writes
+            nplow=(i-1)*blocksize+1 + np_local
+            nphigh=min(i*blocksize,np_nu) + np_local
+            do j=nplow,nphigh
+                read(21) PID(j)
+            enddo
+        enddo
+        close(21)
+#endif
+
+#endif
+
+! ---------------------------------------------------------------------------------------------
+! Done read in checkpoint kill
+! ---------------------------------------------------------------------------------------------
 
 #endif
 
@@ -296,17 +537,23 @@
       xv(:,1)=(/0.0,0.0,0.0,0.,0.,0./) 
     else
 
-!! Read in initial conditions
+! ---------------------------------------------------------------------------------------------
+! Read in ICs
+! ---------------------------------------------------------------------------------------------
 
       write(rank_s,'(i4)') rank
       rank_s=adjustl(rank_s)
 
       ofile=ic_path//'xv'//rank_s(1:len_trim(rank_s))//'.ic'
       print *,'opening particle list:',ofile(1:len_trim(ofile))
+#ifdef STREAM
+      open(unit=20, file=ofile, status="old", iostat=fstat, access="stream")
+#else
 #ifdef BINARY
       open(unit=20,file=ofile,form='binary',iostat=fstat,status='old')
 #else
       open(unit=20,file=ofile,form='unformatted',iostat=fstat,status='old')
+#endif
 #endif
       if (fstat /= 0) then
          write(*,*) 'error opening initial conditions'
@@ -314,22 +561,54 @@
          call mpi_abort(mpi_comm_world,ierr,ierr)
       endif
       read(20) np_local
-      !      np_local=100**3
       if (np_local > max_np) then
          write(*,*) 'too many particles to store'
          write(*,*) 'rank',rank,'np_local',np_local,'max_np',max_np
          call mpi_abort(mpi_comm_world,ierr,ierr)
       endif
-#ifndef BINARY
-      ! this was for the old initial condition generator 
-       !     read(20) xv(:3,:np_local)
-            do i=1,np_local
-              read(20) xv(:,i)
-            enddo
-#else
       read(20) xv(:,:np_local)
-#endif
       close(20)
+
+#ifdef NEUTRINOS
+
+        !
+        ! Open neutrino ICs
+        !
+
+        ofile=ic_path//'xv'//rank_s(1:len_trim(rank_s))//'_nu.ic'
+        print *,'opening particle list:',ofile(1:len_trim(ofile))
+
+#ifdef STREAM
+        open(unit=20, file=ofile, status="old", iostat=fstat, access="stream")
+#else
+#ifdef BINARY
+        open(unit=20,file=ofile,form='binary',iostat=fstat,status='old')
+#else
+        open(unit=20,file=ofile,form='unformatted',iostat=fstat,status='old')
+#endif
+#endif
+
+        !! Check open was successful
+        if (fstat /= 0) then
+            write(*,*) 'error opening initial conditions'
+            write(*,*) 'rank',rank,'file:',ofile
+            call mpi_abort(mpi_comm_world,ierr,ierr)
+        endif
+      
+        !! Read header
+        read(20) np_nu
+
+        !! Check if we have enough memory to store particles
+        if (np_local+np_nu > max_np) then
+            write(*,*) 'too many particles to store'
+            write(*,*) 'rank',rank,'np_local',np_local+np_nu,'max_np',max_np
+            call mpi_abort(mpi_comm_world,ierr,ierr)
+        endif
+
+        read(20) xv(:,np_local+1:np_local+np_nu) 
+        close(20)
+
+#endif 
 
 #ifdef PID_FLAG
       write(*,*) 'np_local before delete', np_local, 'rank =', rank
@@ -341,38 +620,69 @@
          ! Assign a uniqe ID to particles in physical volumes.        
          ! This assumes that every node starts with the same np_local
          !PID(i) = int(i + rank*np_local,kind=8)
-         PID(i) = int(i,kind=8) + int(rank*np_local,kind=8)
+         PID(i) = int(i,kind=8) + int(rank*int(np_local,kind=8),kind=8)
       enddo
 
-#ifdef DEBUG_PID_INIT
-      write(*,*) 'np_local=',np_local
-      write(*,*) 'xv',xv(1:3,1:10), 'PID', PID(1:10) !
-      write(*,*) 'xv',xv(1:3,np_local), 'PID', PID(np_local) ! should be non-zero
-      write(*,*) 'xv',xv(1:3,np_local+1), 'PID', PID(np_local+1) ! should be zero
+#ifdef NEUTRINOS
+        do i = np_local+1, np_local+np_nu
+            PID(i) = int(i-np_local,kind=8) + int(nodes*int(np_local,kind=8),kind=8) + int(rank*int(np_nu,kind=8),kind=8)
+        enddo
 #endif
 
-    if(rank==0)write(*,*) 'PID initialized' 
+        if(rank==0)write(*,*) 'PID initialized' 
 
-    ! Write initial PIDs to a file:
-    fstat = 0
+        !
+        ! Write initial ICs to a file
+        !
 
-#ifdef BINARY
-      open(unit=21,file=ic_path//'PID'//rank_s(1:len_trim(rank_s))//'.ic',form='binary',iostat=fstat)
+        fstat = 0
+
+#ifdef STREAM
+        open(unit=21, file=ic_path//'PID'//rank_s(1:len_trim(rank_s))//'.ic', iostat=fstat, access="stream")
 #else
-      open(unit=21,file=ic_path//'PID'//rank_s(1:len_trim(rank_s))//'.ic',form='unformatted',iostat=fstat)
+#ifdef BINARY
+        open(unit=21,file=ic_path//'PID'//rank_s(1:len_trim(rank_s))//'.ic',form='binary',iostat=fstat)
+#else
+        open(unit=21,file=ic_path//'PID'//rank_s(1:len_trim(rank_s))//'.ic',form='unformatted',iostat=fstat)
 #endif
-      if (fstat /= 0) then
-         write(*,*) 'error writing initial PID'
-         write(*,*) 'rank',rank,'file:',ic_path//'PID'//rank_s(1:len_trim(rank_s))//'.ic'
-         call mpi_abort(mpi_comm_world,ierr,ierr)
-      endif
-      write(21) np_local
-      write(21) PID(:np_local)
-      close(21)
-      !stop
+#endif
+        if (fstat /= 0) then
+            write(*,*) 'error writing initial PID'
+            write(*,*) 'rank',rank,'file:',ic_path//'PID'//rank_s(1:len_trim(rank_s))//'.ic'
+            call mpi_abort(mpi_comm_world,ierr,ierr)
+        endif
+        write(21) np_local
+        write(21) PID(:np_local)
+        close(21)
+
+#ifdef NEUTRINOS
+        fstat = 0
+
+#ifdef STREAM
+        open(unit=21, file=ic_path//'PID'//rank_s(1:len_trim(rank_s))//'_nu.ic', iostat=fstat, access="stream")
+#else
+#ifdef BINARY
+        open(unit=21,file=ic_path//'PID'//rank_s(1:len_trim(rank_s))//'_nu.ic',form='binary',iostat=fstat)
+#else
+        open(unit=21,file=ic_path//'PID'//rank_s(1:len_trim(rank_s))//'_nu.ic',form='unformatted',iostat=fstat)
+#endif
+#endif
+        if (fstat /= 0) then
+            write(*,*) 'error writing initial PID'
+            write(*,*) 'rank',rank,'file:',ic_path//'PID'//rank_s(1:len_trim(rank_s))//'_nu.ic'
+            call mpi_abort(mpi_comm_world,ierr,ierr)
+        endif
+        write(21) np_nu
+        write(21) PID(np_local+1:np_local+np_nu)
+        close(21)
+#endif
 
 #endif
-    
+
+! ---------------------------------------------------------------------------------------------
+! Done read in ICs
+! ---------------------------------------------------------------------------------------------
+
    endif
 
 !! calculate total number of particles and particle mass
@@ -391,16 +701,25 @@
        elseif (pp_test) then
           mass_p=10000.0/4.
        else
-!#ifdef MHD
-!          mass_p = (real(nf_physical_dim)**3 / real(np_total))!*(1-omega_b/omega_m)
-!#else
           mass_p = real(nf_physical_dim)**3 / real(np_total)
-!#endif
        endif
     endif
 
     if (rank == 0) write(*,*) 'particle mass=', mass_p
     if (rank == 0) write(*,*) 'total dark matter mass =', mass_p * np_total
+
+#ifdef NEUTRINOS
+    np_dm_total = np_total
+    !! Append np_nu to np_local (must be done after PIDs and after mass calculation)
+    np_dm = np_local
+    np_local = np_local + np_nu
+    if (rank == 0) then
+        write(*,*) "np_dm = ", np_dm
+        write(*,*) "np_nu = ", np_nu
+        write(*,*) "np_local = ", np_local
+        write(*,*) "np_dm_total = ", np_dm_total
+    endif
+#endif
 
 !! This is to scale the initial conditions if we are doing testing with another data-set
 #ifdef SCALED_IC

@@ -246,7 +246,13 @@ if (rank == 0) write(*,*) 'finished kernel init',t_elapsed(wc_counter)
           sec1a = mpi_wtime(ierr)
           if (rank == 0) write(*,*) "STARTING HALOFIND: ", sec1a
 
+#ifdef NEUTRINOS
+          doing_halofind = .true.
+#endif
           call halofind
+#ifdef NEUTRINOS
+          doing_halofind = .true.
+#endif
           if (rank == 0) write(*,*) 'finished halofind',t_elapsed(wc_counter)
 
           sec2a = mpi_wtime(ierr)
