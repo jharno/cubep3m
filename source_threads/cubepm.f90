@@ -1,6 +1,10 @@
 !!  cubep3m - cubical decomposition 2-level particle mesh algorithm with particle-particle interactions
 !! Hugh Merz :: merz@cita.utoronto.ca :: 2006 11 02 
 program cubep3m
+  use omp_lib
+#ifdef FFTMKL 
+    use MKL_DFTI
+#endif
 
 #ifdef MHD
   use mpi_tvd_mhd
@@ -20,12 +24,22 @@ program cubep3m
 
   real(4) :: t_elapsed
   external t_elapsed
-  real(4) :: z_write
-  character(len=7) :: z_s
+
+  real(8) :: sec1, sec2
+  real(8) :: sec1a, sec2a
+
+#ifdef CHECKPOINT_KILL
+  logical :: kill_step, kill_step_done
+  real, parameter :: kill_time = 47.5 * 3600. !! Checkpoint after this time (in seconds)
+  kill_step_done = .false.
+#endif
 
   call datestamp 
 
   call mpi_initialize
+
+  sec1 = mpi_wtime(ierr)
+  if (rank == 0) write(*,*) "STARTING CUBEP3M: ", sec1
 
   call t_start(wc_counter)
 
@@ -35,7 +49,12 @@ program cubep3m
 
   if (rank == 0) write(*,*) 'finished variable init',t_elapsed(wc_counter)
 
-  !$ call omp_set_num_threads(cores)
+#ifdef NESTED_OMP
+    call omp_set_num_threads(cores*nested_threads)
+    call omp_set_nested(.true.)
+#else
+    call omp_set_num_threads(cores)
+#endif
 
 if (rank == 0) write(*,*) 'finished omp call',t_elapsed(wc_counter)
 
@@ -71,15 +90,8 @@ if (rank == 0) write(*,*) 'finished kernel init',t_elapsed(wc_counter)
     u(5,nx%m:nx%n,ny%m:ny%n,nz%m:nz%n)=0.0001
     print *,rank,sum(u(1,nx%m:nx%n,ny%m:ny%n,nz%m:nz%n))
     b=0.0
-  elseif (restart_ic)then
-      if (rank==0) z_write = z_checkpoint(restart_checkpoint)
-      call mpi_bcast(z_write,1,mpi_real,0,mpi_comm_world,ierr)
-
-      write(z_s,'(f7.3)') z_write
-      z_s=adjustl(z_s)
-      call mpi_tvd_mhd_restart(output_path, z_s)
   else
-      call mpi_tvd_mhd_ic(ic_path)
+    call mpi_tvd_mhd_ic(ic_path)
   endif
 
   if (rank == 0) write(*,*) 'finished reading mhd initial conditions',t_elapsed(wc_counter)
@@ -102,6 +114,8 @@ if (rank == 0) write(*,*) 'finished kernel init',t_elapsed(wc_counter)
   if (rank == 0) write(*,*) 'starting main loop'
   do 
     call timestep
+    sec1a = mpi_wtime(ierr)
+    if (rank == 0) write(*,*) "TIMESTEP_TIME [hrs] = ", (sec1a - sec1) / 3600.
 
 #ifdef MHD
 
@@ -164,11 +178,19 @@ if (rank == 0) write(*,*) 'finished kernel init',t_elapsed(wc_counter)
     if (rank == 0) write(*,*) 'finished backward gas sweep',t_elapsed(wc_counter)
 #endif
 
+#ifdef CHECKPOINT_KILL
+    !! Determine if it is time to write a checkpoint before being killed
+    kill_step = .false.
+    sec1a = mpi_wtime(ierr)
+    if (rank == 0) then
+        if ((sec1a - sec1) .ge. kill_time) kill_step = .true.
+    endif
+    call mpi_bcast(kill_step, 1, mpi_logical, 0, mpi_comm_world, ierr)
 
-    !if(superposition_test)then
-    !    checkpoint_step = .true.
-    !endif
+    if (checkpoint_step.or.projection_step.or.halofind_step.or.kill_step) then
+#else
     if (checkpoint_step.or.projection_step.or.halofind_step) then
+#endif
 
 !! advance the particles to the end of the current step.
 
@@ -181,9 +203,35 @@ if (rank == 0) write(*,*) 'finished kernel init',t_elapsed(wc_counter)
 
       !dt = 0.0
 
+#ifdef CHECKPOINT_KILL
+      if (kill_step .eqv. .true. .and. kill_step_done .eqv. .false.) then
+
+        sec1a = mpi_wtime(ierr)
+        if (rank == 0) write(*,*) "STARTING CHECKPOINT_KILL: ", sec1a
+
+        call checkpoint_kill
+
+        sec2a = mpi_wtime(ierr)
+        if (rank == 0) write(*,*) "STOPPING CHECKPOINT_KILL: ", sec2a
+        if (rank == 0) write(*,*) "ELAPSED CHECKPOINT_KILL TIME: ", sec2a-sec1a
+
+        kill_step_done = .true. ! Don't want to keep doing this
+
+      endif
+#endif
+
       if (checkpoint_step) then
+
+        sec1a = mpi_wtime(ierr)
+        if (rank == 0) write(*,*) "STARTING CHECKPOINT: ", sec1a
+
         call checkpoint
         if (rank == 0) write(*,*) 'finished checkpoint',t_elapsed(wc_counter)
+
+        sec2a = mpi_wtime(ierr)
+        if (rank == 0) write(*,*) "STOPPING CHECKPOINT: ", sec2a
+        if (rank == 0) write(*,*) "ELAPSED CHECKPOINT TIME: ", sec2a-sec1a
+
       endif
 
       if (projection_step.or.halofind_step) then
@@ -193,10 +241,18 @@ if (rank == 0) write(*,*) 'finished kernel init',t_elapsed(wc_counter)
         call link_list
         call particle_pass
 
-        fine_clumping=0.0
         if (halofind_step) then
+
+          sec1a = mpi_wtime(ierr)
+          if (rank == 0) write(*,*) "STARTING HALOFIND: ", sec1a
+
           call halofind
           if (rank == 0) write(*,*) 'finished halofind',t_elapsed(wc_counter)
+
+          sec2a = mpi_wtime(ierr)
+          if (rank == 0) write(*,*) "STOPPING HALOFIND: ", sec2a
+          if (rank == 0) write(*,*) "ELAPSED HALOFIND TIME: ", sec2a-sec1a
+
         endif
 
         if (projection_step) then
@@ -232,7 +288,7 @@ if (rank == 0) write(*,*) 'finished kernel init',t_elapsed(wc_counter)
 
     endif
 
-    if (nts == max_nts .or. final_step .or. (a .gt. 1.0)) exit
+    if (nts == max_nts .or. final_step .or. a .gt. 1.0) exit
   enddo
 
 #ifdef TIMING
@@ -251,6 +307,11 @@ if (rank == 0) write(*,*) 'finished kernel init',t_elapsed(wc_counter)
   do ierr=1,cores 
     call cubepm_fftw2('q',ierr)
   enddo
+
+  sec2 = mpi_wtime(ierr)
+  if (rank == 0) write(*,*) "STOPPING CUBEP3M: ", sec2
+  if (rank == 0) write(*,*) "ELAPSED CUBEP3M TIME: ", sec2-sec1
+
   call mpi_finalize(ierr)
 
   call datestamp

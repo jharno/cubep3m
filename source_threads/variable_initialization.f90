@@ -218,6 +218,7 @@
 ! Initialize first time through fftw flag
 
     firstfftw=.true.
+    firstfftw_nest=.true.
     firstfftw2=.true.
 
     ! NEW TRICK BY JHD TO REMOVE MEMORY RACING CONDITION ON THREADED PLAN

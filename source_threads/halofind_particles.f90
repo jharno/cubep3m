@@ -100,14 +100,10 @@ subroutine halofind
 
     ofile = output_path//z_s(1:len_trim(z_s))//"halo"//r_s(1:len_trim(r_s))//".dat"
 
-#ifdef STREAM
-    open(unit=12, file=ofile, status="replace", iostat=fstat, access="stream")
-#else
 #ifdef BINARY
     open(unit=12, file=ofile, status="replace", iostat=fstat, form="binary")
 #else
     open(unit=12, file=ofile, status="replace", iostat=fstat, form="unformatted")
-#endif
 #endif
 
     if (fstat /= 0) then
@@ -135,19 +131,6 @@ subroutine halofind
     hpart_odc = 0
 #ifdef HVIR
     hpart_vir = 0
-#endif
-
-#ifdef NEUTRINOS
-    !! Exclude neutrinos from being included in halos by
-    !! making the halofinder think they have already been inclued in a halo
-    do i = 1, np_local
-        if (PID(i) > np_dm_total) then
-            hpart_odc(i) = 1
-#ifdef HVIR
-            hpart_vir(i) = 1
-#endif
-        endif
-    enddo 
 #endif
 
     !! Initialize refined mesh
@@ -312,17 +295,6 @@ subroutine halofind
 
     close(12)
 
-    call mpi_barrier(mpi_comm_world, ierr)
-
-#ifdef STREAM
-    open(unit=12, file=ofile, status="old", iostat=fstat, access="stream", position="rewind")
-    if (fstat == 0) then
-        write(12) nhalo
-        close(12)
-    else
-        write(*,*) "WARNING: Could not reopen file ", ofile, "to add nhalo to header ", nhalo
-    endif
-#else
 #ifdef BINARY
     open (unit=12, file=ofile, status="old", iostat=fstat, form="binary", access="direct", recl=4)
     write(12, rec=1) nhalo
@@ -331,7 +303,6 @@ subroutine halofind
     write(12, rec=2) nhalo
 #endif
     close(12)
-#endif
 
     call mpi_barrier(mpi_comm_world, ierr)
 
