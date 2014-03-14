@@ -23,15 +23,9 @@
     write(rfn,'(i1,"crho.dat")') rank
     ofn='cd3dgps_data/'//rfn
     write(*,*) 'rank',rank,'writing:',ofn
-#ifdef STREAM
+
     open(unit=52, file=ofn, access="stream")
-#else
-#ifdef BINARY
-    open(unit=52,file=ofn,form='binary')
-#else
-    open(unit=52,file=ofn,form='unformatted')
-#endif
-#endif
+
     write(52) cmplx_rho_c
     close(52)
 #endif

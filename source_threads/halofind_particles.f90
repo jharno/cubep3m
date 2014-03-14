@@ -100,15 +100,7 @@ subroutine halofind
 
     ofile = output_path//z_s(1:len_trim(z_s))//"halo"//r_s(1:len_trim(r_s))//".dat"
 
-#ifdef STREAM
     open(unit=12, file=ofile, status="replace", iostat=fstat, access="stream")
-#else
-#ifdef BINARY
-    open(unit=12, file=ofile, status="replace", iostat=fstat, form="binary")
-#else
-    open(unit=12, file=ofile, status="replace", iostat=fstat, form="unformatted")
-#endif
-#endif
 
     if (fstat /= 0) then
         write(*,*) "Error opening halo catalog for write"
@@ -314,7 +306,8 @@ subroutine halofind
 
     call mpi_barrier(mpi_comm_world, ierr)
 
-#ifdef STREAM
+    !! SUBTLE ISSUE HERE THAT JD NEEDS TO FIX ...
+
     open(unit=12, file=ofile, status="old", iostat=fstat, access="stream", position="rewind")
     if (fstat == 0) then
         write(12) nhalo
@@ -322,16 +315,6 @@ subroutine halofind
     else
         write(*,*) "WARNING: Could not reopen file ", ofile, "to add nhalo to header ", nhalo
     endif
-#else
-#ifdef BINARY
-    open (unit=12, file=ofile, status="old", iostat=fstat, form="binary", access="direct", recl=4)
-    write(12, rec=1) nhalo
-#else
-    open (unit=12, file=ofile, status="old", iostat=fstat, form="unformatted", access="direct", recl=4)
-    write(12, rec=2) nhalo
-#endif
-    close(12)
-#endif
 
     call mpi_barrier(mpi_comm_world, ierr)
 

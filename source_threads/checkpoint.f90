@@ -60,16 +60,7 @@
 #endif
 
 !! Open checkpoint
-
-#ifdef STREAM
     open(unit=12, file=ofile, status="replace", iostat=fstat, access="stream")
-#else
-#ifdef BINARY
-    open (unit=12,file=ofile,status='replace',iostat=fstat,form='binary')
-#else
-    open (unit=12,file=ofile,status='replace',iostat=fstat,form='unformatted')
-#endif
-#endif
 
     if (fstat /= 0) then
       write(*,*) 'error opening checkpoint file for write'
@@ -86,16 +77,7 @@
 #ifdef NEUTRINOS
 
     !! Open neutrino checkpoint file
-
-#ifdef STREAM
     open(unit=22, file=ofile_nu, status="replace", iostat=fstat, access="stream") 
-#else
-#ifdef BINARY
-    open (unit=22,file=ofile_nu,status='replace',iostat=fstat,form='binary')
-#else
-    open (unit=22,file=ofile_nu,status='replace',iostat=fstat,form='unformatted')
-#endif
-#endif
 
     if (fstat /= 0) then
       write(*,*) 'error opening checkpoint file for write'
@@ -195,15 +177,7 @@
 !! Open PID file
 #ifdef PID_FLAG
 
-#ifdef STREAM
     open(unit=15, file=ofile2, status="replace", iostat=fstat, access="stream")
-#else
-#ifdef BINARY
-    open (unit=15,file=ofile2,status='replace',iostat=fstat,form='binary')
-#else
-    open (unit=15,file=ofile2,status='replace',iostat=fstat,form='unformatted')
-#endif
-#endif
 
     if (fstat /= 0) then
       write(*,*) 'error opening PID file for write'
@@ -215,15 +189,7 @@
 
 #ifdef NEUTRINOS
 
-#ifdef STREAM
     open(unit=25, file=ofile2_nu, status="replace", iostat=fstat, access="stream")
-#else
-#ifdef BINARY
-    open (unit=25,file=ofile2_nu,status='replace',iostat=fstat,form='binary')
-#else
-    open (unit=25,file=ofile2_nu,status='replace',iostat=fstat,form='unformatted')
-#endif
-#endif
 
     if (fstat /= 0) then
       write(*,*) 'error opening PID file for write'

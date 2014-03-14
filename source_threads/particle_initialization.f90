@@ -113,15 +113,7 @@
       ofile=output_path//z_s(1:len_trim(z_s))//'xv'// &
             rank_s(1:len_trim(rank_s))//'.dat'
 
-#ifdef STREAM
       open(unit=21, file=ofile, status="old", iostat=fstat, access="stream")
-#else
-#ifdef BINARY
-      open(unit=21,file=ofile,status='old',iostat=fstat,form='binary')
-#else
-      open(unit=21,file=ofile,status='old',iostat=fstat,form='unformatted')
-#endif
-#endif
 
       if (fstat /= 0) then
         write(*,*) 'error opening checkpoint'
@@ -163,16 +155,7 @@
         ofile=output_path//z_s(1:len_trim(z_s))//'xv'// &
             rank_s(1:len_trim(rank_s))//'_nu.dat'
 
-#ifdef STREAM
         open(unit=21, file=ofile, status="old", iostat=fstat, access="stream")
-#else
-#ifdef BINARY
-        open(unit=21,file=ofile,status='old',iostat=fstat,form='binary')
-#else
-        open(unit=21,file=ofile,status='old',iostat=fstat,form='unformatted')
-#endif
-#endif
-
         if (fstat /= 0) then
             write(*,*) 'error opening checkpoint'
             write(*,*) 'rank',rank,'file:',ofile
@@ -215,16 +198,7 @@
       ofile=output_path//z_s(1:len_trim(z_s))//'PID'// &
             rank_s(1:len_trim(rank_s))//'.dat'
 
-#ifdef STREAM
       open(unit=21, file=ofile, status="old", iostat=fstat, access="stream")
-#else
-#ifdef BINARY
-      open(unit=21,file=ofile,status='old',iostat=fstat,form='binary')
-#else
-      open(unit=21,file=ofile,status='old',iostat=fstat,form='unformatted')
-#endif
-#endif
-
       if (fstat /= 0) then
         write(*,*) 'error opening checkpoint'
         write(*,*) 'rank',rank,'file:',ofile
@@ -262,16 +236,7 @@
         ofile=output_path//z_s(1:len_trim(z_s))//'PID'// &
             rank_s(1:len_trim(rank_s))//'_nu.dat'
 
-#ifdef STREAM
         open(unit=21, file=ofile, status="old", iostat=fstat, access="stream")
-#else
-#ifdef BINARY
-        open(unit=21,file=ofile,status='old',iostat=fstat,form='binary')
-#else
-        open(unit=21,file=ofile,status='old',iostat=fstat,form='unformatted')
-#endif
-#endif
-
         if (fstat /= 0) then
             write(*,*) 'error opening checkpoint'
             write(*,*) 'rank',rank,'file:',ofile
@@ -326,16 +291,7 @@
       ofile=output_path//reskill_prefix//'xvres'// &
             rank_s(1:len_trim(rank_s))//'.dat'
 
-#ifdef STREAM
       open(unit=21, file=ofile, status="old", iostat=fstat, access="stream")
-#else
-#ifdef BINARY
-      open(unit=21,file=ofile,status='old',iostat=fstat,form='binary')
-#else
-      open(unit=21,file=ofile,status='old',iostat=fstat,form='unformatted')
-#endif
-#endif
-
       if (fstat /= 0) then
         write(*,*) 'error opening checkpoint'
         write(*,*) 'rank',rank,'file:',ofile
@@ -380,16 +336,7 @@
         ofile=output_path//reskill_prefix//'xvres'// &
             rank_s(1:len_trim(rank_s))//'_nu.dat'
 
-#ifdef STREAM
         open(unit=21, file=ofile, status="old", iostat=fstat, access="stream")
-#else
-#ifdef BINARY
-        open(unit=21,file=ofile,status='old',iostat=fstat,form='binary')
-#else
-        open(unit=21,file=ofile,status='old',iostat=fstat,form='unformatted')
-#endif
-#endif
-
         if (fstat /= 0) then
             write(*,*) 'error opening checkpoint'
             write(*,*) 'rank',rank,'file:',ofile
@@ -432,16 +379,7 @@
       ofile=output_path//reskill_prefix//'PIDres'// &
             rank_s(1:len_trim(rank_s))//'.dat'
 
-#ifdef STREAM
       open(unit=21, file=ofile, status="old", iostat=fstat, access="stream")
-#else
-#ifdef BINARY
-      open(unit=21,file=ofile,status='old',iostat=fstat,form='binary')
-#else
-      open(unit=21,file=ofile,status='old',iostat=fstat,form='unformatted')
-#endif
-#endif
-
       if (fstat /= 0) then
         write(*,*) 'error opening checkpoint'
         write(*,*) 'rank',rank,'file:',ofile
@@ -480,16 +418,7 @@
         ofile=output_path//reskill_prefix//'PIDres'// &
             rank_s(1:len_trim(rank_s))//'_nu.dat'
 
-#ifdef STREAM
         open(unit=21, file=ofile, status="old", iostat=fstat, access="stream")
-#else
-#ifdef BINARY
-        open(unit=21,file=ofile,status='old',iostat=fstat,form='binary')
-#else
-        open(unit=21,file=ofile,status='old',iostat=fstat,form='unformatted')
-#endif
-#endif
-
         if (fstat /= 0) then
             write(*,*) 'error opening checkpoint'
             write(*,*) 'rank',rank,'file:',ofile
@@ -546,15 +475,8 @@
 
       ofile=ic_path//'xv'//rank_s(1:len_trim(rank_s))//'.ic'
       print *,'opening particle list:',ofile(1:len_trim(ofile))
-#ifdef STREAM
+
       open(unit=20, file=ofile, status="old", iostat=fstat, access="stream")
-#else
-#ifdef BINARY
-      open(unit=20,file=ofile,form='binary',iostat=fstat,status='old')
-#else
-      open(unit=20,file=ofile,form='unformatted',iostat=fstat,status='old')
-#endif
-#endif
       if (fstat /= 0) then
          write(*,*) 'error opening initial conditions'
          write(*,*) 'rank',rank,'file:',ofile
@@ -578,17 +500,7 @@
         ofile=ic_path//'xv'//rank_s(1:len_trim(rank_s))//'_nu.ic'
         print *,'opening particle list:',ofile(1:len_trim(ofile))
 
-#ifdef STREAM
         open(unit=20, file=ofile, status="old", iostat=fstat, access="stream")
-#else
-#ifdef BINARY
-        open(unit=20,file=ofile,form='binary',iostat=fstat,status='old')
-#else
-        open(unit=20,file=ofile,form='unformatted',iostat=fstat,status='old')
-#endif
-#endif
-
-        !! Check open was successful
         if (fstat /= 0) then
             write(*,*) 'error opening initial conditions'
             write(*,*) 'rank',rank,'file:',ofile
@@ -637,15 +549,7 @@
 
         fstat = 0
 
-#ifdef STREAM
         open(unit=21, file=ic_path//'PID'//rank_s(1:len_trim(rank_s))//'.ic', iostat=fstat, access="stream")
-#else
-#ifdef BINARY
-        open(unit=21,file=ic_path//'PID'//rank_s(1:len_trim(rank_s))//'.ic',form='binary',iostat=fstat)
-#else
-        open(unit=21,file=ic_path//'PID'//rank_s(1:len_trim(rank_s))//'.ic',form='unformatted',iostat=fstat)
-#endif
-#endif
         if (fstat /= 0) then
             write(*,*) 'error writing initial PID'
             write(*,*) 'rank',rank,'file:',ic_path//'PID'//rank_s(1:len_trim(rank_s))//'.ic'
@@ -658,15 +562,7 @@
 #ifdef NEUTRINOS
         fstat = 0
 
-#ifdef STREAM
         open(unit=21, file=ic_path//'PID'//rank_s(1:len_trim(rank_s))//'_nu.ic', iostat=fstat, access="stream")
-#else
-#ifdef BINARY
-        open(unit=21,file=ic_path//'PID'//rank_s(1:len_trim(rank_s))//'_nu.ic',form='binary',iostat=fstat)
-#else
-        open(unit=21,file=ic_path//'PID'//rank_s(1:len_trim(rank_s))//'_nu.ic',form='unformatted',iostat=fstat)
-#endif
-#endif
         if (fstat /= 0) then
             write(*,*) 'error writing initial PID'
             write(*,*) 'rank',rank,'file:',ic_path//'PID'//rank_s(1:len_trim(rank_s))//'_nu.ic'

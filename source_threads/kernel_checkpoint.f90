@@ -20,12 +20,7 @@
 
 !! Open checkpoint
 
-#ifdef BINARY
-      open (unit=12,file=ofile,status='replace',iostat=fstat,form='binary')
-#else
-      open (unit=12,file=ofile,status='replace',iostat=fstat)
-#endif
-
+      open(unit=12, file=ofile, status="replace", iostat=fstat, access="stream")
       if (fstat /= 0) then
         write(*,*) 'error opening coarse kernel file for write'
         write(*,*) 'rank',rank,'file:',ofile
@@ -49,17 +44,7 @@
         if (rank==0)  print *,'finished rank',i
       enddo
       if (rank==0) then
-#ifdef BINARY
         write(12) full_kern
-#else
-        do k=1,nc_dim
-          do j=1,nc_dim
-            do i=1,nc_dim/2+1
-              write(12,*) i,j,k,full_kern(:,i,j,k)             
-            enddo
-          enddo
-        enddo
-#endif
         close(12)
         deallocate(full_kern)
       endif
