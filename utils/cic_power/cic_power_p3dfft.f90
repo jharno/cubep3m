@@ -33,7 +33,7 @@ program cic_power
   include '../../parameters'
 
   logical, parameter :: correct_kernel=.false.
-  character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints_high'
+  character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints'
 
   !! nc is the number of cells per box length
   integer, parameter :: hc=nc/2
@@ -53,12 +53,10 @@ program cic_power
   !! internal parallelization parameters
   integer(4), parameter :: nc_node_dim = nc/nodes_dim
   integer(4), parameter :: np_node_dim = np/nodes_dim
-
   integer(4), parameter :: max_np = density_buffer * ( ((nf_tile-2*nf_buf)*tiles_node_dim/2)**3 + &
                                   (8*nf_buf**3 + 6*nf_buf*(((nf_tile-2*nf_buf)*tiles_node_dim)**2) + &
                                   12*(nf_buf**2)*((nf_tile-2*nf_buf)*tiles_node_dim))/8.0 )
   integer(4), parameter :: np_buffer=int(2./3.*max_np)
-
   integer(4), parameter :: nodes = nodes_dim * nodes_dim * nodes_dim
   integer(4), parameter :: nodes_slab = nodes_dim * nodes_dim
   integer(4), parameter :: nc_slab = nc / nodes
