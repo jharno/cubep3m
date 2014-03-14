@@ -299,24 +299,12 @@ subroutine halofind
     enddo !! iloc loop 
 
     !
-    ! Rewrite nhalo in the header
+    ! Rewrite nhalo in the header and close the file
     !
 
+    rewind(12)
+    write(12) nhalo
     close(12)
-
-    call mpi_barrier(mpi_comm_world, ierr)
-
-    !! SUBTLE ISSUE HERE THAT JD NEEDS TO FIX ...
-
-    open(unit=12, file=ofile, status="old", iostat=fstat, access="stream", position="rewind")
-    if (fstat == 0) then
-        write(12) nhalo
-        close(12)
-    else
-        write(*,*) "WARNING: Could not reopen file ", ofile, "to add nhalo to header ", nhalo
-    endif
-
-    call mpi_barrier(mpi_comm_world, ierr)
 
     !
     ! Count particles that were found within halos
