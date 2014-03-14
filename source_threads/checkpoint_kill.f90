@@ -99,27 +99,16 @@
 
     if (rank == 0) write(*,*) "checkpoint np_dm, np_nu = ", np_dm, np_nu
 
-#ifdef PPINT
+
     write(12) np_dm,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
               cur_projection,cur_halofind,mass_p
     write(22) np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
               cur_projection,cur_halofind,mass_p
-#else
-    write(12) np_dm,a,t,tau,nts,dt_f_acc,dt_c_acc,cur_checkpoint, &
-              cur_projection,cur_halofind,mass_p
-    write(22) np_nu,a,t,tau,nts,dt_f_acc,dt_c_acc,cur_checkpoint, &
-              cur_projection,cur_halofind,mass_p
-#endif
 
 #else
 
-#ifdef PPINT
     write(12) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
               cur_projection,cur_halofind,mass_p
-#else
-    write(12) np_local,a,t,tau,nts,dt_f_acc,dt_c_acc,cur_checkpoint, &
-              cur_projection,cur_halofind,mass_p
-#endif
 
 #endif
 
@@ -197,27 +186,15 @@
       call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
 
-#ifdef PPINT
     write(15) np_dm,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
               cur_projection,cur_halofind,mass_p
     write(25) np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
               cur_projection,cur_halofind,mass_p
-#else
-    write(15) np_dm,a,t,tau,nts,dt_f_acc,dt_c_acc,cur_checkpoint, &
-              cur_projection,cur_halofind,mass_p
-    write(25) np_nu,a,t,tau,nts,dt_f_acc,dt_c_acc,cur_checkpoint, &
-              cur_projection,cur_halofind,mass_p
-#endif
 
 #else
 
-#ifdef PPINT
     write(15) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
               cur_projection,cur_halofind,mass_p
-#else
-    write(15) np_local,a,t,tau,nts,dt_f_acc,dt_c_acc,cur_checkpoint, &
-              cur_projection,cur_halofind,mass_p
-#endif
 
 #endif 
 

@@ -121,13 +121,9 @@
         call mpi_abort(mpi_comm_world,ierr,ierr)
       endif
 
-#ifdef PPINT
       read(21) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
                cur_projection,cur_halofind,mass_p
-#else
-      read(21) np_local,a,t,tau,nts,dt_f_acc,dt_c_acc,cur_checkpoint, &
-               cur_projection,cur_halofind,mass_p
-#endif
+
       if (rank == 0) print *,'restarting simulation from z=',z_checkpoint(cur_checkpoint-1)
 
       if (np_local > max_np) then
@@ -162,13 +158,8 @@
             call mpi_abort(mpi_comm_world,ierr,ierr)
         endif
 
-#ifdef PPINT
         read(21) np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
                cur_projection,cur_halofind,mass_p
-#else
-        read(21) np_nu,a,t,tau,nts,dt_f_acc,dt_c_acc,cur_checkpoint, &
-               cur_projection,cur_halofind,mass_p
-#endif
       
         if (rank == 0) print *,'neutrinos restarting simulation from z=',z_checkpoint(cur_checkpoint-1)
 
@@ -205,13 +196,8 @@
         call mpi_abort(mpi_comm_world,ierr,ierr)
       endif
 
-#ifdef PPINT
       read(21) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
                cur_projection,cur_halofind,mass_p
-#else
-      read(21) np_local,a,t,tau,nts,dt_f_acc,dt_c_acc,cur_checkpoint, &
-               cur_projection,cur_halofind,mass_p
-#endif
 
       if (np_local > max_np) then
         write(*,*) 'too many particles to store'
@@ -243,13 +229,8 @@
             call mpi_abort(mpi_comm_world,ierr,ierr)
         endif
 
-#ifdef PPINT
         read(21) np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
                cur_projection,cur_halofind,mass_p
-#else
-        read(21) np_nu,a,t,tau,nts,dt_f_acc,dt_c_acc,cur_checkpoint, &
-               cur_projection,cur_halofind,mass_p
-#endif
 
         if (np_local+np_nu > max_np) then
             write(*,*) 'too many particles to store'
@@ -298,13 +279,8 @@
         call mpi_abort(mpi_comm_world,ierr,ierr)
       endif
 
-#ifdef PPINT
       read(21) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
                cur_projection,cur_halofind,mass_p
-#else
-      read(21) np_local,a,t,tau,nts,dt_f_acc,dt_c_acc,cur_checkpoint, &
-               cur_projection,cur_halofind,mass_p
-#endif
 
       if (rank == 0) print *,'restarting simulation from z=', reskill_prefix
       !if (rank == 0) print *,'restarting simulation from z=',z_checkpoint(cur_checkpoint-1)
@@ -343,13 +319,8 @@
             call mpi_abort(mpi_comm_world,ierr,ierr)
         endif
 
-#ifdef PPINT
         read(21) np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
                cur_projection,cur_halofind,mass_p
-#else
-        read(21) np_nu,a,t,tau,nts,dt_f_acc,dt_c_acc,cur_checkpoint, &
-               cur_projection,cur_halofind,mass_p
-#endif
 
         if (rank == 0) print *,'neutrinos restarting simulation from z=',reskill_prefix
 
@@ -386,13 +357,8 @@
         call mpi_abort(mpi_comm_world,ierr,ierr)
       endif
 
-#ifdef PPINT
       read(21) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
                cur_projection,cur_halofind,mass_p
-#else
-      read(21) np_local,a,t,tau,nts,dt_f_acc,dt_c_acc,cur_checkpoint, &
-               cur_projection,cur_halofind,mass_p
-#endif
 
       if (np_local > max_np) then
         write(*,*) 'too many particles to store'
@@ -425,13 +391,8 @@
             call mpi_abort(mpi_comm_world,ierr,ierr)
         endif
 
-#ifdef PPINT
         read(21) np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
                cur_projection,cur_halofind,mass_p
-#else
-        read(21) np_nu,a,t,tau,nts,dt_f_acc,dt_c_acc,cur_checkpoint, &
-               cur_projection,cur_halofind,mass_p
-#endif
 
         if (np_local+np_nu > max_np) then
             write(*,*) 'too many particles to store'
