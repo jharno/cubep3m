@@ -6,7 +6,7 @@
     include 'mpif.h'
     include 'cubepm.fh'
 
-    real(4) :: rnum,z_write
+    real(4) :: rnum,z_write,dummy
     integer(4) :: i,j,k,pp,fstat,blocksize,num_writes,nplow,nphigh
     integer*8 :: np_total,npl8
     character(len=max_path) :: ofile
@@ -158,8 +158,8 @@
             call mpi_abort(mpi_comm_world,ierr,ierr)
         endif
 
-        read(21) np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
-               cur_projection,cur_halofind,mass_p
+        !! Only store the local number of particles. All other info already read from dark matter checkpoint file.
+        read(21) np_nu,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy
       
         if (rank == 0) print *,'neutrinos restarting simulation from z=',z_checkpoint(cur_checkpoint-1)
 
@@ -229,8 +229,8 @@
             call mpi_abort(mpi_comm_world,ierr,ierr)
         endif
 
-        read(21) np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
-               cur_projection,cur_halofind,mass_p
+        !! Only store the local number of particles. All other info already read from dark matter checkpoint file.
+        read(21) np_nu,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy
 
         if (np_local+np_nu > max_np) then
             write(*,*) 'too many particles to store'
@@ -319,8 +319,8 @@
             call mpi_abort(mpi_comm_world,ierr,ierr)
         endif
 
-        read(21) np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
-               cur_projection,cur_halofind,mass_p
+        !! Only store the local number of particles. All other info already read from dark matter checkpoint file.
+        read(21) np_nu,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy
 
         if (rank == 0) print *,'neutrinos restarting simulation from z=',reskill_prefix
 
@@ -391,8 +391,8 @@
             call mpi_abort(mpi_comm_world,ierr,ierr)
         endif
 
-        read(21) np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
-               cur_projection,cur_halofind,mass_p
+        !! Only store the local number of particles. All other info already read from dark matter checkpoint file.
+        read(21) np_nu,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy
 
         if (np_local+np_nu > max_np) then
             write(*,*) 'too many particles to store'
