@@ -580,7 +580,11 @@ subroutine unpack_pencils
         i0 = i * nc_node_dim + 1
         i1 = (i + 1) * nc_node_dim
         pen_slice = i
-        recv_cube(:,:,:, pen_slice) = slab(i0:i1,:,:)
+        do k = 1, nc_pen
+            do j = 1, nc_node_dim
+                recv_cube(:, j, k, pen_slice) = slab(i0:i1, j, k)
+            enddo
+        enddo
     enddo
 
     num_elements = nc_node_dim * nc_node_dim * nc_pen

@@ -365,13 +365,8 @@ end subroutine read_shake_offsets_list
     endif
 
 !! read in checkpoint header data
-    if(z_write .eq. z_i)then
-       read(21) np_local
-       a = 1.0/(1.0 + z_i)
-    else
     read(21) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint, &
                sim_projection,sim_halofind,mass_p
-    endif
 
     if (np_local > max_np) then
       write(*,*) 'too many particles to store'
@@ -598,7 +593,11 @@ subroutine unpack_pencils
         i0 = i * nc_node_dim + 1
         i1 = (i + 1) * nc_node_dim
         pen_slice = i
-        recv_cube(:,:,:, pen_slice) = slab(i0:i1,:,:)
+        do k = 1, nc_pen
+            do j = 1, nc_node_dim
+                recv_cube(:, j, k, pen_slice) = slab(i0:i1, j, k)
+            enddo
+        enddo
     enddo
 
     num_elements = nc_node_dim * nc_node_dim * nc_pen
