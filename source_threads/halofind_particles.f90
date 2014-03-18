@@ -392,9 +392,17 @@ subroutine find_halo_candidates(tile, ic)
             do i = cic_l(1), cic_h(1)
                 pp = hoc(i, j, k)
 #ifdef NGPH
+#ifdef NEUTRINOS
+                call fine_ngp_mass(pp, tile, thread, 1)
+#else
                 call fine_ngp_mass(pp, tile, thread)
+#endif
+#else
+#ifdef NEUTRINOS
+                call fine_cic_mass(pp, tile, thread, 1)
 #else
                 call fine_cic_mass(pp, tile, thread)
+#endif
 #endif
             enddo
         enddo

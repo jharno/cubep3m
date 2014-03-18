@@ -1,14 +1,22 @@
 !! add mass to fine mesh density within tile
-  subroutine fine_cic_mass(pp,tile,thread)
+#ifdef NEUTRINOS
+subroutine fine_cic_mass(pp,tile,thread,ONLYPID)
+#else
+subroutine fine_cic_mass(pp,tile,thread)
+#endif
     implicit none
 
     include 'cubepm.fh'
 
     integer(4) :: pp,thread
     integer(4), dimension(3) :: tile
-
     integer(4), dimension(3) :: i1, i2
     real(4), dimension(3) :: x, offset, dx1, dx2
+#ifdef NEUTRINOS
+    integer(8), optional :: ONLYPID
+    logical :: DO_ONLYPID = .false.
+    if (present(ONLYPID)) DO_ONLYPID = .true.
+#endif
 
     offset(:)= - tile(:) * nf_physical_tile_dim + nf_buf !- 0.5 
 
@@ -46,7 +54,7 @@
 
 #else
 
-  if (.not. doing_halofind) then
+  if (.not. DO_ONLYPID) then
 
     do
       if (pp == 0) exit
@@ -78,7 +86,7 @@
       pp = ll(pp)
     enddo
 
-  else !! When doing halofind we don't want to include neutrinos in the search for density peaks
+  else !! When doing halofind and projections want to include only one type of particle 
 
     do
       if (pp == 0) exit
@@ -88,7 +96,7 @@
       dx1(:) = i1(:) - x(:)
       dx2(:) = 1 - dx1(:)
 
-      if (PID(pp) == 1) then !! This is a dark matter particle 
+      if (PID(pp) == ONLYPID) then !! This is the particle we want 
           dx1(1) = mass_p * dx1(1)
           dx2(1) = mass_p * dx2(1) 
 
@@ -118,4 +126,4 @@
 
 #endif
 
-  end subroutine fine_cic_mass
+end subroutine fine_cic_mass

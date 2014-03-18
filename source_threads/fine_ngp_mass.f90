@@ -1,5 +1,10 @@
 !! add mass to fine mesh density within tile using nearest gridpoint scheme
-  subroutine fine_ngp_mass(pp,tile,thread)
+
+#ifdef NEUTRINOS
+subroutine fine_ngp_mass(pp,tile,thread,ONLYPID)
+#else
+subroutine fine_ngp_mass(pp,tile,thread)
+#endif
     implicit none
 
     include 'cubepm.fh'
@@ -7,6 +12,11 @@
     integer(4)               :: pp,thread
     integer(4), dimension(3) :: tile,i1
     real(4),    dimension(3) :: x, offset
+#ifdef NEUTRINOS
+    integer(8), optional :: ONLYPID
+    logical :: DO_ONLYPID = .false.
+    if (present(ONLYPID)) DO_ONLYPID = .true.
+#endif
 
     offset(:)= - tile(:) * nf_physical_tile_dim + nf_buf 
 ! removed the half-cell offset so that fine mesh cells will line up with coarse mesh cells
@@ -24,7 +34,7 @@
 
 #else
 
-    if (.not. doing_halofind) then 
+      if (.not. DO_ONLYPID) then
 
       do
         if (pp == 0) exit
@@ -34,13 +44,13 @@
         pp = ll(pp)
       enddo
 
-    else !! When doing halofind we don't want to include neutrinos in the search for density peaks
+    else !! When doing halofind and projections want to include only one type of particle 
 
       do
         if (pp == 0) exit
         x(:) = xv(1:3,pp) + offset(:)
         i1(:) = floor(x(:)) + 1
-        if (PID(pp) == 1) then !! This is a dark matter particle 
+        if (PID(pp) == ONLYPID) then !! This is the particle we want 
           rho_f(i1(1),i1(2),i1(3),thread) = rho_f(i1(1),i1(2),i1(3),thread)+mass_p
         endif
         pp = ll(pp)
@@ -50,4 +60,4 @@
 
 #endif
 
-  end subroutine fine_ngp_mass
+end subroutine fine_ngp_mass

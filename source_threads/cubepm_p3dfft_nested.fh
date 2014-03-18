@@ -28,7 +28,7 @@ real(4), dimension(max_input) :: z_projection,a_projection, &
          z_checkpoint,a_checkpoint,z_halofind,a_halofind
 integer(4) :: num_checkpoints, num_projections, cur_checkpoint, &
          cur_projection,num_halofinds,cur_halofind
-logical :: checkpoint_step, projection_step, halofind_step, final_step, doing_halofind
+logical :: checkpoint_step, projection_step, halofind_step, final_step
 
 ! :: fine mesh arrays
 
@@ -164,5 +164,5 @@ common / equiv6 / recv_buf
 
 common / equiv7 / xv
 
-common / lvar / firstfftw, firstfftw_nest, firstfftw2, projection_step, checkpoint_step, halofind_step, doing_halofind, final_step
+common / lvar / firstfftw, firstfftw_nest, firstfftw2, projection_step, checkpoint_step, halofind_step, final_step
 

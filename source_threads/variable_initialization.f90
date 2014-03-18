@@ -221,9 +221,7 @@
     firstfftw_nest=.true.
     firstfftw2=.true.
 
-#ifdef NEUTRINOS
-    doing_halofind=.false.
-    
+#ifdef NEUTRINOS    
     !! Determine factors that must be multiplied to mass_p for dark matter and nuetrinos
     mass_p_nudm_fac(1) = 1. - ratio_omega_nudm        !! Dark matter
     mass_p_nudm_fac(2) = ratio_omega_nudm/ratio_nudm  !! Neutrino
