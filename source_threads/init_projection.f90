@@ -12,7 +12,16 @@
     integer(4), dimension(3) :: tile
     real(8) :: rho_node, rho_tot
 
+#ifdef NEUTRINOS
+    integer(4) :: ispec
+#endif
+
 !! Initialize projection variables
+
+#ifdef NEUTRINOS
+    !! Loop over particle species
+    do ispec = 1, 2
+#endif
 
    if(rank == 0) write(*,*) 'Inside init_projection.f90'
 
@@ -30,7 +39,11 @@
       tile(2) = (j-1) /  tiles_node_dim
       j = j - tile(2) * tiles_node_dim
       tile(1) = j - 1
+#ifdef NEUTRINOS
+      call build_init_projection(tile,rho_node,ispec)
+#else
       call build_init_projection(tile,rho_node)
+#endif
     enddo
 
     call mpi_reduce(rho_node,rho_tot,1,mpi_double_precision, &
@@ -58,11 +71,18 @@
 
     if (rank == 0) then
 
-      !write(z_s,'(f7.3)') z_projection(cur_projection)
       write(z_s,'(f7.3)') z_i
       z_s=adjustl(z_s)
 
+#ifdef NEUTRINOS
+      if (ispec == 1) then !! Dark matter
+        ofile=output_path//z_s(1:len_trim(z_s))//'init_proj_xy.dat'
+      else !! Neutrinos
+        ofile=output_path//z_s(1:len_trim(z_s))//'init_proj_xy_nu.dat'
+      endif
+#else
       ofile=output_path//z_s(1:len_trim(z_s))//'init_proj_xy.dat'
+#endif
 
       open(unit=12, file=ofile, status="replace", iostat=fstat, access="stream")
       if (fstat /= 0) then
@@ -71,7 +91,15 @@
         call mpi_abort(mpi_comm_world,ierr,ierr)
       endif
 
+#ifdef NEUTRINOS
+      if (ispec == 1) then !! Dark matter
+        ofile=output_path//z_s(1:len_trim(z_s))//'init_proj_xz.dat'
+      else !! Neutrinos
+        ofile=output_path//z_s(1:len_trim(z_s))//'init_proj_xz_nu.dat'
+      endif
+#else
       ofile=output_path//z_s(1:len_trim(z_s))//'init_proj_xz.dat'
+#endif
 
       open(unit=13, file=ofile, status="replace", iostat=fstat, access="stream")
       if (fstat /= 0) then
@@ -80,7 +108,15 @@
         call mpi_abort(mpi_comm_world,ierr,ierr)
       endif
 
+#ifdef NEUTRINOS
+      if (ispec == 1) then !! Dark matter
+        ofile=output_path//z_s(1:len_trim(z_s))//'init_proj_yz.dat'
+      else !! Neutrinos
+        ofile=output_path//z_s(1:len_trim(z_s))//'init_proj_yz_nu.dat'
+      endif
+#else
       ofile=output_path//z_s(1:len_trim(z_s))//'init_proj_yz.dat'
+#endif
 
       open(unit=14, file=ofile, status="replace", iostat=fstat, access="stream")
       if (fstat /= 0) then
@@ -107,6 +143,10 @@
 
     endif
 
+#ifdef NEUTRINOS
+    enddo !! ispec
+#endif
+
     write(*,*) 'Finished projection:',rank
 
 !! Increment projection counter 
@@ -119,7 +159,11 @@
     !stop
   end subroutine init_projection 
 
+#ifdef NEUTRINOS
+  subroutine build_init_projection(tile,rho_node,ispec)
+#else
   subroutine build_init_projection(tile,rho_node)
+#endif
     implicit none
     include 'cubepm.fh'
 
@@ -127,6 +171,9 @@
     integer(4) :: i,j,k,pp,thread
     integer(4), dimension(3) :: cic_l,cic_h,tile
     real(8) :: rho_node
+#ifdef NEUTRINOS
+    integer(4) :: ispec
+#endif
   
     thread=1
  
@@ -144,7 +191,11 @@
       do j = cic_l(2), cic_h(2)
         do i = cic_l(1), cic_h(1)
           pp=hoc(i,j,k)
+#ifdef NEUTRINOS
+          call fine_cic_mass(pp,tile,thread,ispec)
+#else
           call fine_cic_mass(pp,tile,thread)
+#endif
         enddo
       enddo
     enddo
