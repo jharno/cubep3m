@@ -17,9 +17,6 @@
 #ifdef DEBUG_CCIC
     integer(4) :: i,j,k
 #endif
-#ifdef NEUTRINOS
-    real(4) :: fpp
-#endif
 
     do
       if (pp == 0) exit
@@ -39,10 +36,8 @@
 #else
 
 #ifdef NEUTRINOS
-      fpp = mpfac_dm
-      if (PID(pp) > np_dm_total) fpp = mpfac_nt
-      dx1(1) = mass_p * dx1(1) * fpp
-      dx2(1) = mass_p * dx2(1) * fpp
+      dx1(1) = mass_p * dx1(1) * mass_p_nudm_fac(PID(pp)) 
+      dx2(1) = mass_p * dx2(1) * mass_p_nudm_fac(PID(pp))
 #else
       dx1(1) = mass_p * dx1(1)
       dx2(1) = mass_p * dx2(1)

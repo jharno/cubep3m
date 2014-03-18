@@ -78,8 +78,7 @@ subroutine halofind
 
 #ifdef HVIR
     !
-    ! Determine Delta_vir using equation (6) of Bryan et al. (1997) for a
-    ! flat universe
+    ! Determine Delta_vir using equation (6) of Bryan et al. (1997) for a flat universe
     !
 
     xflat    = (omega_m / a**3) / (omega_m / a**3 + omega_l) - 1.
@@ -133,7 +132,7 @@ subroutine halofind
     !! Exclude neutrinos from being included in halos by
     !! making the halofinder think they have already been inclued in a halo
     do i = 1, np_local
-        if (PID(i) > np_dm_total) then
+        if (PID(i) > 1) then
             hpart_odc(i) = 1
 #ifdef HVIR
             hpart_vir(i) = 1
@@ -437,14 +436,12 @@ subroutine find_halo_candidates(tile, ic)
                         if (ii > 18 .and. amtot/(real(ii)) < halo_odc) exit
                     enddo
 
-                    !! Consider this a halo candidate if the fine mesh mass is
-                    !large enough
+                    !! Consider this a halo candidate if the fine mesh mass is large enough
                     if (amtot > mass_p*min_halo_particles/2.) then
 
                         ic = ic + 1
 
-                        !! Store integer coordinates of the peak as well as its
-                        !mesh mass
+                        !! Store integer coordinates of the peak as well as its mesh mass
                         ipeak(:, ic) = (/real(i), real(j), real(k)/) - 0.5 + offset
                         den_peak(ic) = denmax
                         halo_mesh_mass(ic) = amtot
@@ -492,8 +489,7 @@ subroutine find_halo_particles(HODC, HMASS, HPOS, RODC, ITOT, DOVIR)
     integer, parameter :: refine_ratio = 5
 
     !
-    ! Determine which overdensity we are trying to reach (only matters ifdef
-    ! HVIR)
+    ! Determine which overdensity we are trying to reach (only matters ifdef HVIR)
     !
 
     if (present(DOVIR)) then

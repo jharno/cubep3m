@@ -18,7 +18,7 @@ logical, dimension(cores) :: firstfftw2
 
 ! :: simulation variables
 
-integer(4) :: wc_counter, count_i,count_f,count_r,nts, np_local, np_dm_total
+integer(4) :: wc_counter, count_i,count_f,count_r,nts, np_local
 real(4) :: a, a_mid, t, tau, dt, dt_old, dt_gas, mass_p, dt_f_acc, da, dt_c_acc, freeze
 real(4) :: shake_offset(3), cur_sep, dt_pp_acc,dt_pp_ext_acc, dt_max_v
 
@@ -83,6 +83,9 @@ integer(4) 								:: np_buf
 
 real(4), dimension(nf_physical_dim,nf_physical_dim)        :: rp_buf,rho_pxy,rho_pxz,rho_pyz
 
+! arrays storing modification to mass_p for -DNEUTRINOS simulation
+real(4), dimension(2) :: mass_p_nudm_fac
+
 ! :: halofinding arrays
 
 integer(8) :: search_fail
@@ -129,11 +132,11 @@ common / drvar / rho_pxy, rho_pxz, rho_pyz, rp_buf, f_mesh_mass!, cfmass, cfmass
 common / ivar / slab_rank, num_projections, num_checkpoints, &
                 slab_coord, slab_neighbor, pen_neighbor_to, pen_neighbor_fm, mpi_comm_cart, cur_projection, cur_checkpoint, &
                 cart_rank, cart_neighbor, cart_coords, rank, ierr, &
-                wc_counter, count_i, count_r, count_f, nts, np_local, np_dm_total, ll, llf, hoc, np_buf, &
+                wc_counter, count_i, count_r, count_f, nts, np_local, ll, llf, hoc, np_buf, &
                 num_halofinds, cur_halofind, idist, ipeak, nhalo, irtot, ilist_odc, ilist_vir, &
                 pen_dims, istart, iend, isize,fstart, fend, fsize, mypadd 
                 
-common / rvar / a, a_mid, t, tau, dt, dt_old, dt_gas, mass_p, kern_f, &
+common / rvar / a, a_mid, t, tau, dt, dt_old, dt_gas, mass_p, mass_p_nudm_fac, kern_f, &
                 kern_c, slab, f_force_max, pp_force_max, &
                 dt_f_acc, dt_pp_acc, dt_pp_ext_acc, da, dt_c_acc, a_projection, z_projection, a_checkpoint, &
                 z_checkpoint, a_halofind, z_halofind, ps_c, ps_c_sum, freeze, &

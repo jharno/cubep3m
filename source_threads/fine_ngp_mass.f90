@@ -30,11 +30,7 @@
         if (pp == 0) exit
         x(:) = xv(1:3,pp) + offset(:)
         i1(:) = floor(x(:)) + 1
-        if (PID(pp) > np_dm_total) then !! This is a neutrino
-          rho_f(i1(1),i1(2),i1(3),thread) = rho_f(i1(1),i1(2),i1(3),thread)+mass_p*mpfac_nt
-        else !! This is a dark matter particle
-          rho_f(i1(1),i1(2),i1(3),thread) = rho_f(i1(1),i1(2),i1(3),thread)+mass_p*mpfac_dm
-        endif
+        rho_f(i1(1),i1(2),i1(3),thread) = rho_f(i1(1),i1(2),i1(3),thread) + mass_p*mass_p_nudm_fac(PID(pp))
         pp = ll(pp)
       enddo
 
@@ -44,7 +40,7 @@
         if (pp == 0) exit
         x(:) = xv(1:3,pp) + offset(:)
         i1(:) = floor(x(:)) + 1
-        if (PID(pp) <= np_dm_total) then !! This is a dark matter particle 
+        if (PID(pp) == 1) then !! This is a dark matter particle 
           rho_f(i1(1),i1(2),i1(3),thread) = rho_f(i1(1),i1(2),i1(3),thread)+mass_p
         endif
         pp = ll(pp)

@@ -17,6 +17,7 @@
 #endif
 #ifdef NEUTRINOS
     integer(4) :: np_dm, np_nu
+    integer(8) :: np_total_nu
 
     !! Check that the PID flag is also defined
 #ifndef PID_FLAG
@@ -489,16 +490,19 @@
       !write(*,*) 'np_local after delete', np_local, 'rank =', rank
 
 
+#ifndef NEUTRINOS
       do i=1,np_local
          ! Assign a uniqe ID to particles in physical volumes.        
          ! This assumes that every node starts with the same np_local
          !PID(i) = int(i + rank*np_local,kind=8)
          PID(i) = int(i,kind=8) + int(rank*int(np_local,kind=8),kind=8)
       enddo
-
-#ifdef NEUTRINOS
+#else
+        do i = 1, np_local
+            PID(i) = 1 !! All dark matter will have a PID of 1
+        enddo
         do i = np_local+1, np_local+np_nu
-            PID(i) = int(i-np_local,kind=8) + int(nodes*int(np_local,kind=8),kind=8) + int(rank*int(np_nu,kind=8),kind=8)
+            PID(i) = 2 !! All neutrinos will have a PID of 2 
         enddo
 #endif
 
@@ -566,7 +570,8 @@
     if (rank == 0) write(*,*) 'total dark matter mass =', mass_p * np_total
 
 #ifdef NEUTRINOS
-    np_dm_total = np_total
+    npl8=int(np_nu,kind=8)
+    call mpi_reduce(npl8,np_total_nu,1,MPI_INTEGER8, mpi_sum,0,mpi_comm_world,ierr)
     !! Append np_nu to np_local (must be done after PIDs and after mass calculation)
     np_dm = np_local
     np_local = np_local + np_nu
@@ -574,7 +579,8 @@
         write(*,*) "np_dm = ", np_dm
         write(*,*) "np_nu = ", np_nu
         write(*,*) "np_local = ", np_local
-        write(*,*) "np_dm_total = ", np_dm_total
+        write(*,*) "np_dm_total = ", np_total
+        write(*,*) "np_nu_total = ", np_total_nu
     endif
 #endif
 

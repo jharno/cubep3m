@@ -90,10 +90,10 @@
     np_nu = 0
 
     do i = 1, np_local
-        if (PID(i) > np_dm_total) then 
-            np_nu = np_nu + 1
-        else 
+        if (PID(i) == 1) then
             np_dm = np_dm + 1
+        else
+            np_nu = np_nu + 1
         endif
     enddo
 
@@ -121,7 +121,7 @@
       nplow=(i-1)*blocksize+1
       nphigh=min(i*blocksize,np_local)
       do j=nplow,nphigh
-        if (PID(j) <= np_dm_total) then
+        if (PID(j) == 1) then
             write(12) xv(:,j)
             ind_check1 = ind_check1 + 1
         else
@@ -207,7 +207,7 @@
       nplow=(i-1)*blocksize+1
       nphigh=min(i*blocksize,np_local)
       do j=nplow,nphigh
-        if (PID(j) <= np_dm_total) then
+        if (PID(j) == 1) then
             write(15) PID(j)
             ind_check1 = ind_check1 + 1
         else

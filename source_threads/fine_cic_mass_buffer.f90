@@ -8,9 +8,6 @@
     integer(4), dimension(3) :: tile
     integer(4), dimension(3) :: i1, i2
     real(4), dimension(3) :: x, offset, dx1, dx2
-#ifdef NEUTRINOS
-    real(4) :: fpp
-#endif
 
     offset(:)= - tile(:) * nf_physical_tile_dim + nf_buf !- 0.5 
 
@@ -23,10 +20,8 @@
       dx2(:) = 1 - dx1(:)
 
 #ifdef NEUTRINOS
-      fpp = mpfac_dm
-      if (PID(pp) > np_dm_total) fpp = mpfac_nt
-      dx1(1) = mass_p * dx1(1) * fpp
-      dx2(1) = mass_p * dx2(1) * fpp
+      dx1(1) = mass_p * dx1(1) * mass_p_nudm_fac(PID(pp)) 
+      dx2(1) = mass_p * dx2(1) * mass_p_nudm_fac(PID(pp))
 #else
       dx1(1) = mass_p * dx1(1)
       dx2(1) = mass_p * dx2(1)

@@ -47,8 +47,7 @@ real(4),      parameter :: power_index    = 2.0 ! 1.0,1.5 and 2.0 for power law 
 
 ! neutrino parameters
 real(4),      parameter :: H0             = 68
-integer(4),   parameter :: r_n_nucdm = 1
-integer(4),   parameter :: r_n_1_3 = 1
+integer(4),   parameter :: ratio_nudm_dim = 1
 real(4),      parameter :: mass_neutrino = 1.5
 real(4),      parameter :: omega_nu = mass_neutrino/93.15/(H0/100.)/(H0/100.)
 

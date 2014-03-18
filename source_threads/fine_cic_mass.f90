@@ -56,13 +56,8 @@
       dx1(:) = i1(:) - x(:)
       dx2(:) = 1 - dx1(:)
 
-      if (PID(pp) > np_dm_total) then !! This is a neutrino
-          dx1(1) = mass_p * dx1(1) * mpfac_nt
-          dx2(1) = mass_p * dx2(1) * mpfac_nt
-      else !! This is a dark matter particle
-          dx1(1) = mass_p * dx1(1) * mpfac_dm
-          dx2(1) = mass_p * dx2(1) * mpfac_dm
-      endif
+      dx1(1) = mass_p * dx1(1) * mass_p_nudm_fac(PID(pp)) 
+      dx2(1) = mass_p * dx2(1) * mass_p_nudm_fac(PID(pp))
 
       rho_f(i1(1),i1(2),i1(3),thread) = rho_f(i1(1),i1(2),i1(3),thread) &
                                        + dx1(1) * dx1(2) * dx1(3)
@@ -93,7 +88,7 @@
       dx1(:) = i1(:) - x(:)
       dx2(:) = 1 - dx1(:)
 
-      if (PID(pp) <= np_dm_total) then !! This is a dark matter particle 
+      if (PID(pp) == 1) then !! This is a dark matter particle 
           dx1(1) = mass_p * dx1(1)
           dx2(1) = mass_p * dx2(1) 
 

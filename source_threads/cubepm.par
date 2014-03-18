@@ -195,7 +195,6 @@ integer(4), parameter   :: dim_y = nodes_dim
 integer(4), parameter   :: dim_z = nodes_dim**2
 
 !! Factors needed to make rho_f mean density equal to unity
-real(4), parameter :: r_m_nucdm = omega_nu/omega_m
-real(4), parameter :: mpfac_nt  = r_m_nucdm/r_n_nucdm
-real(4), parameter :: mpfac_dm  = 1. - r_m_nucdm
+integer(4),   parameter :: ratio_nudm     = ratio_nudm_dim**3
+real(4), parameter      :: ratio_omega_nudm = omega_nu / omega_m
 
