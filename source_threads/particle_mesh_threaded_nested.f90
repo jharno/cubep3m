@@ -569,7 +569,7 @@
 #ifdef NESTED_OMP
         do k0 = 0, pp_range
             !$omp  parallel num_threads(nested_threads) default(shared) & 
-            !$omp& private(i_n, j_n, k_n, pp1_n, kp_min_n, kp_max_n, kp_n, jp_min_n, jp_max_n, &
+            !$omp& private(i_n, j_n, k_n, pp1_n, kp_min_n, kp_max_n, kp_n, jp_min_n, jp_max_n, fpp1_n, fpp2_n, &
             !$omp&         jp_n, ip_min_n, ip_max_n, ip_n, pp2_n, n_pairs_n, sep_n, rmag_n, force_pp_n) 
             !$omp do
             do k_n=1+k0,nf_physical_tile_dim+pp_range,pp_range+1 ! We never loop towards smaller z
@@ -581,6 +581,11 @@
                
                         pp1_n = hoc_fine(i_n, j_n, k_n, thread) 
                         if(pp1_n == 0) cycle 
+
+#ifdef NEUTRINOS
+                        !! Determine if partilce pp1_n is a neutrino or dark matter
+                        fpp1_n = mass_p_nudm_fac(PID(pp1_n))
+#endif
  
                         kp_min_n = k_n
                         kp_max_n = k_n + pp_range
@@ -611,6 +616,11 @@
                            
                                     pp2_n = hoc_fine(ip_n, jp_n, kp_n, thread) 
                                     if(pp2_n == 0) cycle                                                     
+
+#ifdef NEUTRINOS
+                                    !! Determine if partilce pp2_n is a neutrino or dark matter
+                                    fpp2_n = mass_p_nudm_fac(PID(pp2_n))
+#endif
 
 #ifdef DEBUG_PP_EXT
                                     write(*,*) 'Found a pair of cells with sep :',ip_n-i_n,jp_n-j_n,kp_n-k_n,'on thread', thread
@@ -647,8 +657,14 @@
 
                                                 !force_pp = force_pp - mass_p*( -7*rmag/(4*nf_cutoff**3) + 3*rmag**3/(4*nf_cutoff**5))
                                                 !force_pp = force_pp + sep*mass_p*(7/(4*nf_cutoff**3) - 3*rmag**2/(4*nf_cutoff**5))
+
+#ifdef NEUTRINOS
+                                                pp_ext_force_accum(:, pp1_n, thread) = pp_ext_force_accum(:, pp1_n, thread) - force_pp_n*fpp2_n
+                                                pp_ext_force_accum(:, pp2_n, thread) = pp_ext_force_accum(:, pp2_n, thread) + force_pp_n*fpp1_n
+#else
                                                 pp_ext_force_accum(:, pp1_n, thread) = pp_ext_force_accum(:, pp1_n, thread) - force_pp_n
                                                 pp_ext_force_accum(:, pp2_n, thread) = pp_ext_force_accum(:, pp2_n, thread) + force_pp_n
+#endif
                               
                                                 if (pp_ext_force_flag) then
                                  
@@ -658,7 +674,11 @@
                                                        (pp_range<k_n).and.(k_n<=nf_physical_tile_dim+pp_range)) then 
                                     
                                                         !HERE, I SHOULD TRY TO AVOID READING THE xv VARIABLE TO INCREASE PROCESSOR SPEED
+#ifdef NEUTRINOS
+                                                        xv(4:,pp1_n) = xv(4:,pp1_n) - force_pp_n*a_mid*G*dt*fpp2_n
+#else
                                                         xv(4:,pp1_n) = xv(4:,pp1_n) - force_pp_n*a_mid*G*dt
+#endif
                                                     endif
                                  
                                                     if((pp_range<ip_n).and.(ip_n<=nf_physical_tile_dim+pp_range) .and.&
@@ -666,7 +686,11 @@
                                                        (pp_range<kp_n).and.(kp_n<=nf_physical_tile_dim+pp_range)) then 
 
                                                         !HERE, I SHOULD TRY TO AVOID READING THE xv VARIABLE TO INCREASE PROCESSOR SPEED
+#ifdef NEUTRINOS
+                                                        xv(4:,pp2_n)=xv(4:,pp2_n) + force_pp_n*a_mid*G*dt*fpp1_n
+#else
                                                         xv(4:,pp2_n)=xv(4:,pp2_n) + force_pp_n*a_mid*G*dt
+#endif
                                                     endif
                              
                                                 endif !! pp_ext_force_flag
@@ -675,6 +699,11 @@
                            
                                             !HERE, I SHOULD TRY TO AVOID READING THE ll_fine VARIABLE TO INCREASE PROCESSOR SPEED
                                             pp2_n = ll_fine(pp2_n, thread)                           
+
+#ifdef NEUTRINOS
+                                            !! Determine if partilce pp2_n is a neutrino or dark matter
+                                            fpp2_n = mass_p_nudm_fac(PID(pp2_n))
+#endif
                            
                                         enddo !! pp2_n
 
@@ -682,6 +711,12 @@
 
                                         !HERE, I SHOULD TRY TO AVOID READING THE ll_fine VARIABLE TO INCREASE PROCESSOR SPEED
                                         pp1_n = ll_fine(pp1_n, thread)
+
+#ifdef NEUTRINOS
+                                        !! Determine what species pp1_n and pp2_n are 
+                                        fpp1_n = mass_p_nudm_fac(PID(pp1_n))
+                                        fpp2_n = mass_p_nudm_fac(PID(pp2_n))
+#endif
                         
                                     enddo !! pp1_n
 #ifdef DEBUG_PP_EXT
@@ -689,6 +724,11 @@
 #endif
                                     ! Restore pp1_n value for the next pp2_n iteration
                                     pp1_n = hoc_fine(i_n, j_n, k_n, thread)
+
+#ifdef NEUTRINOS
+                                    !! Determine if partilce pp1_n is a neutrino or dark matter
+                                    fpp1_n = mass_p_nudm_fac(PID(pp1_n))
+#endif
                         
                                 enddo !! ip_n                    
                             enddo !! jp_n
