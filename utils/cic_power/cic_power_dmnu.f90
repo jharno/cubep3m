@@ -991,8 +991,8 @@ end subroutine cp_fftw
     enddo
 
     ! Randomize positions across all nodes, hence np_local should be equal
-    if (command == 0) then !! Dark matter are further reduced by factor of r_n_1_3
-        np_local = (np_node_dim/r_n_1_3)**3
+    if (command == 0) then !! Dark matter are further reduced by factor of ratio_nudm_dim 
+        np_local = (np_node_dim/ratio_nudm_dim)**3
     else
         np_local = np_node_dim**3
     endif
@@ -1522,8 +1522,8 @@ end subroutine cp_fftw
     real    :: x,y,z,dx1,dx2,dy1,dy2,dz1,dz2,vf,v(3)
     integer :: command
 
-    if (command == 0) then !! Dark matter are further reduced by factor of r_n_1_3 
-        mp = (ncr/(np/r_n_1_3))**3
+    if (command == 0) then !! Dark matter are further reduced by factor of ratio_nudm_dim 
+        mp = (ncr/(np/ratio_nudm_dim))**3
     else
         mp = (ncr/np)**3
     endif 
