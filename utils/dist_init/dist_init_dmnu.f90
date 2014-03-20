@@ -65,10 +65,10 @@ program dist_init
 
   !! np is the number of particles
   !! np should be set to nc (1:1), hc (1:2), or qc (1:4)
-#ifdef DM_NEUTRINOS
-  integer, parameter :: np=hc/r_n_1_3
+#ifdef NEUTRINOS
+  integer, parameter :: np=hc 
 #else
-  integer, parameter :: np=hc                     ! hc for Low z ! nc for High z.
+  integer, parameter :: np=hc/ratio_nudm_dim
 #endif
   real, parameter    :: npr=np
 
@@ -615,7 +615,7 @@ end subroutine di_fftw
 #endif
 
 #ifdef NEUTRINOS
-    write(*,*) 'r_n_1_3 ', r_n_1_3 
+    write(*,*) 'ratio_nudm_dim ', ratio_nudm_dim 
     write(*,*) 'Vphys2sim ',Vphys2sim
     write(*,*) 'nu_random ', nu_random
     write(*,*) 'nu_relfd ', nu_relfd    
