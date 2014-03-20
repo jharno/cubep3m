@@ -13,7 +13,7 @@
     real(8) :: rho_node, rho_tot
 
 #ifdef NEUTRINOS
-    integer(4) :: ispec
+    integer(1) :: ispec
 #endif
 
 !! Initialize projection variables
@@ -172,7 +172,7 @@
     integer(4), dimension(3) :: cic_l,cic_h,tile
     real(8) :: rho_node
 #ifdef NEUTRINOS
-    integer(4) :: ispec
+    integer(1) :: ispec
 #endif
   
     thread=1

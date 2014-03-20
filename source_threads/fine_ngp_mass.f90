@@ -13,7 +13,8 @@ subroutine fine_ngp_mass(pp,tile,thread)
     integer(4), dimension(3) :: tile,i1
     real(4),    dimension(3) :: x, offset
 #ifdef NEUTRINOS
-    integer(8), optional :: ONLYPID
+    integer(1), optional :: ONLYPID
+    real(4) :: fpp
     logical :: DO_ONLYPID = .false.
     if (present(ONLYPID)) DO_ONLYPID = .true.
 #endif
@@ -46,12 +47,18 @@ subroutine fine_ngp_mass(pp,tile,thread)
 
     else !! When doing halofind and projections want to include only one type of particle 
 
+      if (ONLYPID == 1) then
+          fpp = 1.
+      else
+          fpp = 1./real(ratio_nudm_dim)**3
+      endif
+
       do
         if (pp == 0) exit
         x(:) = xv(1:3,pp) + offset(:)
         i1(:) = floor(x(:)) + 1
         if (PID(pp) == ONLYPID) then !! This is the particle we want 
-          rho_f(i1(1),i1(2),i1(3),thread) = rho_f(i1(1),i1(2),i1(3),thread)+mass_p
+          rho_f(i1(1),i1(2),i1(3),thread) = rho_f(i1(1),i1(2),i1(3),thread)+mass_p*fpp
         endif
         pp = ll(pp)
       enddo
