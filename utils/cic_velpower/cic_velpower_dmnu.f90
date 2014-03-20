@@ -1,6 +1,30 @@
-! ------------------------------------------------------------------------------------------------------- 
-! cic_velpower.f90 ... Last edit: February 11, 2013 by JD Emberson
-! -------------------------------------------------------------------------------------------------------
+!!
+!! cic_velpower_dmnu.f90
+!!
+!! Program to compute the velocity power spectra of both dark matter and neutrinos as well as their 
+!! cross velocity power spectra. This is to be used in conjunction with particle checkpoint files
+!! produced by a -DNEUTRINOS cubep3m simulation.
+!!
+!! * Using FFTW on the SciNet GPC compile with:
+!!   mpif90 -shared-intel -fpp -g -O3 -DNGP -DGAUSSIAN_SMOOTH -mt_mpi cic_velpower_dmnu.f90 -I$SCINET_FFTW_INC 
+!!        -I$P3DFFT_INC -o ngp_velpower_dmnu -L$SCINET_FFTW_LIB -L$P3DFFT_LIB -lp3dfft -lfftw3f
+!!
+!! * Using MKL on the SciNet GPC compile with:
+!!   mpiifort -shared-intel -fpp -g -O3 -xhost -i_dynamic -mkl -mcmodel=medium -DNGP -DGAUSSIAN_SMOOTH -mt_mpi 
+!!        cic_velpower_dmnu.f90 -I$P3DFFT_INC -I$MKL_FFTW_INC -o ngp_velpower_dmnu -L$P3DFFT_LIB -L$MKL_FFTW_LIB -lp3dfft -lmkl_intel_lp64
+!!
+!! * Using FFTW on the SciNet BGQ compile with:
+!!   mpif90 -q64 -O3 -qhot -qarch=qp -qtune=qp -WF,-DNGP,-DGAUSSIAN_SMOOTH cic_velpower_dmnu.F90 -I$SCINET_FFTW_INC 
+!!        -I$P3DFFT_INC -o ngp_velpower_dmnu -L$SCINET_FFTW_LIB -L$P3DFFT_LIB -lp3dfft -lfftw3f
+!!
+!! * Optional flags:
+!!   -DNGP: Uses NGP interpolation for binning of the power spectrum. 
+!!   -DSLAB: Alternatively run with FFTW slab decomposition instead of P3DFFT pencil decomposition.
+!!   -DGAUSSIAN_SMOOTH: Smooths the density field with a Gaussian filter to avoid division by empty 
+!!                      cells when converting from momentum density to velocity. 
+!!   -Dwrite_vel: Writes gridded velocity fields to binary files. 
+!!   -DKAISER: Adjusts for redshift space distortions.
+!!   -DDEBUG: Output useful debugging information.
 
 program cic_velpower 
 
@@ -11,8 +35,14 @@ program cic_velpower
 
   character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints'
 
+#ifdef GAUSSIAN_SMOOTH
+  !! Gaussian smoothing parameters (to go from momentum density field to velocity field)
+  real, parameter :: cell_smooth = 1.0
+  real, parameter :: R_smooth = box / nc * cell_smooth
+#endif
+
   !! nc is the number of cells per box length
-  integer, parameter :: hc=nc / 2
+  integer, parameter :: hc=nc/2
   real, parameter    :: ncr=nc
   real, parameter    :: hcr=hc
 
@@ -22,78 +52,102 @@ program cic_velpower
   real, parameter    :: npr=np
 
   !! internals
-  integer, parameter :: max_checkpoints = 100
+  integer, parameter :: max_checkpoints=100
   real, dimension(max_checkpoints) :: z_checkpoint
   integer num_checkpoints, cur_checkpoint
 
-  !! have velocity power spectra for each x, y, z
-  integer cur_dimension
-
   !! internal parallelization parameters
-  integer(4), parameter :: nc_node_dim = nc / nodes_dim
-  integer(4), parameter :: np_node_dim = np / nodes_dim
-  integer(4), parameter :: np_buffer = 4 * np_node_dim**3
-  integer(4), parameter :: max_np = np_node_dim**3 + np_buffer
+  integer(4), parameter :: nc_node_dim = nc/nodes_dim
+  integer(4), parameter :: np_node_dim = np/nodes_dim
+  integer(4), parameter :: max_np = density_buffer * ( ((nf_tile-2*nf_buf)*tiles_node_dim/2)**3 + &
+                                  (8*nf_buf**3 + 6*nf_buf*(((nf_tile-2*nf_buf)*tiles_node_dim)**2) + &
+                                  12*(nf_buf**2)*((nf_tile-2*nf_buf)*tiles_node_dim))/8.0 )
+  integer(4), parameter :: np_buffer=int(2./3.*max_np)
   integer(4), parameter :: nodes = nodes_dim * nodes_dim * nodes_dim
   integer(4), parameter :: nodes_slab = nodes_dim * nodes_dim
   integer(4), parameter :: nc_slab = nc / nodes
 
+  !! For storage of dark matter particles (usually small since r_n_1_3 generally > 1)
+  integer(4), parameter :: max_np_dm = max_np / ratio_nudm_dim**3
+
   !! parallelization variables
-  integer(4), dimension(0:nodes_dim-1, 0:nodes_dim-1) :: slab_neighbor
   integer(4), dimension(6) :: cart_neighbor
   integer(4), dimension(3) :: slab_coord, cart_coords
   integer(4) :: slab_rank, mpi_comm_cart, cart_rank, rank, ierr
 
-  integer(4) :: np_local
-
+  integer(4) :: np_local,np_local_dm
   integer(8) :: plan, iplan
-
   logical :: firstfftw
 
-! :: simulation variables
- 
+  !! have velocity power spectra for each x, y, z
+  integer cur_dimension
+
   !! Other parameters
-  real, parameter :: pi = 3.14159
-  real, parameter :: cell_smooth = 1.0
-  real, parameter :: R_smooth = box / nc * cell_smooth
+  real, parameter :: pi=3.14159
 
   !! Dark matter arrays
-  real, dimension(6, max_np) :: xvp
-  real, dimension(6, np_buffer) :: xp_buf
-  real, dimension(6 * np_buffer) :: send_buf, recv_buf
+  real, dimension(6,max_np) :: xvp
+  real, dimension(6,max_np_dm) :: xvp_dm
+  real, dimension(6,np_buffer) :: xp_buf
+  real, dimension(6*np_buffer) :: send_buf, recv_buf
 
   !! Power spectrum arrays
-  real, dimension(3, 3, nc) :: pkcurldm
   real, dimension(3, 3, nc) :: pkmomdim
-  real, dimension(3, nc) :: pkdivdm
+  real, dimension(3, 3, nc) :: pkmomdim_dm
+  real, dimension(3, 3, nc) :: pkmomdim_dmnu
   real, dimension(3, nc) :: pkdm
 
+  !! For pencils decomposition:
+#ifdef SLAB
+  integer(4), dimension(0:nodes_dim-1,0:nodes_dim-1) :: slab_neighbor
+#else
+  integer(4), parameter   :: nodes_pen = nodes_dim
+  integer(4), parameter   :: nc_pen = nc_node_dim / nodes_dim
+  integer(4), parameter   :: dim_y = nodes_dim
+  integer(4), parameter   :: dim_z = nodes_dim**2
+  integer(4) :: pen_dims(2), istart(3), iend(3), isize(3), fstart(3), fend(3), fsize(3), mypadd
+  integer(4), dimension(0:nodes_dim-1) :: pen_neighbor_to
+  integer(4), dimension(0:nodes_dim-1) :: pen_neighbor_fm
+#endif
+
   !! Fourier transform arrays
-  real, dimension(nc_node_dim, nc_node_dim, nc_node_dim) :: cube
-  real, dimension(nc_node_dim, nc_node_dim, nc_slab, 0:nodes_slab-1) :: recv_cube
-  real, dimension(nc+2, nc, nc_slab) :: slab, slab_work
-
-  !! Array containing (x, y, z) components of the momentum density field
-  real, dimension(3, 0:nc_node_dim+1, 0:nc_node_dim+1, 0:nc_node_dim+1) :: momden
-  real, dimension(0:nc_node_dim+1, 0:nc_node_dim+1) :: momden_send_buff
-  real, dimension(0:nc_node_dim+1, 0:nc_node_dim+1) :: momden_recv_buff
-
-  !! Array containing (x, y, z) components of the curl of the momentum density field
-  real, dimension(3, nc_node_dim, nc_node_dim, nc_node_dim) :: momcurl
-
-  !! Array containing divergence of the momentum density field
-  real, dimension(nc_node_dim, nc_node_dim, nc_node_dim) :: momdiv
+  real, dimension(nc_node_dim,nc_node_dim,nc_node_dim) :: cube
+#ifdef SLAB
+  real, dimension(nc_node_dim,nc_node_dim,nc_slab,0:nodes_slab-1) :: recv_cube
+  real, dimension(nc+2,nc,nc_slab) :: slab, slab2, slab_work
+#else
+  real, dimension(nc, nc_node_dim, nc_pen+2) :: slab, slab2
+  real, dimension(nc_node_dim, nc_node_dim, nc_pen, 0:nodes_pen-1) :: recv_cube
+#endif
 
   !! Array containing the matter density field
   real, dimension(0:nc_node_dim+1, 0:nc_node_dim+1, 0:nc_node_dim+1) :: massden
   real, dimension(0:nc_node_dim+1, 0:nc_node_dim+1) :: massden_send_buff
   real, dimension(0:nc_node_dim+1, 0:nc_node_dim+1) :: massden_recv_buff
 
+  !! Only work with one component of the velocity field at a time 
+  real, dimension(0:nc_node_dim+1, 0:nc_node_dim+1, 0:nc_node_dim+1) :: momden
+  real, dimension(0:nc_node_dim+1, 0:nc_node_dim+1) :: momden_send_buff
+  real, dimension(0:nc_node_dim+1, 0:nc_node_dim+1) :: momden_recv_buff
+
   !! Equivalence arrays to save memory
-  equivalence (slab_work,recv_cube) 
+  !! Must make sure that ONLY the largest array in each equivalence statement is on the common block. 
+  !! Fill in check_equivalence.py with simulation parameters and run if unsure.
+  equivalence(recv_cube, xp_buf) !! May sometimes need to be changed (see check_equivalence.py)
+  equivalence(momden, send_buf) !! May sometimes need to be changed (see check_equivalence.py)
+#ifdef SLAB
+  equivalence(slab_work, recv_buf) !! May sometimes need to be changed (see check_equivalence.py)
+#endif
+  equivalence(slab, cube) !! Slab will always be larger than cube
+  equivalence(massden_send_buff, momden_send_buff) !! These are the same size
+  equivalence(massden_recv_buff, momden_recv_buff) !! These are the same size
 
   !! Common block
-  common xvp, send_buf, slab_work, cube, slab, xp_buf, recv_buf, pkcurldm, pkmomdim, pkdivdm, pkdm
+#ifdef SLAB
+  common xvp, xvp_dm, massden, recv_cube, momden, slab_work, slab, massden_send_buff, massden_recv_buff, pkmomdim, pkmomdim_dm, pkmomdim_dmnu, pkdm
+#else
+  common xvp, xvp_dm, massden, recv_cube, momden, recv_buf, slab, massden_send_buff, massden_recv_buff, pkmomdim, pkmomdim_dm, pkmomdim_dmnu, pkdm
+#endif
 
 ! -------------------------------------------------------------------------------------------------------
 ! MAIN
@@ -110,55 +164,63 @@ program cic_velpower
   do cur_checkpoint = 1, num_checkpoints
 
     call initvar
-    call read_particles
-    call pass_particles
-    call momentum_density
-    call buffer_momdensity
-    call pass_momdensity
 
-    !
-    ! Compute curl power spectrum
-    !
+    !! Read and pass neutrino particles
+    call read_particles(0)
+    call pass_particles(0)
 
-    call momentum_curl
+    !! Read and pass dark matter particles (stored in xvp_dm)
+    call read_particles(1)
+    call pass_particles(1)
 
-    do cur_dimension = 1, 3 !! Each curl component 
+    do cur_dimension = 1, 3 !! Each x, y, z dimension
 
-      call darkmatter(0)
-    
-    enddo
+        !! Compute momentum density field for this dimension
+        call momentum_density(0)
+        call buffer_momdensity
 
-    if (rank == 0) call writepowerspectra(0)
-
-    !
-    ! Compute divergence power spectrum
-    !
-
-    call momentum_divergence
-    call darkmatter(1)
-
-    if (rank == 0) call writepowerspectra(1)
-
-    !
-    ! Compute power spectrum of total velocity field
-    !
-
-    !! Convert momentum field into velocity field 
-    call mass_density
-    call buffer_massdensity
-    call momentum2velocity
-
-    do cur_dimension = 1, 3
-
-        call darkmatter(2)
-
-    enddo
-
-    if (rank == 0) call writepowerspectra(2)
+        !! Convert momentum field into velocity field
+        call mass_density(0)
+        call buffer_massdensity
+        call momentum2velocity
 
 #ifdef write_vel
-    call writevelocityfield
+        call writevelocityfield(0)
 #endif
+
+        !! Fourier transform velocity field and compute power spectrum
+        call darkmatter
+        call powerspectrum(slab, slab, pkmomdim(cur_dimension,:,:))
+
+        !! Store neutrino Fourier field in slab 2 for cross spectra later
+        slab2(:,:,:) = slab(:,:,:)      
+
+        !! Compute dark matter momentum density field for this dimension
+        call momentum_density(1)
+        call buffer_momdensity
+
+        !! Convert dark matter momentum field into velocity field
+        call mass_density(0)
+        call buffer_massdensity
+        call momentum2velocity
+
+#ifdef write_vel
+        call writevelocityfield(1)
+#endif
+
+        !! Fourier transform velocity field and compute power spectrum
+        call darkmatter
+        call powerspectrum(slab, slab, pkmomdim_dm(cur_dimension,:,:))
+
+        !! Compute cross power spectra
+        call powerspectrum(slab, slab2, pkmomdim_dmnu(cur_dimension,:,:))        
+
+    enddo
+
+    !! Write out the power spectra
+    if (rank == 0) call writepowerspectra(0)
+    if (rank == 0) call writepowerspectra(1)
+    if (rank == 0) call writepowerspectra(2)
 
   enddo
 
@@ -218,10 +280,15 @@ subroutine mpi_initialize
     slab_coord(1) = slab_rank - slab_coord(2) * nodes_dim
    
     do j = 0, nodes_dim - 1
+#ifdef SLAB
       do i = 0, nodes_dim - 1
         slab_neighbor(i,j) = i + j * nodes_dim + slab_coord(3) &
                            * nodes_slab
       enddo
+#else
+        pen_neighbor_to(j) = nodes_slab*slab_coord(3) + slab_coord(2) + j*nodes_dim
+        pen_neighbor_fm(j) = nodes_slab*slab_coord(3) + j + nodes_dim*slab_coord(1)
+#endif
     enddo
 
     !! Create cartesian communicator based on cubic decomposition
@@ -319,26 +386,28 @@ subroutine initvar
 
     !! Momentum and matter density arrays
     do k = 0, nc_node_dim + 1
-        momden(:, :, :, k) = 0.
         massden(:, :, k) = 0.
-    enddo
-
-    !! Divergence and curl arrays
-    do k = 1, nc_node_dim
-        momcurl(:, :, :, k) = 0.
-        momdiv(:, :, k) = 0.
+        momden(:, :, k) = 0.
+        massden_send_buff(:, k) = 0.
+        massden_recv_buff(:, k) = 0.
     enddo
 
     !! Fourier transform arrays
+#ifdef SLAB
     do k = 1, nc_slab
        slab_work(:, :, k)=0
     enddo
+#endif
 
     do k = 1, nc_node_dim
        cube(:, :, k) = 0
     enddo
 
+#ifdef SLAB
     do k = 1, nc_slab
+#else
+    do k = 1, nc_pen+2
+#endif
        slab(:, :, k) = 0
     enddo
 
@@ -346,15 +415,28 @@ subroutine initvar
        xp_buf(:, k) = 0
     enddo
 
+    do k = 1, 6*np_buffer
+        send_buf(k) = 0.
+        recv_buf(k) = 0.
+    enddo
+
     do k = 1, 3 * np_buffer
        recv_buf(k) = 0
     enddo
 
+#ifdef SLAB
+    do k = 0, nodes_slab-1
+#else
+    do k = 0, nodes_pen-1
+#endif
+        recv_cube(:, :, :, k) = 0.
+    enddo
+
     !! Power spectrum arrays
     do k = 1, nc
-        pkcurldm(:, :, k) = 0.
         pkmomdim(:, :, k) = 0.
-        pkdivdm(:, k) = 0.
+        pkmomdim_dm(:, :, k) = 0.
+        pkmomdim_dmnu(:, :, k) = 0.
         pkdm(:, k) = 0.
     enddo
 
@@ -364,7 +446,7 @@ end subroutine initvar
 
 ! -------------------------------------------------------------------------------------------------------
 
-subroutine read_particles
+subroutine read_particles(command)
     !
     ! Read x, y, z positions and velocities and store in xvp
     !
@@ -376,6 +458,7 @@ subroutine read_particles
     character(len=7) :: z_string
     character(len=4) :: rank_string
     character(len=100) :: check_name
+    integer(4) :: command
 
     !! These are unnecessary headers from the checkpoint
     real(4) :: a, t, tau, dt_f_acc, dt_c_acc, dt_pp_acc, mass_p
@@ -399,15 +482,25 @@ subroutine read_particles
     write(rank_string,'(i4)') rank
     rank_string=adjustl(rank_string)
 
-    check_name = output_path//z_string(1:len_trim(z_string))//'xv'// &
-               rank_string(1:len_trim(rank_string))//'.dat'
+    if (command == 0) then
+        if(z_write .eq. z_i) then
+           check_name=ic_path//'xv'//rank_string(1:len_trim(rank_string))//'_nu.ic'
+        else
+           check_name=output_path//z_string(1:len_trim(z_string))//'xv'// &
+                   rank_string(1:len_trim(rank_string))//'_nu.dat'
+        endif
+    else
+        if(z_write .eq. z_i) then
+           check_name=ic_path//'xv'//rank_string(1:len_trim(rank_string))//'.ic'
+        else
+           check_name=output_path//z_string(1:len_trim(z_string))//'xv'// &
+                   rank_string(1:len_trim(rank_string))//'.dat'
+        endif
+    endif
 
     !! Open the file    
-#ifdef BINARY
-    open(unit=21, file=check_name, status='old', iostat=fstat, form='binary')
-#else
-    open(unit=21, file=check_name, status='old', iostat=fstat, form='unformatted')
-#endif
+
+    open(unit=21,file=check_name,status="old",iostat=fstat,access="stream")
 
     !! Check for opening error
     if (fstat /= 0) then
@@ -417,51 +510,73 @@ subroutine read_particles
     endif
 
     !! Read in checkpoint header data
-#ifdef PPINT
-    read(21) np_local, a, t, tau, nts, dt_f_acc, dt_pp_acc, dt_c_acc, sim_checkpoint, &
-               sim_projection, sim_halofind, mass_p
-#else
-    read(21) np_local, a, t, tau, nts, dt_f_acc, dt_c_acc, sim_checkpoint, &
-               sim_projection, sim_halofind, mass_p
-#endif
+    if (command == 0) then
+        read(21) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint, &
+                   sim_projection,sim_halofind,mass_p
+    else
+        read(21) np_local_dm,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint, &
+                   sim_projection,sim_halofind,mass_p
+    endif
 
     !! Check for memory problems
-    if (np_local > max_np) then
-      write(*,*) 'ERROR: Too many particles to store in memory!'
-      write(*,*) 'rank', rank, 'np_local', np_local, 'max_np', max_np
-      call mpi_abort(mpi_comm_world, ierr, ierr)
+    if (command == 0) then
+        if (np_local > max_np) then
+          write(*,*) 'ERROR: Too many particles to store in memory!'
+          write(*,*) 'rank', rank, 'np_local', np_local, 'max_np', max_np
+          call mpi_abort(mpi_comm_world, ierr, ierr)
+        endif
+    else
+        if (np_local_dm > max_np_dm) then
+          write(*,*) 'ERROR: Too many particles to store in memory!'
+          write(*,*) 'rank', rank, 'np_local', np_local, 'max_np', max_np
+          call mpi_abort(mpi_comm_world, ierr, ierr)
+        endif
     endif
 
     !! Tally up total number of particles
-    call mpi_reduce(real(np_local, kind=4), np_total, 1, mpi_real, &
+    if (command == 0) then
+        call mpi_reduce(real(np_local, kind=4), np_total, 1, mpi_real, &
                          mpi_sum, 0, mpi_comm_world, ierr)
-    
-    if (rank == 0) write(*,*) 'Total number of particles = ', int(np_total,4)
+    else
+        call mpi_reduce(real(np_local_dm, kind=4), np_total, 1, mpi_real, &
+                         mpi_sum, 0, mpi_comm_world, ierr)
 
-    !! Read positions and velocities
-    read(21) xvp(:, :np_local)
+    endif    
+
+    if (rank == 0) write(*,*) 'Total number of particles = ', int(np_total,8)
+
+    if (command == 0) then
+        do j=1, np_local
+            read(21) xvp(:,j)
+        enddo
+    else
+        do j=1, np_local_dm
+            read(21) xvp_dm(:,j)
+        enddo
+    endif
 
     close(21)
  
 #ifdef KAISER
 
-    !! Red Shift Distortion: x_z -> x_z +  v_z/H(Z)   
-    !! Converting seconds into simulation time units
-    !! cancels the H0...
-    
-    !! xv(3,ip+1:ip+nploc(i))=xv(3,ip+1:ip+nploc(i)) + xv(6,ip+1:ip+nploc(i))*1.5*sqrt(omegam/cubepm_a)
-    !! xv(3,ip+1:ip+nploc(i))=xv(3,ip+1:ip+nploc(i)) + xv(6,ip+1:ip+nploc(i))*1.5/sqrt(cubepm_a*(1+cubepm_a*omegak/omegam + omegav/omegam*cubepm_a**3))
-    
-    xvp(3, :) = xvp(3, :) + xvp(6, :) * 1.5 / sqrt(a * (1 + a * (1 - omega_m - omega_l) / omega_m + omega_l / omega_m * a**3))  
+    !Red Shift Distortion: x_z -> x_z +  v_z/H(Z)   
+    !Converting seconds into simulation time units
+    !cancels the H0...
 
-    call pass_particles
+    if (command == 0) then
+        xvp(3,:)=xvp(3,:) + xvp(6,:)*1.5/sqrt(a*(1+a*(1-omega_m-omega_l)/omega_m + omega_l/omega_m*a**3))
+    else
+        xvp_dm(3,:)=xvp_dm(3,:) + xvp_dm(6,:)*1.5/sqrt(a*(1+a*(1-omega_m-omega_l)/omega_m + omega_l/omega_m*a**3))
+    endif
 
-    if(rank == 0) then
+    call pass_particles(command)
+
+    if(rank==0) then
        write(*,*) '**********************'
        write(*,*) 'Included Kaiser Effect'
-       write(*,*) 'Omega_m = ', omega_m, ' a = ', a
+       write(*,*) 'Omega_m =', omega_m, 'a =', a
        !write(*,*) '1/H(z) =', 1.5*sqrt(omegam/cubepm_a)
-       write(*,*) '1 / H(z) = ', 1.5 / sqrt(a * (1 + a * (1 - omega_m - omega_l) / omega_m + omega_l / omega_m * a**3))
+       write(*,*) '1/H(z) =', 1.5/sqrt(a*(1+a*(1-omega_m-omega_l)/omega_m + omega_l/omega_m*a**3))
        write(*,*) '**********************'
     endif
 #endif
@@ -475,6 +590,7 @@ end subroutine read_particles
 
 ! -------------------------------------------------------------------------------------------------------
 
+#ifdef SLAB
   subroutine pack_slab
 !! pack cubic data into slab decomposition for fftw transform
     implicit none
@@ -520,9 +636,67 @@ end subroutine read_particles
     enddo
       
   end subroutine pack_slab
+#else
+subroutine pack_pencils
+    !
+    ! Pack cubic data into pencils for p3dfft transform.
+    !
+
+    implicit none
+
+    integer(4) :: i,j,k,i0,i1,k1
+    integer(4) :: pen_slice,tag,rtag
+    integer(4) :: num_elements !possibly should be double so as not to 
+                               !overflow for large runs, but integer*8 
+                               !might be unsupported by MPI
+
+    integer(4), dimension(2*nodes_dim) :: requests
+    integer(4), dimension(MPI_STATUS_SIZE,2*nodes_dim) :: wait_status
+
+    num_elements = nc_node_dim * nc_node_dim * nc_pen
+
+    !
+    ! Send the data from cube to recv_cube
+    !
+
+    do j = 0, nodes_dim - 1
+        pen_slice = j
+        tag  = rank**2
+        rtag = pen_neighbor_fm(j)**2
+        call mpi_isend(cube(1,1, pen_slice*nc_pen + 1), num_elements, &
+                       mpi_real, pen_neighbor_to(j), tag, mpi_comm_world, &
+                       requests(pen_slice+1),ierr)
+        call mpi_irecv(recv_cube(1,1,1,pen_slice), &
+                       num_elements, mpi_real, pen_neighbor_fm(j),rtag, &
+                       mpi_comm_world, requests(pen_slice+1+nodes_dim), &
+                       ierr)
+    enddo
+
+    call mpi_waitall(2*nodes_dim, requests, wait_status, ierr)
+
+    !
+    ! Place this data into the pencils (stored in the slab array)
+    !
+
+    do i = 0, nodes_dim - 1
+        i0 = i * nc_node_dim + 1
+        i1 = (i + 1) * nc_node_dim
+        pen_slice = i
+
+        do k = 1, nc_pen
+            do j = 1, nc_node_dim
+                slab(i0:i1,j,k) = recv_cube(:,j,k,pen_slice)
+            enddo
+        enddo
+
+    enddo
+
+end subroutine pack_pencils
+#endif
     
 ! -------------------------------------------------------------------------------------------------------
 
+#ifdef SLAB
   subroutine unpack_slab
 !! unpack slab data into cubic decomposition following fftw transform
     implicit none
@@ -567,21 +741,80 @@ end subroutine read_particles
     call mpi_waitall(2*nodes_dim**2,requests, wait_status, ierr)
 
   end subroutine unpack_slab
+#else
+subroutine unpack_pencils
+    !
+    ! Unpack data from the pencils back into the cubic decompisition following
+    ! p3dfft transform.
+    !
+
+    implicit none
+
+    integer(4) :: i,j,k,i0,i1,k1
+    integer(4) :: pen_slice,num_elements,tag,rtag
+    integer(4), dimension(2*nodes_dim) :: requests
+    integer(4), dimension(MPI_STATUS_SIZE,2*nodes_dim) :: wait_status
+
+    !
+    ! Place data in the recv_cube buffer
+    !
+
+    do i = 0, nodes_dim - 1
+        i0 = i * nc_node_dim + 1
+        i1 = (i + 1) * nc_node_dim
+        pen_slice = i
+        do k = 1, nc_pen
+            do j = 1, nc_node_dim
+                recv_cube(:, j, k, pen_slice) = slab(i0:i1, j, k)
+            enddo
+        enddo
+    enddo
+
+    num_elements = nc_node_dim * nc_node_dim * nc_pen
+
+    !
+    ! Put this data back into cube
+    !
+
+    do j = 0, nodes_dim - 1
+        pen_slice = j
+        tag  = rank**2
+        rtag = pen_neighbor_to(j)**2
+        call mpi_isend(recv_cube(1,1,1,pen_slice), num_elements, &
+                       mpi_real, pen_neighbor_fm(j), tag, mpi_comm_world, &
+                       requests(pen_slice+1),ierr)
+        call mpi_irecv(cube(1,1,pen_slice*nc_pen + 1), &
+                       num_elements, mpi_real, pen_neighbor_to(j),rtag, &
+                       mpi_comm_world, requests(pen_slice+1+nodes_dim), &
+                       ierr)
+    enddo
+
+    call mpi_waitall(2*nodes_dim,requests, wait_status, ierr)
+
+end subroutine unpack_pencils
+#endif
 
 ! -------------------------------------------------------------------------------------------------------
 
-  subroutine cp_fftw(command)
-!! calculate fftw transform
-!! 0 ends fftw subprogram, 1 starts forward fft, -1 starts backwards
-    implicit none
-    include 'fftw_f77.i'
+subroutine cp_fftw(command)
+    !
+    ! Calculate fftw transform using P3DFFT.
+    ! 0 ends fftw subprogram, 1 starts forward fft, -1 starts backwards
+    !
 
+#ifndef SLAB
+    use p3dfft
+#endif
+    implicit none
+#ifdef SLAB
+    include 'fftw_f77.i'
     integer(4), parameter :: order=FFTW_NORMAL_ORDER ! FFTW_TRANSPOSED_ORDER
+#endif
 
     integer(4) :: i
     integer(4) :: command
 
-#ifdef DEBUG_LOW
+#ifdef DEBUG
     do i=0,nodes-1
       if (rank == i) print *,'starting fftw',rank
       call mpi_barrier(mpi_comm_world,ierr)
@@ -591,11 +824,18 @@ end subroutine read_particles
 ! initialize plan variables for fftw
 
     if (firstfftw) then
+#ifdef SLAB
       call rfftw3d_f77_mpi_create_plan(plan,mpi_comm_world,nc, &
-            nc,nc, FFTW_REAL_TO_COMPLEX, FFTW_MEASURE)
+            nc,nc, FFTW_REAL_TO_COMPLEX, FFTW_ESTIMATE)
       call rfftw3d_f77_mpi_create_plan(iplan,mpi_comm_world,nc, &
-            nc,nc, FFTW_COMPLEX_TO_REAL, FFTW_MEASURE)
-#ifdef DEBUG_LOW
+            nc,nc, FFTW_COMPLEX_TO_REAL, FFTW_ESTIMATE)
+#else
+        pen_dims = (/dim_y,dim_z/)
+        call p3dfft_setup(pen_dims, nc, nc, nc, .true.)
+        call p3dfft_get_dims(istart, iend, isize, 1, mypadd)
+        call p3dfft_get_dims(fstart, fend, fsize, 2)
+#endif
+#ifdef DEBUG
       print *,'finished initialization of fftw',rank
 #endif
       firstfftw=.false.
@@ -607,15 +847,20 @@ end subroutine read_particles
 
 !! call pack routine if we are going forward
 
-#ifdef DEBUG_LOW
+#ifdef DEBUG
     do i=0,nodes-1
       if (rank == i) print *,'starting pack',rank
       call mpi_barrier(mpi_comm_world,ierr)
     enddo
 #endif
-      if (command > 0) call pack_slab
 
-#ifdef DEBUG_LOW
+#ifdef SLAB
+      if (command > 0) call pack_slab
+#else
+      if (command > 0) call pack_pencils
+#endif
+
+#ifdef DEBUG
     do i=0,nodes-1
       if (rank == i) print *,'finished forward slab pack',rank
       call mpi_barrier(mpi_comm_world,ierr)
@@ -623,13 +868,21 @@ end subroutine read_particles
 #endif
 
     if (command > 0) then
-      call rfftwnd_f77_mpi(plan,1,slab,slab_work,1,order)
+#ifdef SLAB
+        call rfftwnd_f77_mpi(plan,1,slab,slab_work,1,order)
+#else
+        call ftran_r2c(slab, slab, "fft")
+#endif
     else
-      call rfftwnd_f77_mpi(iplan,1,slab,slab_work,1,order)
-      slab=slab/real(nc*nc*nc)
+#ifdef SLAB
+        call rfftwnd_f77_mpi(iplan,1,slab,slab_work,1,order)
+#else
+        call btran_c2r(slab, slab, "tff")
+#endif
+        slab=slab/(real(nc)*real(nc)*real(nc))
     endif
 
-#ifdef DEBUG_LOW
+#ifdef DEBUG
     do i=0,nodes-1
       if (rank == i) print *,'finished fftw',rank
       call mpi_barrier(mpi_comm_world,ierr)
@@ -638,17 +891,26 @@ end subroutine read_particles
 
 !! unpack the slab data
 
+#ifdef SLAB
       if (command < 0) call unpack_slab
+#else
+      if (command < 0) call unpack_pencils
+#endif
 
     else
 
 ! if command = 0 we delete the plans
 
-      call rfftwnd_f77_mpi_destroy_plan(iplan)
-      call rfftwnd_f77_mpi_destroy_plan(plan)
+#ifdef SLAB
+        call rfftwnd_f77_mpi_destroy_plan(iplan)
+        call rfftwnd_f77_mpi_destroy_plan(plan)
+#else
+        call p3dfft_clean
+#endif
+
     endif
 
-  end subroutine cp_fftw
+end subroutine cp_fftw
 
 ! -------------------------------------------------------------------------------------------------------
 
@@ -676,7 +938,7 @@ subroutine writepowerspectra(command)
     
     integer      :: i, j, k
     character*180 :: fn
-    character*7  :: prefix
+    character*6  :: prefix
     character*7  :: z_write
     real    :: vsim2phys, zcur
     integer(4) :: command
@@ -695,27 +957,27 @@ subroutine writepowerspectra(command)
     z_write=adjustl(z_write)
     
 #ifdef NGP 
-    if (command == 0) then
-        prefix = 'ngpcvps'
-    else if (command == 1) then
-        prefix = 'ngpdvps'
-    else if (command == 2) then
-        prefix = 'ngptvps'
-    endif
+    prefix = 'ngpvps'
 #else
-    if (command == 0) then
-        prefix = 'ciccvps'
-    else if (command == 1) then
-        prefix = 'cicdvps'
-    else if (command == 2) then
-        prefix = 'cictvps'
-    endif
+    prefix = 'cicvps'
 #endif
 
 #ifdef KAISER
-   fn=output_path//z_write(1:len_trim(z_write))//prefix//'-RSD.dat' 
+   if (command == 0) then !! Neutrino power spectra
+       fn=output_path//z_write(1:len_trim(z_write))//prefix//'-RSD_nu.dat' 
+   else if (command == 1) then !! Dark matter power spectra
+       fn=output_path//z_write(1:len_trim(z_write))//prefix//'-RSD.dat'
+   else if (command == 2) then !! Dark matter-neutrino cross spectra
+       fn=output_path//z_write(1:len_trim(z_write))//prefix//'-RSD_dmnu.dat'
+   endif
 #else
-   fn=output_path//z_write(1:len_trim(z_write))//prefix//'.dat' 
+   if (command == 0) then !! Neutrino power spectra
+       fn=output_path//z_write(1:len_trim(z_write))//prefix//'_nu.dat'
+   else if (command == 1) then !! Dark matter power spectra
+       fn=output_path//z_write(1:len_trim(z_write))//prefix//'.dat'
+   else if (command == 2) then !! Dark matter-neutrino cross spectra
+       fn=output_path//z_write(1:len_trim(z_write))//prefix//'_dmnu.dat'
+   endif
 #endif
 
     !
@@ -731,18 +993,21 @@ subroutine writepowerspectra(command)
         !! Sum over all three dimensions 
         do i = 1, nc
             do j = 1, 3
-                pkdm(1, i) = pkdm(1, i) + pkcurldm(j, 1, i)
-                pkdm(2, i) = pkdm(2, i) + pkcurldm(j, 2, i)
+                pkdm(1, i) = pkdm(1, i) + pkmomdim(j, 1, i)
+                pkdm(2, i) = pkdm(2, i) + pkmomdim(j, 2, i)
             enddo
-            pkdm(3, i) = pkcurldm(1, 3, i)
+            pkdm(3, i) = pkmomdim(1, 3, i)
         enddo
 
     else if (command == 1) then
 
+        !! Sum over all three dimensions 
         do i = 1, nc
-            pkdm(1, i) = pkdivdm(1, i)
-            pkdm(2, i) = pkdivdm(2, i)
-            pkdm(3, i) = pkdivdm(3, i)
+            do j = 1, 3
+                pkdm(1, i) = pkdm(1, i) + pkmomdim_dm(j, 1, i)
+                pkdm(2, i) = pkdm(2, i) + pkmomdim_dm(j, 2, i)
+            enddo
+            pkdm(3, i) = pkmomdim_dm(1, 3, i)
         enddo
 
     else if (command == 2) then
@@ -750,10 +1015,10 @@ subroutine writepowerspectra(command)
         !! Sum over all three dimensions 
         do i = 1, nc
             do j = 1, 3
-                pkdm(1, i) = pkdm(1, i) + pkmomdim(j, 1, i)
-                pkdm(2, i) = pkdm(2, i) + pkmomdim(j, 2, i)
+                pkdm(1, i) = pkdm(1, i) + pkmomdim_dmnu(j, 1, i)
+                pkdm(2, i) = pkdm(2, i) + pkmomdim_dmnu(j, 2, i)
             enddo
-            pkdm(3, i) = pkmomdim(1, 3, i)
+            pkdm(3, i) = pkmomdim_dmnu(1, 3, i)
         enddo
 
     endif
@@ -793,7 +1058,8 @@ end subroutine writepowerspectra
 
 ! -------------------------------------------------------------------------------------------------------
 
-subroutine darkmatter(command)
+
+subroutine darkmatter
 
     implicit none
 
@@ -802,8 +1068,6 @@ subroutine darkmatter(command)
     real    :: d, dmin, dmax, sum_dm, sum_dm_local, dmint, dmaxt
     real*8  :: dsum, dvar, dsumt, dvart
     real, dimension(3) :: dis
-
-    integer(4) :: command ! 0 for curl, 1 for divergence, 2 for momentum
 
     real(8) time1, time2
     time1 = mpi_wtime(ierr)
@@ -820,19 +1084,7 @@ subroutine darkmatter(command)
     ! Assign data to density grid
     !
 
-    if (command == 0) then !! Fill with given curl component 
-
-        cube(:, :, :) = momcurl(cur_dimension, :, :, :) 
-
-    else if (command == 1) then !! Fill with divergence 
-
-        cube(:, :, :) = momdiv(:, :, :) 
-
-    else if (command == 2) then !! Fill with momentum density field
-
-        cube(:, :, :) = momden(cur_dimension, 1:nc_node_dim, 1:nc_node_dim, 1:nc_node_dim)
-
-    endif
+    cube(:, :, :) = momden(1:nc_node_dim, 1:nc_node_dim, 1:nc_node_dim)
 
     !
     ! Calculate some statistics
@@ -840,7 +1092,7 @@ subroutine darkmatter(command)
 
     sum_dm_local = sum(cube) 
     call mpi_reduce(sum_dm_local, sum_dm, 1, mpi_real, mpi_sum, 0, mpi_comm_world, ierr)
-    if (rank == 0) print *, "CUBE total sum = ", sum_dm, " command = ", command
+    if (rank == 0) print *, "CUBE total sum = ", sum_dm
 
     dmin = 0
     dmax = 0
@@ -869,7 +1121,6 @@ subroutine darkmatter(command)
       dsum = dsumt / nc**3
       dvar = sqrt(dvart / nc**3)
       write(*,*)
-      write(*,*) 'Darkmatter command ', command
       write(*,*) 'Cube min    ', dmint
       write(*,*) 'Cube max    ', dmaxt
       write(*,*) 'Cube sum ', real(dsum)
@@ -888,20 +1139,6 @@ subroutine darkmatter(command)
     ! Compute power spectrum
     !
     
-    if (command == 0) then
- 
-        call powerspectrum(slab, pkcurldm(cur_dimension, :, :), command)
-
-    else if (command == 1) then
-
-        call powerspectrum(slab, pkdivdm, command)
-
-    else if (command == 2) then
-
-        call powerspectrum(slab, pkmomdim(cur_dimension, :, :), command)
-
-    endif
-
     time2 = mpi_wtime(ierr)
     if (rank == 0) write(*, *) "Finished darkmatter ... elapsed time = ", time2-time1
 
@@ -911,7 +1148,7 @@ end subroutine darkmatter
 
 ! -------------------------------------------------------------------------------------------------------
 
-subroutine pass_particles
+subroutine pass_particles(command)
     !
     ! Pass particles inside buffer space to their appropriate nodes.
     !
@@ -923,6 +1160,7 @@ subroutine pass_particles
     integer, dimension(mpi_status_size) :: status,sstatus,rstatus
     integer :: tag,srequest,rrequest,sierr,rierr
     real(4), parameter :: eps = 1.0e-03
+    integer(4) :: command
 
     real(8) time1, time2
     time1 = mpi_wtime(ierr)
@@ -938,18 +1176,24 @@ subroutine pass_particles
     pp = 1
 
     do
-    
-        if (pp > np_local) exit
+
+        if (command == 0) then
+            if (pp > np_local) exit
+        else
+            if (pp > np_local_dm) exit
+        endif
 
         !! Read its position  
-        x = xvp(:, pp)
+        if (command == 0) then
+            x = xvp(:, pp)
+        else
+            x = xvp_dm(:, pp)
+        endif
         
         !! See if it lies within the buffer
         if (x(1) < lb .or. x(1) >= ub .or. x(2) < lb .or. x(2) >= ub .or. &
             x(3) < lb .or. x(3) >= ub ) then
        
-            !write (*,*) 'PARTICLE OUT', xvp(:, pp)
-        
             !! Make sure we aren't exceeding the maximum
             np_buf = np_buf + 1
         
@@ -958,10 +1202,16 @@ subroutine pass_particles
                 call mpi_abort(mpi_comm_world, ierr, ierr)
             endif 
 
-            xp_buf(:, np_buf) = xvp(:, pp)
-            xvp(:, pp)        = xvp(:, np_local)
-            np_local          = np_local - 1
-        
+            if (command == 0) then
+                xp_buf(:, np_buf) = xvp(:, pp)
+                xvp(:, pp)        = xvp(:, np_local)
+                np_local          = np_local - 1
+            else
+                xp_buf(:, np_buf) = xvp_dm(:, pp)
+                xvp_dm(:, pp)     = xvp_dm(:, np_local_dm)
+                np_local_dm       = np_local_dm - 1
+            endif       
+ 
             cycle 
       
         endif
@@ -1030,7 +1280,8 @@ subroutine pass_particles
 
 #ifdef DEBUG
     do i = 0, nodes-1
-      if (rank == i) print *, rank, 'x+ np_local=', np_local
+      if (rank == i .and. command == 0) print *, rank, 'x+ np_local=', np_local
+      if (rank == i .and. command == 1) print *, rank, 'x+ np_local_dm=', np_local_dm
       call mpi_barrier(mpi_comm_world, ierr)
     enddo
 #endif 
@@ -1042,8 +1293,13 @@ subroutine pass_particles
       x = xp_buf(:, np_buf + pp)
       if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
           x(3) >= lb .and. x(3) < ub ) then
-        np_local = np_local + 1
-        xvp(:, np_local) = x
+        if (command == 0) then
+            np_local = np_local + 1
+            xvp(:, np_local) = x
+        else
+            np_local_dm = np_local_dm + 1
+            xvp_dm(:, np_local_dm) = x
+        endif
         xp_buf(:, np_buf+pp) = xp_buf(:, np_buf+npi)
         npi = npi - 1
         cycle
@@ -1055,7 +1311,8 @@ subroutine pass_particles
 
 #ifdef DEBUG
     do i = 0, nodes-1
-      if (rank == i) print *, rank, 'x+ np_exit=', np_buf, np_local
+      if (rank == i .and. command == 0) print *, rank, 'x+ np_exit=', np_buf, np_local
+      if (rank == i .and. command == 1) print *, rank, 'x+ np_exit=', np_buf, np_local_dm
       call mpi_barrier(mpi_comm_world, ierr)
     enddo
 #endif 
@@ -1103,8 +1360,13 @@ subroutine pass_particles
       x = xp_buf(:, np_buf+pp)
       if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
           x(3) >= lb .and. x(3) < ub ) then
-        np_local = np_local + 1
-        xvp(:, np_local) = x
+        if (command == 0) then
+            np_local = np_local + 1
+            xvp(:, np_local) = x
+        else
+            np_local_dm = np_local_dm + 1
+            xvp_dm(:, np_local_dm) = x
+        endif
         xp_buf(:, np_buf+pp) = xp_buf(:, np_buf+npi)
         npi = npi - 1
         cycle 
@@ -1157,8 +1419,13 @@ subroutine pass_particles
       x = xp_buf(:, np_buf+pp)
       if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
           x(3) >= lb .and. x(3) < ub ) then
-        np_local = np_local + 1
-        xvp(:, np_local) = x
+        if (command == 0) then
+            np_local = np_local + 1
+            xvp(:, np_local) = x
+        else
+            np_local_dm = np_local_dm + 1
+            xvp_dm(:, np_local_dm) = x
+        endif
         xp_buf(:, np_buf+pp) = xp_buf(:, np_buf+npi)
         npi = npi-1
         cycle 
@@ -1211,8 +1478,13 @@ subroutine pass_particles
       x = xp_buf(:, np_buf+pp)
       if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
           x(3) >= lb .and. x(3) < ub ) then
-        np_local = np_local+1
-        xvp(:, np_local) = x
+        if (command == 0) then
+            np_local = np_local+1
+            xvp(:, np_local) = x
+        else
+            np_local_dm = np_local_dm+1
+            xvp_dm(:, np_local_dm) = x
+        endif
         xp_buf(:, np_buf+pp) = xp_buf(:, np_buf+npi)
         npi=npi-1
         cycle 
@@ -1265,8 +1537,13 @@ subroutine pass_particles
       x=xp_buf(:,np_buf+pp)
       if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
           x(3) >= lb .and. x(3) < ub ) then
-        np_local=np_local+1
-        xvp(:,np_local)=x
+        if (command == 0) then
+            np_local=np_local+1
+            xvp(:,np_local)=x
+        else
+            np_local_dm=np_local_dm+1
+            xvp_dm(:,np_local_dm)=x
+        endif
         xp_buf(:,np_buf+pp)=xp_buf(:,np_buf+npi)
         npi=npi-1
         cycle 
@@ -1319,8 +1596,13 @@ subroutine pass_particles
       x=xp_buf(:,np_buf+pp)
       if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
           x(3) >= lb .and. x(3) < ub ) then
-        np_local=np_local+1
-        xvp(:,np_local)=x
+        if (command == 0) then
+            np_local=np_local+1
+            xvp(:,np_local)=x
+        else
+            np_local_dm=np_local_dm+1
+            xvp_dm(:,np_local_dm)=x
+        endif
         xp_buf(:,np_buf+pp)=xp_buf(:,np_buf+npi)
         npi=npi-1
         cycle 
@@ -1342,8 +1624,13 @@ subroutine pass_particles
 
     if (rank == 0) print *,'total buffered particles =',np_exit
 
-    call mpi_reduce(np_local,np_final,1,mpi_integer,mpi_sum,0, &
+    if (command == 0) then
+        call mpi_reduce(np_local,np_final,1,mpi_integer,mpi_sum,0, &
                     mpi_comm_world,ierr)
+    else
+        call mpi_reduce(np_local_dm,np_final,1,mpi_integer,mpi_sum,0, &
+                    mpi_comm_world,ierr)
+    endif
 
     if (rank == 0) then
       print *,'total particles =',np_final
@@ -1354,13 +1641,23 @@ subroutine pass_particles
  
 !!  Check for particles out of bounds
 
-    do i=1,np_local
-      if (xvp(1,i) < 0 .or. xvp(1,i) >= nc_node_dim .or. &
-          xvp(2,i) < 0 .or. xvp(2,i) >= nc_node_dim .or. &
-          xvp(3,i) < 0 .or. xvp(3,i) >= nc_node_dim) then
-        print *,'particle out of bounds',rank,i,xvp(:3,i),nc_node_dim
-      endif
-    enddo
+    if (command == 0) then
+        do i=1,np_local
+          if (xvp(1,i) < 0 .or. xvp(1,i) >= nc_node_dim .or. &
+              xvp(2,i) < 0 .or. xvp(2,i) >= nc_node_dim .or. &
+              xvp(3,i) < 0 .or. xvp(3,i) >= nc_node_dim) then
+            print *,'particle out of bounds',rank,i,xvp(:3,i),nc_node_dim
+          endif
+        enddo
+    else
+        do i=1,np_local_dm
+          if (xvp_dm(1,i) < 0 .or. xvp_dm(1,i) >= nc_node_dim .or. &
+              xvp_dm(2,i) < 0 .or. xvp_dm(2,i) >= nc_node_dim .or. &
+              xvp_dm(3,i) < 0 .or. xvp_dm(3,i) >= nc_node_dim) then
+            print *,'particle out of bounds',rank,i,xvp_dm(:3,i),nc_node_dim
+          endif
+        enddo
+    endif
 
     time2 = mpi_wtime(ierr)
     if (rank == 0) write(*, *) "Finished pass_particles ... elapsed time = ", time2-time1
@@ -1371,27 +1668,54 @@ end subroutine pass_particles
 
 ! -------------------------------------------------------------------------------------------------------
 
-subroutine mass_density
+subroutine mass_density(command)
     !
     ! Bin particles in position space to generate mass density field 
     ! 
 
     implicit none
 
-    real, parameter :: mp = (ncr / np)**3
-
+    real :: mp
     integer :: i, j, i1, i2, j1, j2, k1, k2
     real    :: x, y, z, dx1, dx2, dy1, dy2, dz1, dz2
+
+    integer(4) :: command, iend
 
     real(8) time1, time2
     time1 = mpi_wtime(ierr)
 
-    do i = 1, np_local
+    !
+    ! Initialize grid to 0
+    !
+
+    do k1 = 0, nc_node_dim+1
+        massden(:,:,k1) = 0.
+    enddo
+
+    if (command == 0) then 
+        mp = (ncr/np)**3
+    else !! Dark matter are further reduced by factor of r_n_1_3 
+        mp = (ncr/(np/ratio_nudm_dim))**3
+    endif
+
+    if (command == 0) then
+        iend = np_local
+    else
+        iend = np_local_dm
+    endif
+
+    do i = 1, iend
 
         !! Read particle position
-        x = xvp(1, i) - 0.5
-        y = xvp(2, i) - 0.5
-        z = xvp(3, i) - 0.5
+        if (command == 0) then
+            x = xvp(1, i) - 0.5
+            y = xvp(2, i) - 0.5
+            z = xvp(3, i) - 0.5
+        else
+            x = xvp_dm(1, i) - 0.5
+            y = xvp_dm(2, i) - 0.5
+            z = xvp_dm(3, i) - 0.5
+        endif
 
         !! Determine particle grid location
         i1 = floor(x) + 1
@@ -1435,23 +1759,38 @@ end subroutine mass_density
 
 ! -------------------------------------------------------------------------------------------------------
 
-subroutine momentum_density
+subroutine momentum_density(command)
     !
     ! Bin particles in position space to generate the 3D momentum density field
     ! 
 
     implicit none
 
-    real, parameter :: mp = (ncr / np)**3
-
+    real :: mp
     integer :: i, j, i1, i2, j1, j2, k1, k2
     real    :: x, y, z, dx1, dx2, dy1, dy2, dz1, dz2
     real    :: dv1, dv2, v(3)
     real    :: vsim2phys, zcur
     real    :: vrmsx, vrmsy, vrmsz
 
+    integer(4) :: command, iend
+
     real(8) time1, time2
     time1 = mpi_wtime(ierr)
+
+    !
+    ! Initialize grid to 0
+    !
+
+    do k1 = 0, nc_node_dim+1
+        momden(:,:,k1) = 0.
+    enddo
+
+    if (command == 0) then 
+        mp = (ncr/np)**3
+    else !! Dark matter are further reduced by factor of r_n_1_3 
+        mp = (ncr/(np/ratio_nudm_dim))**3
+    endif
 
     !
     ! Determine RMS velocity in each dimension
@@ -1461,12 +1800,30 @@ subroutine momentum_density
     vrmsy = 0.
     vrmsz = 0.
 
-    do i = 1, np_local
+    if (command == 0) then
+        iend = np_local
+    else
+        iend = np_local_dm
+    endif
+
+    do i = 1, iend
 
         !! Read particle position
-        x = xvp(1, i) - 0.5 
-        y = xvp(2, i) - 0.5
-        z = xvp(3, i) - 0.5
+        if (command == 0) then
+            x = xvp(1, i) - 0.5 
+            y = xvp(2, i) - 0.5
+            z = xvp(3, i) - 0.5
+            v(1) = xvp(4, i)
+            v(2) = xvp(5, i)
+            v(3) = xvp(6, i)
+        else
+            x = xvp_dm(1, i) - 0.5
+            y = xvp_dm(2, i) - 0.5
+            z = xvp_dm(3, i) - 0.5
+            v(1) = xvp_dm(4, i)
+            v(2) = xvp_dm(5, i)
+            v(3) = xvp_dm(6, i)
+        endif
 
         !! Determine particle grid location
         i1 = floor(x) + 1
@@ -1487,31 +1844,21 @@ subroutine momentum_density
                 print *,'WARNING: Particle out of bounds', i1, i2, j1, j2, k1, k2, nc_node_dim
         endif
 
-        !! Read particle velocities 
-        v(1) = xvp(4, i)
-        v(2) = xvp(5, i)
-        v(3) = xvp(6, i)
-
         vrmsx = vrmsx + v(1)**2
         vrmsy = vrmsy + v(2)**2
         vrmsz = vrmsz + v(3)**2
 
-        !! Momentum density field in each dimension
-        do j = 1, 3
+        dv1 = dz1 * mp * v(cur_dimension)
+        dv2 = dz2 * mp * v(cur_dimension)
 
-            dv1 = dz1 * mp * v(j)
-            dv2 = dz2 * mp * v(j)
-
-            momden(j, i1, j1, k1) = momden(j, i1, j1, k1) + dx1 * dy1 * dv1
-            momden(j, i2, j1, k1) = momden(j, i2, j1, k1) + dx2 * dy1 * dv1
-            momden(j, i1, j2, k1) = momden(j, i1, j2, k1) + dx1 * dy2 * dv1
-            momden(j, i2, j2, k1) = momden(j, i2, j2, k1) + dx2 * dy2 * dv1
-            momden(j, i1, j1, k2) = momden(j, i1, j1, k2) + dx1 * dy1 * dv2
-            momden(j, i2, j1, k2) = momden(j, i2, j1, k2) + dx2 * dy1 * dv2
-            momden(j, i1, j2, k2) = momden(j, i1, j2, k2) + dx1 * dy2 * dv2
-            momden(j, i2, j2, k2) = momden(j, i2, j2, k2) + dx2 * dy2 * dv2
-
-        enddo
+        momden(i1, j1, k1) = momden(i1, j1, k1) + dx1 * dy1 * dv1
+        momden(i2, j1, k1) = momden(i2, j1, k1) + dx2 * dy1 * dv1
+        momden(i1, j2, k1) = momden(i1, j2, k1) + dx1 * dy2 * dv1
+        momden(i2, j2, k1) = momden(i2, j2, k1) + dx2 * dy2 * dv1
+        momden(i1, j1, k2) = momden(i1, j1, k2) + dx1 * dy1 * dv2
+        momden(i2, j1, k2) = momden(i2, j1, k2) + dx2 * dy1 * dv2
+        momden(i1, j2, k2) = momden(i1, j2, k2) + dx1 * dy2 * dv2
+        momden(i2, j2, k2) = momden(i2, j2, k2) + dx2 * dy2 * dv2
 
     enddo
 
@@ -1523,11 +1870,11 @@ subroutine momentum_density
     zcur      = z_checkpoint(cur_checkpoint)
     vsim2phys = 300. * sqrt(omega_m) * box * (1. + zcur) / 2. / nc !! Takes h = 1
 
-    vrmsx = vsim2phys * sqrt(vrmsx / np_local)
-    vrmsy = vsim2phys * sqrt(vrmsy / np_local)
-    vrmsz = vsim2phys * sqrt(vrmsz / np_local)
+    vrmsx = vsim2phys * sqrt(vrmsx / iend)
+    vrmsy = vsim2phys * sqrt(vrmsy / iend)
+    vrmsz = vsim2phys * sqrt(vrmsz / iend)
 
-    write(*, *) "RMS physical velocities (rank, z, vx, vy, vz): ", rank, zcur, vrmsx, vrmsy, vrmsz
+    if (rank == 0 .and. cur_dimension == 0) write(*, *) "RMS physical velocities (rank, z, vx, vy, vz): ", rank, zcur, vrmsx, vrmsy, vrmsz
 
     time2 = mpi_wtime(ierr)
     if (rank == 0) write(*, *) "Finished momentum_density ... elapsed time = ", time2-time1
@@ -1565,13 +1912,10 @@ subroutine momentum2velocity
     ! Now smooth each component of the momentum field
     !
 
-    do m = 1, 3
+    cube(:, :, :) = momden(1:nc_node_dim, 1:nc_node_dim, 1:nc_node_dim)
+    call Gaussian_filter
+    momden(1:nc_node_dim, 1:nc_node_dim, 1:nc_node_dim) = cube(:, :, :)
 
-        cube(:, :, :) = momden(m, 1:nc_node_dim, 1:nc_node_dim, 1:nc_node_dim)
-        call Gaussian_filter
-        momden(m, 1:nc_node_dim, 1:nc_node_dim, 1:nc_node_dim) = cube(:, :, :)
-
-    enddo
 #endif
 
     !
@@ -1584,10 +1928,7 @@ subroutine momentum2velocity
         do j = 1, nc_node_dim
             do k = 1, nc_node_dim
                 if (massden(i, j, k) .ne. 0.) then
-                    do m = 1, 3
-                        momden(m, i, j, k) = momden(m, i, j, k) / &
-                                             massden(i, j, k)
-                    enddo
+                    momden(i, j, k) = momden(i, j, k) / massden(i, j, k)
                 else
                     ecount_local = ecount_local + 1
                 endif
@@ -1599,7 +1940,7 @@ subroutine momentum2velocity
 
     time2 = mpi_wtime(ierr)
 
-    if (rank == 0) write(*, *) "Empty cells in the velocity field = ", ecount
+    if (rank == 0) write(*, *) "Empty cells in the density field = ", ecount
     if (rank == 0) write(*, *) "Finished momentum2velocity ... elapsed time = ", time2-time1
 
     return
@@ -1608,6 +1949,7 @@ end subroutine momentum2velocity
 
 ! -------------------------------------------------------------------------------------------------------
 
+#ifdef GAUSSIAN_SMOOTH
 subroutine Gaussian_filter
     !
     ! Smooths the provided real space field (in cube) with a Gaussian filter in
@@ -1616,14 +1958,24 @@ subroutine Gaussian_filter
 
     implicit none
 
-    integer :: i, j, k, kg
+    integer :: i, j, k, kg, ig, mg, jg
     real :: fr, kr, kx, ky, kz
+#ifndef SLAB
+    integer :: ind, dx, dxy
+#endif
 
     !! Forward transform cube to slab
     call cp_fftw(1)
 
+#ifndef SLAB
+    dx  = fsize(1)
+    dxy = dx * fsize(2)
+    ind = 0
+#endif
+
     !! Convolve Fourier field with a Gaussian filter
 
+#ifdef SLAB
     do k = 1, nc_slab
         kg = k + nc_slab*rank
         if (kg .lt. hc+2) then
@@ -1639,6 +1991,30 @@ subroutine Gaussian_filter
             endif
             do i = 1, nc+2, 2
                 kx = (i-1)/2
+#else
+    do k = 1, nc_pen+mypadd
+        do j = 1, nc_node_dim
+            do i = 1, nc, 2
+                kg = ind / dxy
+                mg = ind - kg * dxy
+                jg = mg / dx
+                ig = mg - jg * dx
+                kg = fstart(3) + kg
+                jg = fstart(2) + jg
+                ig = 2 * (fstart(1) + ig) - 1
+                ind = ind + 1
+                if (kg < hc+2) then
+                    kz=kg-1
+                else
+                    kz=kg-1-nc
+                endif
+                if (jg < hc+2) then
+                    ky=jg-1
+                else
+                    ky=jg-1-nc
+                endif
+                kx = (ig-1)/2
+#endif
                 kr = sqrt(kx**2 + ky**2 + kz**2)
                 fr = 2. * pi * kr / box
 
@@ -1654,6 +2030,7 @@ subroutine Gaussian_filter
     return
 
 end subroutine Gaussian_filter
+#endif
 
 ! -------------------------------------------------------------------------------------------------------
 
@@ -1672,15 +2049,13 @@ subroutine buffer_momdensity
     real(8) time1, time2
     time1 = mpi_wtime(ierr)
 
-    do i = 1, 3
-
         !
         ! Pass +x
         ! 
 
         tag = 111
 
-        momden_send_buff(:, :) = momden(i, nc_node_dim+1, :, :)
+        momden_send_buff(:, :) = momden(nc_node_dim+1, :, :)
 
         call mpi_isend(momden_send_buff, num2send, mpi_real, cart_neighbor(6), &
                    tag, mpi_comm_world, srequest, sierr)
@@ -1689,7 +2064,7 @@ subroutine buffer_momdensity
         call mpi_wait(srequest, sstatus, sierr)
         call mpi_wait(rrequest, rstatus, rierr)
 
-        momden(i, 1, :, :) = momden(i, 1, :, :) + momden_recv_buff(:, :)
+        momden(1, :, :) = momden(1, :, :) + momden_recv_buff(:, :)
 
         !
         ! Pass -x
@@ -1697,7 +2072,7 @@ subroutine buffer_momdensity
 
         tag = 112
 
-        momden_send_buff(:, :) = momden(i, 0, :, :)
+        momden_send_buff(:, :) = momden(0, :, :)
 
         call mpi_isend(momden_send_buff, num2send, mpi_real, cart_neighbor(5), &
                    tag, mpi_comm_world, srequest, sierr)
@@ -1706,7 +2081,7 @@ subroutine buffer_momdensity
         call mpi_wait(srequest, sstatus, sierr)
         call mpi_wait(rrequest, rstatus, rierr)
 
-        momden(i, nc_node_dim, :, :) = momden(i, nc_node_dim, :, :) + momden_recv_buff(:, :)
+        momden(nc_node_dim, :, :) = momden(nc_node_dim, :, :) + momden_recv_buff(:, :)
 
         !
         ! Pass +y
@@ -1714,7 +2089,7 @@ subroutine buffer_momdensity
 
         tag = 113
 
-        momden_send_buff(:, :) = momden(i, :, nc_node_dim+1, :)
+        momden_send_buff(:, :) = momden(:, nc_node_dim+1, :)
 
         call mpi_isend(momden_send_buff, num2send, mpi_real, cart_neighbor(4), &
                    tag, mpi_comm_world, srequest, sierr)
@@ -1723,7 +2098,7 @@ subroutine buffer_momdensity
         call mpi_wait(srequest, sstatus, sierr)
         call mpi_wait(rrequest, rstatus, rierr)
 
-        momden(i, :, 1, :) = momden(i, :, 1, :) + momden_recv_buff(:, :)
+        momden(:, 1, :) = momden(:, 1, :) + momden_recv_buff(:, :)
 
         !
         ! Pass -y
@@ -1731,7 +2106,7 @@ subroutine buffer_momdensity
 
         tag = 114
 
-        momden_send_buff(:, :) = momden(i, :, 0, :)
+        momden_send_buff(:, :) = momden(:, 0, :)
 
         call mpi_isend(momden_send_buff, num2send, mpi_real, cart_neighbor(3), &
                    tag, mpi_comm_world, srequest, sierr)
@@ -1740,7 +2115,7 @@ subroutine buffer_momdensity
         call mpi_wait(srequest, sstatus, sierr)
         call mpi_wait(rrequest, rstatus, rierr)
 
-        momden(i, :, nc_node_dim, :) = momden(i, :, nc_node_dim, :) + momden_recv_buff(:, :)
+        momden(:, nc_node_dim, :) = momden(:, nc_node_dim, :) + momden_recv_buff(:, :)
 
         !
         ! Pass +z
@@ -1748,7 +2123,7 @@ subroutine buffer_momdensity
 
         tag = 115
 
-        momden_send_buff(:, :) = momden(i, :, :, nc_node_dim+1)
+        momden_send_buff(:, :) = momden(:, :, nc_node_dim+1)
 
         call mpi_isend(momden_send_buff, num2send, mpi_real, cart_neighbor(2), &
                    tag, mpi_comm_world, srequest, sierr)
@@ -1757,7 +2132,7 @@ subroutine buffer_momdensity
         call mpi_wait(srequest, sstatus, sierr)
         call mpi_wait(rrequest, rstatus, rierr)
 
-        momden(i, :, :, 1) = momden(i, :, :, 1) + momden_recv_buff(:, :)
+        momden(:, :, 1) = momden(:, :, 1) + momden_recv_buff(:, :)
 
         !
         ! Pass -z
@@ -1765,7 +2140,7 @@ subroutine buffer_momdensity
 
         tag = 116
 
-        momden_send_buff(:, :) = momden(i, :, :, 0)
+        momden_send_buff(:, :) = momden(:, :, 0)
 
         call mpi_isend(momden_send_buff, num2send, mpi_real, cart_neighbor(1), &
                    tag, mpi_comm_world, srequest, sierr)
@@ -1774,9 +2149,7 @@ subroutine buffer_momdensity
         call mpi_wait(srequest, sstatus, sierr)
         call mpi_wait(rrequest, rstatus, rierr)
 
-        momden(i, :, :, nc_node_dim) = momden(i, :, :, nc_node_dim) + momden_recv_buff(:, :)
-
-    enddo
+        momden(:, :, nc_node_dim) = momden(:, :, nc_node_dim) + momden_recv_buff(:, :)
 
     time2 = mpi_wtime(ierr)
     if (rank == 0) write(*, *) "Finished buffer_momdensity ... elapsed time = ", time2-time1
@@ -1912,237 +2285,28 @@ end subroutine buffer_massdensity
 
 ! -------------------------------------------------------------------------------------------------------
 
-subroutine pass_momdensity
-    !
-    ! Pass physical boundaries to adjacent nodes for finite differencing later
-    !
-
-    implicit none
-
-    integer :: i
-    integer, dimension(mpi_status_size) :: status, sstatus, rstatus
-    integer :: tag, srequest, rrequest, sierr, rierr, ierr
-    integer, parameter :: num2send = (nc_node_dim + 2)**2
-
-    real(8) time1, time2
-    time1 = mpi_wtime(ierr)
-
-    do i = 1, 3
-
-        !
-        ! Pass +x
-        ! 
-
-        tag = 111
-
-        momden_send_buff(:, :) = momden(i, nc_node_dim, :, :)
-
-        call mpi_isend(momden_send_buff, num2send, mpi_real, cart_neighbor(6), &
-                   tag, mpi_comm_world, srequest, sierr)
-        call mpi_irecv(momden_recv_buff, num2send, mpi_real, cart_neighbor(5), &
-                   tag, mpi_comm_world, rrequest, rierr)
-        call mpi_wait(srequest, sstatus, sierr)
-        call mpi_wait(rrequest, rstatus, rierr)
-
-        momden(i, 0, :, :) = momden_recv_buff(:, :)
-
-        !
-        ! Pass -x
-        ! 
-
-        tag = 112
-
-        momden_send_buff(:, :) = momden(i, 1, :, :)
-
-        call mpi_isend(momden_send_buff, num2send, mpi_real, cart_neighbor(5), &
-                   tag, mpi_comm_world, srequest, sierr)
-        call mpi_irecv(momden_recv_buff, num2send, mpi_real, cart_neighbor(6), &
-                   tag, mpi_comm_world, rrequest, rierr)
-        call mpi_wait(srequest, sstatus, sierr)
-        call mpi_wait(rrequest, rstatus, rierr)
-
-        momden(i, nc_node_dim+1, :, :) = momden_recv_buff(:, :)
-
-        !
-        ! Pass +y
-        ! 
-
-        tag = 113
-
-        momden_send_buff(:, :) = momden(i, :, nc_node_dim, :)
-
-        call mpi_isend(momden_send_buff, num2send, mpi_real, cart_neighbor(4), &
-                   tag, mpi_comm_world, srequest, sierr)
-        call mpi_irecv(momden_recv_buff, num2send, mpi_real, cart_neighbor(3), &
-                   tag, mpi_comm_world, rrequest, rierr)
-        call mpi_wait(srequest, sstatus, sierr)
-        call mpi_wait(rrequest, rstatus, rierr)
-
-        momden(i, :, 0, :) = momden_recv_buff(:, :)
-
-        !
-        ! Pass -y
-        ! 
-
-        tag = 114
-
-        momden_send_buff(:, :) = momden(i, :, 1, :)
-
-        call mpi_isend(momden_send_buff, num2send, mpi_real, cart_neighbor(3), &
-                   tag, mpi_comm_world, srequest, sierr)
-        call mpi_irecv(momden_recv_buff, num2send, mpi_real, cart_neighbor(4), &
-                   tag, mpi_comm_world, rrequest, rierr)
-        call mpi_wait(srequest, sstatus, sierr)
-        call mpi_wait(rrequest, rstatus, rierr)
-
-        momden(i, :, nc_node_dim+1, :) = momden_recv_buff(:, :)
-
-        !
-        ! Pass +z
-        ! 
-
-        tag = 115
-
-        momden_send_buff(:, :) = momden(i, :, :, nc_node_dim)
-
-        call mpi_isend(momden_send_buff, num2send, mpi_real, cart_neighbor(2), &
-                   tag, mpi_comm_world, srequest, sierr)
-        call mpi_irecv(momden_recv_buff, num2send, mpi_real, cart_neighbor(1), &
-                   tag, mpi_comm_world, rrequest, rierr)
-        call mpi_wait(srequest, sstatus, sierr)
-        call mpi_wait(rrequest, rstatus, rierr)
-
-        momden(i, :, :, 0) = momden_recv_buff(:, :)
-
-        !
-        ! Pass -z
-        ! 
-
-        tag = 116
-
-        momden_send_buff(:, :) = momden(i, :, :, 1)
-
-        call mpi_isend(momden_send_buff, num2send, mpi_real, cart_neighbor(1), &
-                   tag, mpi_comm_world, srequest, sierr)
-        call mpi_irecv(momden_recv_buff, num2send, mpi_real, cart_neighbor(2), &
-                   tag, mpi_comm_world, rrequest, rierr)
-        call mpi_wait(srequest, sstatus, sierr)
-        call mpi_wait(rrequest, rstatus, rierr)
-
-        momden(i, :, :, nc_node_dim+1) = momden_recv_buff(:, :)
-
-    enddo
-
-    time2 = mpi_wtime(ierr)
-    if (rank == 0) write(*, *) "Finished pass_momdensity ... elapsed time = ", time2-time1
-
-    return
-
-end subroutine pass_momdensity
-
-! -------------------------------------------------------------------------------------------------------
-
-subroutine momentum_curl
-    !
-    ! Calculates the curl of the momentum density field
-    !
-
-    implicit none 
-    integer :: k, j, i
-    real :: dx
-
-    real(8) time1, time2
-    time1 = mpi_wtime(ierr)
-
-    !
-    ! Compute derivatives using dy/dx(a) = y(a+1) - y(a-1) / x(a+1) - x(a-1)
-    ! 
-
-    !! Spacing between grid points
-    dx = 2. * box / nc
-
-    do i = 1, nc_node_dim
-        do j = 1, nc_node_dim
-            do k = 1, nc_node_dim
-                
-                !! x component: dp_z/dy - dp_y/dz
-                momcurl(1, i, j, k) = (momden(3, i, j+1, k) - momden(3, i, j-1, k) - &
-                                          momden(2, i, j, k+1) + momden(2, i, j, k-1)) / dx
-
-                !! y component: dp_x/dz - dp_z/dx
-                momcurl(2, i, j, k) = (momden(1, i, j, k+1) - momden(1, i, j, k-1) - &
-                                          momden(3, i+1, j, k) + momden(3, i-1, j, k)) / dx
-
-                !! z component: dp_y/dx - dp_x/dy
-                momcurl(3, i, j, k) = (momden(2, i+1, j, k) - momden(2, i-1, j, k) - &
-                                          momden(1, i, j+1, k) + momden(1, i, j-1, k)) / dx
-
-            enddo
-        enddo
-    enddo
-
-    time2 = mpi_wtime(ierr)
-    if (rank == 0) write(*, *) "Finished momentum_curl ... elapsed time = ", time2-time1
-
-    return
-
-end subroutine momentum_curl
-
-! -------------------------------------------------------------------------------------------------------
-
-subroutine momentum_divergence
-    !
-    ! Calculates the divergence of the momentum density field
-    !
-
-    implicit none
-    integer :: k, j, i
-    real :: dx
-
-    real(8) time1, time2
-    time1 = mpi_wtime(ierr)
-
-    !
-    ! Compute derivatives using dy/dx(a) = y(a+1) - y(a-1) / x(a+1) - x(a-1)
-    !
-
-    !! Spacing between grid points
-    dx = 2. * box / nc
-
-    do i = 1, nc_node_dim
-        do j = 1, nc_node_dim
-            do k = 1, nc_node_dim
-
-                momdiv(i, j, k) = (momden(1, i+1, j, k) - momden(1, i-1, j, k) + &
-                                    momden(2, i, j+1, k) - momden(2, i, j-1, k) + &
-                                    momden(3, i, j, k+1) - momden(3, i, j, k-1)) / dx
-
-            enddo
-        enddo
-    enddo
-
-    time2 = mpi_wtime(ierr)
-    if (rank == 0) write(*, *) "Finished momentum_divergence ... elapsed time = ", time2-time1
-
-    return
-
-end subroutine momentum_divergence
-
-! -------------------------------------------------------------------------------------------------------
-
-  subroutine powerspectrum(delta, pk, command)
+  subroutine powerspectrum(delta, delta2, pk)
     implicit none
     real, dimension(3, nc)       :: pk
-    real, dimension(nc+2, nc, nc_slab) :: delta
-    integer :: command
+#ifdef SLAB
+    real, dimension(nc+2,nc,nc_slab) :: delta, delta2
+#else
+    real, dimension(nc, nc_node_dim, nc_pen+2) :: delta, delta2
+#endif
 
-    integer :: i, j, k, kg
+    integer :: i, j, k, kg, ig, mg, jg
     integer :: k1, k2
     real    :: kr, kx, ky, kz, w1, w2, pow, x, y, z, sync_x, sync_y, sync_z, kernel
-    real, dimension(3, nc, nc_slab) :: pkt
+#ifdef SLAB
+    real, dimension(3,nc,nc_slab) :: pkt
+#else
+    real, dimension(3,nc,nc_pen+2) :: pkt
+#endif
     real, dimension(3, nc) :: pktsum
+
     real, dimension(nc) :: kcen, kcount
     real    :: kavg
+    integer :: ind, dx, dxy
 
     real(8) time1, time2
     time1 = mpi_wtime(ierr)
@@ -2153,76 +2317,115 @@ end subroutine momentum_divergence
     kcen(:)   = 0.
     kcount(:) = 0.
 
+#ifndef SLAB
+    dx  = fsize(1)
+    dxy = dx * fsize(2)
+    ind = 0
+#endif
+
+#ifdef SLAB
     !! Compute power spectrum
+    !COULD OMP DO PARALLEL THIS LOOP?
     do k=1,nc_slab
-       kg=k+nc_slab*rank
-       if (kg .lt. hc+2) then
-          kz=kg-1
-       else
-          kz=kg-1-nc
-       endif
-       do j=1,nc
-          if (j .lt. hc+2) then
-             ky=j-1
-          else
-             ky=j-1-nc
-          endif
-          do i=1,nc+2,2
-             kx=(i-1)/2
-             kr=sqrt(kx**2+ky**2+kz**2)
-             if(kx.eq.0 .and. ky <=0 .and. kz <=0)cycle;
-             if(kx.eq.0 .and. ky >0 .and. kz <0)cycle;
-             if (kr .ne. 0) then
-                k1=ceiling(kr)
-                k2=k1+1
-                w1=k1-kr
-                w2=1-w1
-                x = pi*real(kx)/ncr
-                y = pi*real(ky)/ncr
-                z = pi*real(kz)/ncr
-                
-                if(x==0) then 
-                   sync_x = 1
+        kg=k+nc_slab*rank
+        if (kg .lt. hc+2) then
+            kz=kg-1
+        else
+            kz=kg-1-nc
+        endif
+        do j=1,nc
+            if (j .lt. hc+2) then
+                ky=j-1
+            else
+                ky=j-1-nc
+            endif
+            do i=1,nc+2,2
+                kx=(i-1)/2
+#else
+    !! Compute power spectrum
+    !! Cannot thread because of ind index
+    do k = 1, nc_pen+mypadd
+        do j = 1, nc_node_dim
+            do i = 1, nc, 2
+                kg = ind / dxy
+                mg = ind - kg * dxy
+                jg = mg / dx
+                ig = mg - jg * dx
+                kg = fstart(3) + kg
+                jg = fstart(2) + jg
+                ig = 2 * (fstart(1) + ig) - 1
+                ind = ind + 1
+                if (kg < hc+2) then
+                    kz=kg-1
                 else
-                   sync_x = sin(x)/x
+                    kz=kg-1-nc
                 endif
-                if(y==0) then 
-                   sync_y = 1
+                if (jg < hc+2) then
+                    ky=jg-1
                 else
-                   sync_y = sin(y)/y
+                    ky=jg-1-nc
                 endif
-                if(z==0) then 
-                   sync_z = 1
-                else
-                   sync_z = sin(z)/z
-                endif
+                kx = (ig-1)/2
+#endif
+                kr=sqrt(real(kx**2+ky**2+kz**2))
+                if(kx.eq.0 .and. ky <=0 .and. kz <=0)cycle;
+                if(kx.eq.0 .and. ky >0 .and. kz <0)cycle;
+                if (kr .ne. 0) then
+                    k1=ceiling(kr)
+                    k2=k1+1
+                    w1=k1-kr
+                    w2=1-w1
+                    x = pi*real(kx)/ncr
+                    y = pi*real(ky)/ncr
+                    z = pi*real(kz)/ncr
 
-                kernel = sync_x*sync_y*sync_z
+                    if(x==0) then
+                        sync_x = 1
+                    else
+                        sync_x = sin(x)/x
+                    endif
+                    if(y==0) then
+                        sync_y = 1
+                    else
+                        sync_y = sin(y)/y
+                    endif
+                    if(z==0) then
+                        sync_z = 1
+                    else
+                        sync_z = sin(z)/z
+                    endif
+
+                    kernel = sync_x*sync_y*sync_z
+
 #ifdef NGP
-                w1=1
-                w2=0
+                    w1=1
+                    w2=0
 #endif                
-                pow=sum((delta(i:i+1,j,k)/ncr**3)**2)/kernel**4
-                pkt(1,k1,k)=pkt(1,k1,k)+w1*pow
-                pkt(2,k1,k)=pkt(2,k1,k)+w1*pow**2
-                pkt(3,k1,k)=pkt(3,k1,k)+w1
-                pkt(1,k2,k)=pkt(1,k2,k)+w2*pow
-                pkt(2,k2,k)=pkt(2,k2,k)+w2*pow**2
-                pkt(3,k2,k)=pkt(3,k2,k)+w2
+                    pow=sum((delta(i:i+1,j,k)*delta2(i:i+1,j,k)/real(ncr)**6))/kernel**4
+                    pkt(1,k1,k)=pkt(1,k1,k)+w1*pow
+                    pkt(2,k1,k)=pkt(2,k1,k)+w1*pow**2
+                    pkt(3,k1,k)=pkt(3,k1,k)+w1
+                    pkt(1,k2,k)=pkt(1,k2,k)+w2*pow
+                    pkt(2,k2,k)=pkt(2,k2,k)+w2*pow**2
+                    pkt(3,k2,k)=pkt(3,k2,k)+w2
 
-                kcen(k1) = kcen(k1) + w1 * kr
-                kcen(k2) = kcen(k2) + w2 * kr
+                    kcen(k1) = kcen(k1) + w1 * kr
+                    kcen(k2) = kcen(k2) + w2 * kr
 
-                kcount(k1) = kcount(k1) + w1
-                kcount(k2) = kcount(k2) + w2
+                    kcount(k1) = kcount(k1) + w1
+                    kcount(k2) = kcount(k2) + w2
 
-             endif
-          enddo
-       enddo
+                endif
+            enddo
+        enddo
     enddo
 
     !! Merge power spectrum from threads
+#ifdef SLAB
     do k=2,nc_slab
+#else
+    do k=2,nc_pen+2
+#endif
        pkt(:,:,1)=pkt(:,:,1)+pkt(:,:,k)
     enddo
 
@@ -2256,13 +2459,6 @@ end subroutine momentum_divergence
                 pk(1:2,k)=4*pi*(kavg-1.)**3*pk(1:2,k)
 #endif
 
-                !! Divide by k^2 for divergence and curl components 
-                if (command == 0 .or. command == 1) then
-
-                    pk(1:2, k) = pk(1:2, k) / pk(3, k)**2
-
-                endif
-
             endif
         enddo
     endif
@@ -2278,7 +2474,7 @@ end subroutine momentum_divergence
 
 ! -------------------------------------------------------------------------------------------------------
 
-subroutine writevelocityfield
+subroutine writevelocityfield(command)
 
     implicit none
 
@@ -2288,6 +2484,8 @@ subroutine writevelocityfield
     character(len=4)   :: rank_string
     character(len=1)   :: dim_string
     real :: vsim2phys, zcur
+
+    integer :: command
 
     !
     ! Determine conversion to proper velocity [km/s]
@@ -2312,29 +2510,33 @@ subroutine writevelocityfield
     ! Write out velocity field for each dimension
     !
 
-    do m = 1, 3
+        m = cur_dimension 
 
         if (m == 1) dim_string = "x"
         if (m == 2) dim_string = "y"
         if (m == 3) dim_string = "z"
 
-        fn = output_path//z_write(1:len_trim(z_write))//&
-             "vel"//dim_string//&
-             rank_string(1:len_trim(rank_string))//".bin"
+        if (command == 0) then
+            fn = output_path//z_write(1:len_trim(z_write))//&
+                 "vel"//dim_string//&
+                 rank_string(1:len_trim(rank_string))//"_nu.bin"
+        else
+            fn = output_path//z_write(1:len_trim(z_write))//&
+                 "vel"//dim_string//&
+                 rank_string(1:len_trim(rank_string))//".bin"
+        endif
 
-        open(unit=11, file=fn, status="replace", iostat=fstat, form="binary")
+        open(unit=11, file=fn, status="replace", iostat=fstat, access="stream") 
 
         do k = 1, nc_node_dim
             do j = 1, nc_node_dim
 
-                write(11) momden(m, 1:nc_node_dim, j, k) * vsim2phys
+                write(11) momden(1:nc_node_dim, j, k) * vsim2phys
 
             enddo
         enddo
 
         close(11)
-
-    enddo
 
     return
 
