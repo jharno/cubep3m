@@ -21,8 +21,8 @@ program cic_power
 
   !character(len=*), parameter ::checkpoints=cubepm_root//'/input/checkpoints_KiDS'
   !character(len=*), parameter ::checkpoints=cubepm_root//'/input/checkpoints_KiDS_100Mpc'
-  !character(len=*), parameter ::checkpoints=cubepm_root//'/input/checkpoints_0.042'
-  character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints_ppext2'
+  character(len=*), parameter ::checkpoints=cubepm_root//'/input/checkpoints_0.042_back'
+  !character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints_high'
 
   !! nc is the number of cells per box length
   integer, parameter :: hc=nc/2
@@ -50,7 +50,6 @@ program cic_power
 !  integer(4), parameter :: np_buffer = 4*np_node_dim**3
 !  integer(4), parameter :: max_np = np_node_dim**3 + np_buffer
 
-
   integer(4), parameter :: max_np = density_buffer * ( ((nf_tile-2*nf_buf)*tiles_node_dim/2)**3 + &
                                   (8*nf_buf**3 + 6*nf_buf*(((nf_tile-2*nf_buf)*tiles_node_dim)**2) + &
                                   12*(nf_buf**2)*((nf_tile-2*nf_buf)*tiles_node_dim))/8.0 )
@@ -59,6 +58,12 @@ program cic_power
   integer(4), parameter :: nodes = nodes_dim * nodes_dim * nodes_dim
   integer(4), parameter :: nodes_slab = nodes_dim * nodes_dim
   integer(4), parameter :: nc_slab = nc / nodes
+
+#ifdef FOLD_PARTICLES
+  integer, parameter :: mfac = 8
+  real, parameter :: nc_fold = nc_node_dim / real(mfac)
+  integer(1), dimension(max_np) :: rank_array
+#endif
 
   !! parallelization variables
   integer(4), dimension(0:nodes_dim-1,0:nodes_dim-1) :: slab_neighbor
@@ -71,6 +76,7 @@ program cic_power
   integer(8) :: plan, iplan
 
   logical :: firstfftw
+
 
 ! :: simulation variables
  
@@ -105,6 +111,9 @@ program cic_power
   equivalence (xvp,slab,cube)
 !  equivalence (slab,cube)
 
+#ifdef FOLD_PARTICLES
+  equivalence (den, slab_work, recv_cube, xp_buf, rank_array)
+#endif
 
   !! Common block
 #ifdef PLPLOT
@@ -125,6 +134,9 @@ program cic_power
     call initvar
     call read_particles
     call pass_particles
+#ifdef FOLD_PARTICLES
+    call fold_particles
+#endif
     call darkmatter
     call PoissonNoise
     if (rank == 0) call writepowerspectra
@@ -366,6 +378,191 @@ contains
   end subroutine read_particles
 
 !!---------------------------------------------------------------------------!!
+#ifdef FOLD_PARTICLES
+subroutine fold_particles
+    !
+    ! Folds particles on different nodes on themselves in order to increase the
+    ! effective resolution of the power spectrum
+    !
+    
+    implicit none
+
+    integer :: k, i , node_x, node_y, node_z, my_coord(3),my_rank, counter(nodes_dim**3), fstat
+    real :: xmin, xmax
+    character(len=7) :: z_string
+    character(len=4) :: rank_string, rank_fold_string
+    character(len=100) :: check_name
+
+
+    xmin = 1.e30
+    xmax = -1.e30
+
+
+    write(rank_string,'(i4)') rank
+    rank_string=adjustl(rank_string)
+
+
+    ! 1-Get global coordinate, 
+    ! 2-Increase resolution
+    ! 3-Fold
+    ! 4-Assign to new node and 
+    !   Compute new local coordinates
+    ! 5-Write to new file
+    ! 6-Read new files, overwrite xv
+    ! 7-Pass particles accross nodes (should pass none...)
+
+    !write(*,*) rank, cart_coords
+    counter(:) = 0  
+
+    do k = 1, np_local
+
+        xvp(1, k) = mod(mfac*(xvp(1, k) + cart_coords(1)*nc_node_dim),real(nc))
+        xvp(2, k) = mod(mfac*(xvp(2, k) + cart_coords(2)*nc_node_dim),real(nc))
+        xvp(3, k) = mod(mfac*(xvp(3, k) + cart_coords(3)*nc_node_dim),real(nc))
+
+        !Assign to new node 
+
+        !find z_layer
+        do i = 1,nodes_dim 
+           if(xvp(1,k) .ge. nc_node_dim*(i-1) .and. xvp(1,k) .lt. nc_node_dim*i) then 
+              !  xv(:,k) is in floor number 'i'
+              node_x = i
+           endif
+           if(xvp(2,k) .ge. nc_node_dim*(i-1) .and. xvp(2,k) .lt. nc_node_dim*i) then 
+              !  xv(:,k) is in floor number 'i'
+              node_y = i
+           endif
+           if(xvp(3,k) .ge. nc_node_dim*(i-1) .and. xvp(3,k) .lt. nc_node_dim*i) then 
+              !  xv(:,k) is in floor number 'i'
+              node_z = i
+           endif
+        enddo
+
+        ! Get rank:
+ 
+        my_coord(:) = (/node_x-1, node_y -1, node_z-1/)
+        !write(*,*) 'my_coord=', my_coord
+
+        call mpi_cart_rank(mpi_comm_cart, my_coord, my_rank,ierr)
+
+        !write(*,*) 'particle' ,k , 'with xv=', xvp(1:3,k), 'is in subvolume ',node_x, node_y, node_z, my_rank
+        
+        rank_array(k) = my_rank        
+        counter(my_rank+1) = counter(my_rank+1) +1 
+
+    enddo
+
+    write(*,*) rank, counter
+    
+    write(*,*) 'Opening files'
+    !-----------
+    ! open files
+    do i = 1,nodes_dim**3
+
+       write(rank_fold_string,'(i4)') i-1
+       rank_fold_string=adjustl(rank_fold_string)
+
+       check_name=output_path//'xv_fold_from'// &
+           rank_string(1:len_trim(rank_string))//'_to_'//rank_fold_string(1:len_trim(rank_fold_string))//'.dat'
+
+#ifdef BINARY
+       open(unit=20+i,file=check_name,status='replace',iostat=fstat,form='binary')
+#else
+       open(unit=20+i,file=check_name,status='replace',iostat=fstat,form='unformatted')
+#endif
+       if (fstat /= 0) then
+          write(*,*) 'error opening fold particle list'
+          write(*,*) 'rank',rank,'file:',check_name
+          call mpi_abort(mpi_comm_world,ierr,ierr)
+       endif
+
+       write(20+i) counter(i)
+
+    enddo
+
+    !-----------------------------------
+    !write to file, in local coordinates
+    do k = 1,np_local
+       write(21+rank_array(k)) mod(xvp(1:3,k),real(nc_node_dim)), xvp(4:6,k)
+    enddo
+
+    !-----------
+    ! close files
+    do i = 1,nodes_dim**3
+       close(20+i)
+    enddo
+
+    xvp = 0
+   
+    call mpi_barrier(mpi_comm_world,ierr)
+
+   !stop
+
+    counter = 0
+    np_local = 0
+    !------------------
+    ! re-open the files, but with rank indices ('to' and 'from') swapped 
+
+    do i = 1,nodes_dim**3
+
+       write(rank_fold_string,'(i4)') i-1
+       rank_fold_string=adjustl(rank_fold_string)
+
+       check_name=output_path//'xv_fold_from'// &
+           rank_fold_string(1:len_trim(rank_fold_string))//'_to_'//rank_string(1:len_trim(rank_string))//'.dat'
+
+#ifdef BINARY
+       open(unit=20+i,file=check_name,status='old',iostat=fstat,form='binary')
+#else
+       open(unit=20+i,file=check_name,status='old',iostat=fstat,form='unformatted')
+#endif
+       if (fstat /= 0) then
+          write(*,*) 'error opening checkpoint'
+          write(*,*) 'rank',rank,'file:',check_name
+          call mpi_abort(mpi_comm_world,ierr,ierr)
+       endif
+
+       read(20+i) counter(i)
+
+       !--------------
+       !read from file
+       do k=np_local+1 , np_local+counter(i)
+         read(20+i) xvp(:,k)
+       enddo
+
+       np_local = np_local + counter(i)
+
+       write(*,*) 'rank, counter', rank,i,counter(i)
+
+    enddo
+    
+
+
+
+    !-----------
+    ! close files
+    do i = 1,nodes_dim**3
+       close(20+i)
+    enddo
+
+    !write(*,*) "GLOBAL XMIN, XMAX = ", rank, minval(xvp(1,1:np_local)), maxval(xvp(1,1:np_local))
+    !write(*,*) "GLOBAL YMIN, YMAX = ", rank, minval(xvp(2,1:np_local)), maxval(xvp(2,1:np_local))
+    !write(*,*) "GLOBAL ZMIN, ZMAX = ", rank, minval(xvp(3,1:np_local)), maxval(xvp(3,1:np_local))
+   
+    !do k = np_local/2,np_local/2 + 100
+    !   write(*,*) 'rank, ID, xv, final_rank', rank ,k, xvp(1:3,k),  rank_array(k)
+    !enddo
+
+    
+
+    !stop
+
+    return
+
+end subroutine fold_particles
+#endif
+
+!!---------------------------------------------------------------------------!!
 
   subroutine pack_slab
 !! pack cubic data into slab decomposition for fftw transform
@@ -603,7 +800,13 @@ contains
 #else
     fn=output_path//z_write(1:len_trim(z_write))//prefix//'_new.dat' 
 #endif
-
+#ifdef FOLD_PARTICLES
+#ifdef KAISER
+    fn=output_path//z_write(1:len_trim(z_write))//prefix//'-RSD-fold.dat' 
+#else
+    fn=output_path//z_write(1:len_trim(z_write))//prefix//'_new-fold8.dat' 
+#endif
+#endif
     write(*,*) 'Writing ',fn
     open(11,file=fn,recl=500)
     do k=2,hc+1
@@ -1404,7 +1607,7 @@ contains
                    sync_z = sin(z)/z
                 endif
 
-                kernel = sync_x*sync_y*sync_z
+                kernel = sync_x*sync_y*sync_z ! Verify this when folding particles...
 #ifdef NGP
                 w1=1
                 w2=0
@@ -1454,6 +1657,11 @@ contains
           pk(1:2,k)=4.*pi*(kavg)**3*pk(1:2,k)
 #else
           pk(1:2,k)=4.*pi*(kavg-1.)**3*pk(1:2,k)
+#endif
+
+#ifdef FOLD_PARTICLES
+         pk(3, k) = pk(3, k) * mfac
+         pk(1:2, k) = pk(1:2, k) * mfac**3
 #endif
        endif
       enddo
