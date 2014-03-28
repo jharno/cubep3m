@@ -51,12 +51,12 @@ program dist_init
 #endif
 
   !! NEUTRINO sims may use this:
-!  integer, parameter      :: nk=708
-!  character(*), parameter :: fntf = 'nu_transfer_out_z10.dat'
+  integer, parameter      :: nk=708
+  character(*), parameter :: fntf = 'nu_transfer_out_z10.dat'
 
   !! Transfer function file
-  integer, parameter      :: nk=922
-  character(*), parameter :: fntf='camb_jddefault_transfer_z0.dat'
+!  integer, parameter      :: nk=922
+!  character(*), parameter :: fntf='camb_jddefault_transfer_z0.dat'
 
   !! nc is the number of cells per box length
   integer, parameter :: hc=nc/2

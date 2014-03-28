@@ -38,17 +38,17 @@ real(4),      parameter :: box            = 1000.0
 real(4),      parameter :: z_i            = 100.0
 
 ! omega fractions 
-real(4),      parameter :: omega_l        = 0.73
+real(4),      parameter :: omega_l        = 0.724
 real(4),      parameter :: omega_m        = 1.0 - omega_l
-real(4),      parameter :: omega_b        = 0.042 
+real(4),      parameter :: omega_b        = 0.0461 
 real(4),      parameter :: omega_ch       = 0.7
 real(4),      parameter :: bias           = 1
 real(4),      parameter :: power_index    = 2.0 ! 1.0,1.5 and 2.0 for power law transfer function in initial condition generator.
 
 ! neutrino parameters
-real(4),      parameter :: H0             = 68
-integer(4),   parameter :: ratio_nudm_dim = 1
-real(4),      parameter :: mass_neutrino = 1.5
+real(4),      parameter :: H0             = 70
+integer(4),   parameter :: ratio_nudm_dim = 2
+real(4),      parameter :: mass_neutrino = 0.5
 real(4),      parameter :: omega_nu = mass_neutrino/93.15/(H0/100.)/(H0/100.)
 
 ! non-gaussian initial conditions parameters
