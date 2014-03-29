@@ -20,6 +20,9 @@
 !! * Optional flags:
 !!   -DNGP: Uses NGP interpolation for binning of the power spectrum. 
 !!   -DSLAB: Alternatively run with FFTW slab decomposition instead of P3DFFT pencil decomposition.
+!!   -DMOMENTUM: Uses the approach of computing the velocity field by dividing the momentum density
+!!               field by the density field. If this flag is not used then the velocity field is computed
+!!               by taking the average velocity of the nearest particles to each grid centre.
 !!   -DGAUSSIAN_SMOOTH: Smooths the density field with a Gaussian filter to avoid division by empty 
 !!                      cells when converting from momentum density to velocity. 
 !!   -Dwrite_vel: Writes gridded velocity fields to binary files. 
@@ -27,6 +30,9 @@
 !!   -DDEBUG: Output useful debugging information.
 
 program cic_velpower 
+#ifndef MOMENTUM
+  use omp_lib
+#endif
 
   implicit none
 
@@ -34,6 +40,16 @@ program cic_velpower
   include '../../parameters'
 
   character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints'
+
+#ifndef MOMENTUM
+  !! Threading
+  integer(4), parameter :: nt = 8
+
+  !! Number of nearest particles from grid centre to determine average velocity
+  integer, parameter :: N_closest_nu = 30
+  integer, parameter :: N_closest_dm = 4
+  integer, parameter :: N_closest_auto = 1
+#endif
 
 #ifdef GAUSSIAN_SMOOTH
   !! Gaussian smoothing parameters (to go from momentum density field to velocity field)
@@ -120,10 +136,38 @@ program cic_velpower
   real, dimension(nc_node_dim, nc_node_dim, nc_pen, 0:nodes_pen-1) :: recv_cube
 #endif
 
+#ifdef MOMENTUM
   !! Array containing the matter density field
   real, dimension(0:nc_node_dim+1, 0:nc_node_dim+1, 0:nc_node_dim+1) :: massden
   real, dimension(0:nc_node_dim+1, 0:nc_node_dim+1) :: massden_send_buff
   real, dimension(0:nc_node_dim+1, 0:nc_node_dim+1) :: massden_recv_buff
+#else
+  !! Parameters for linked list
+  integer(4), parameter :: nfine_buf = 4
+  integer(4), parameter :: mesh_scale = 2
+  integer(4), parameter :: nc_buf = nfine_buf / mesh_scale
+  integer(4), parameter :: nm_node_dim = nc_node_dim / mesh_scale
+  integer(4), parameter :: hoc_nc_l = 1 - nc_buf
+  integer(4), parameter :: hoc_nc_h = nm_node_dim + nc_buf
+  integer(4), parameter :: hoc_pass_depth = 2*nc_buf
+  real(4), parameter    :: rnf_buf = real(nfine_buf)
+  integer(4), parameter :: num_ngbhs = (2*nc_buf+1)**3
+  integer(4), parameter :: max_npart_search = int(num_ngbhs*real(max_np)/real(nc_node_dim)**2)
+
+  !! Linked list and head-of-chain arrays
+  integer(4), dimension(max_np) :: ll
+  integer(4), dimension(max_np_dm) :: ll_dm
+  integer(4) :: hoc(hoc_nc_l:hoc_nc_h, hoc_nc_l:hoc_nc_h, hoc_nc_l:hoc_nc_h)
+  integer(4) :: hoc_dm(hoc_nc_l:hoc_nc_h, hoc_nc_l:hoc_nc_h, hoc_nc_l:hoc_nc_h)
+  integer(4) :: ipos(nt, max_npart_search)
+  real(4) :: rpos(nt, 2, max_npart_search)
+  integer(4) :: cell_search(num_ngbhs, 3)
+  logical :: done_shell(num_ngbhs)
+
+  !! Array storing what group each particle belongs to (for autocorrelation break each species 
+  !! into two groups and then cross-correlate to remove shot noise)
+  integer(1) :: GID(max_np), GID_dm(max_np_dm)
+#endif
 
   !! Only work with one component of the velocity field at a time 
   real, dimension(0:nc_node_dim+1, 0:nc_node_dim+1, 0:nc_node_dim+1) :: momden
@@ -139,14 +183,24 @@ program cic_velpower
   equivalence(slab_work, recv_buf) !! May sometimes need to be changed (see check_equivalence.py)
 #endif
   equivalence(slab, cube) !! Slab will always be larger than cube
+#ifdef MOMENTUM
   equivalence(massden_send_buff, momden_send_buff) !! These are the same size
   equivalence(massden_recv_buff, momden_recv_buff) !! These are the same size
+#endif
 
   !! Common block
 #ifdef SLAB
-  common xvp, xvp_dm, massden, recv_cube, momden, slab_work, slab, massden_send_buff, massden_recv_buff, pkmomdim, pkmomdim_dm, pkmomdim_dmnu, pkdm
+#ifdef MOMENTUM
+  common xvp, xvp_dm, massden, recv_cube, momden, slab_work, slab, slab2, massden_send_buff, massden_recv_buff, pkmomdim, pkmomdim_dm, pkmomdim_dmnu, pkdm
 #else
-  common xvp, xvp_dm, massden, recv_cube, momden, recv_buf, slab, massden_send_buff, massden_recv_buff, pkmomdim, pkmomdim_dm, pkmomdim_dmnu, pkdm
+  common xvp, xvp_dm, hoc, hoc_dm, ll, ll_dm, ipos, rpos, cell_search, done_shell, recv_cube, momden, slab_work, slab, slab2, momden_send_buff, momden_recv_buff, pkmomdim, pkmomdim_dm, pkmomdim_dmnu, pkdm, GID, GID_dm
+#endif
+#else
+#ifdef MOMENTUM
+  common xvp, xvp_dm, massden, recv_cube, momden, recv_buf, slab, slab2, massden_send_buff, massden_recv_buff, pkmomdim, pkmomdim_dm, pkmomdim_dmnu, pkdm
+#else
+  common xvp, xvp_dm, hoc, hoc_dm, ll, ll_dm, ipos, rpos, cell_search, done_shell, recv_cube, momden, recv_buf, slab, slab2, momden_send_buff, momden_recv_buff, pkmomdim, pkmomdim_dm, pkmomdim_dmnu, pkdm, GID, GID_dm
+#endif
 #endif
 
 ! -------------------------------------------------------------------------------------------------------
@@ -154,6 +208,10 @@ program cic_velpower
 ! -------------------------------------------------------------------------------------------------------
 
   call mpi_initialize
+#ifndef MOMENTUM
+  call omp_set_num_threads(nt)
+  call initialize_random_number
+#endif
 
   if (rank == 0) call writeparams
 
@@ -168,13 +226,72 @@ program cic_velpower
     !! Read and pass neutrino particles
     call read_particles(0)
     call pass_particles(0)
+#ifndef MOMENTUM
+    call link_list(0)
+    call buffer_particles(0)
+    call assign_groups(0)
+#endif
 
     !! Read and pass dark matter particles (stored in xvp_dm)
     call read_particles(1)
     call pass_particles(1)
+#ifndef MOMENTUM
+    call link_list(1)
+    call buffer_particles(1)
+    call assign_groups(1)
+#endif
+
+#ifndef MOMENTUM
+    !
+    ! Compute power spectra for both neutrinos and dark matter by separting each
+    ! species into two groups and computing the cross-spectrum of the groups.
+    ! This is done to remove shot noise which does not correlate between groups.
+    !
 
     do cur_dimension = 1, 3 !! Each x, y, z dimension
 
+        !! Determine cur_dimension component of velocity for group 0
+        call velocity_density(0, 0, N_closest_auto)
+        call buffer_momdensity
+
+        !! Fourier transform velocity field for group 0 and store in slab2
+        call darkmatter
+        slab2(:,:,:) = slab(:,:,:)
+
+        !! Determine cur_dimension component of velocity for group 1
+        call velocity_density(0, 1, N_closest_auto)
+        call buffer_momdensity
+
+        !! Fourier transform velocity field for group 1 and compute cross-correlation with group 0
+        call darkmatter
+        call powerspectrum(slab, slab2, pkmomdim(cur_dimension,:,:))
+
+        !! Determine cur_dimension component of velocity for group 0
+        call velocity_density(1, 0, N_closest_auto)
+        call buffer_momdensity
+
+        !! Fourier transform velocity field for group 0 and store in slab2
+        call darkmatter
+        slab2(:,:,:) = slab(:,:,:)
+
+        !! Determine cur_dimension component of velocity for group 1
+        call velocity_density(1, 1, N_closest_auto)
+        call buffer_momdensity
+
+        !! Fourier transform velocity field for group 1 and compute cross-correlation with group 0
+        call darkmatter
+        call powerspectrum(slab, slab2, pkmomdim_dm(cur_dimension,:,:))
+
+    enddo
+
+    !! Put all particles into group 0 for neutrino-dark matter cross-power
+    call clear_groups
+
+#endif
+
+    do cur_dimension = 1, 3 !! Each x, y, z dimension
+
+#ifdef MOMENTUM
         !! Compute momentum density field for this dimension
         call momentum_density(0)
         call buffer_momdensity
@@ -183,6 +300,11 @@ program cic_velpower
         call mass_density(0)
         call buffer_massdensity
         call momentum2velocity
+#else
+        !! Determine cur_dimension component of velocity for all particles (all in group 0 now)
+        call velocity_density(0, 0, N_closest_nu)
+        call buffer_momdensity
+#endif
 
 #ifdef write_vel
         call writevelocityfield(0)
@@ -190,11 +312,14 @@ program cic_velpower
 
         !! Fourier transform velocity field and compute power spectrum
         call darkmatter
+#ifdef MOMENTUM
         call powerspectrum(slab, slab, pkmomdim(cur_dimension,:,:))
+#endif
 
         !! Store neutrino Fourier field in slab 2 for cross spectra later
         slab2(:,:,:) = slab(:,:,:)      
 
+#ifdef MOMENTUM
         !! Compute dark matter momentum density field for this dimension
         call momentum_density(1)
         call buffer_momdensity
@@ -203,6 +328,11 @@ program cic_velpower
         call mass_density(0)
         call buffer_massdensity
         call momentum2velocity
+#else
+        !! Determine cur_dimension component of velocity for all particles (all in group 0 now)
+        call velocity_density(1, 0, N_closest_nu)
+        call buffer_momdensity
+#endif
 
 #ifdef write_vel
         call writevelocityfield(1)
@@ -210,7 +340,9 @@ program cic_velpower
 
         !! Fourier transform velocity field and compute power spectrum
         call darkmatter
+#ifdef MOMENTUM
         call powerspectrum(slab, slab, pkmomdim_dm(cur_dimension,:,:))
+#endif
 
         !! Compute cross power spectra
         call powerspectrum(slab, slab2, pkmomdim_dmnu(cur_dimension,:,:))        
@@ -377,7 +509,8 @@ subroutine initvar
 
     implicit none
 
-    integer :: k
+    integer :: k, j, i
+    integer :: ind, ibuf
 
     !! Particle positions and velocities
     do k = 1, max_np
@@ -386,10 +519,15 @@ subroutine initvar
 
     !! Momentum and matter density arrays
     do k = 0, nc_node_dim + 1
+#ifdef MOMENTUM
         massden(:, :, k) = 0.
-        momden(:, :, k) = 0.
         massden_send_buff(:, k) = 0.
         massden_recv_buff(:, k) = 0.
+#else
+        momden_send_buff(:, k) = 0.
+        momden_recv_buff(:, k) = 0.
+#endif
+        momden(:, :, k) = 0.
     enddo
 
     !! Fourier transform arrays
@@ -439,6 +577,28 @@ subroutine initvar
         pkmomdim_dmnu(:, :, k) = 0.
         pkdm(:, k) = 0.
     enddo
+
+#ifndef MOMENTUM
+    !! Array to store the order to search the relative index of neighbouring
+    !cells
+    ind = 1
+    do ibuf = 0, nc_buf
+        do k = -ibuf, ibuf
+            do j = -ibuf, ibuf
+                do i = -ibuf, ibuf
+                    if (.not. (abs(i) < ibuf .and. abs(j) < ibuf .and. abs(k) < ibuf)) then
+                        cell_search(ind, 1) = i
+                        cell_search(ind, 2) = j
+                        cell_search(ind, 3) = k
+                        done_shell(ind) = .false.
+                        ind = ind + 1
+                    endif
+                enddo
+            enddo
+        enddo
+        done_shell(ind-1) = .true.
+    enddo
+#endif
 
     return
 
@@ -1668,6 +1828,1110 @@ end subroutine pass_particles
 
 ! -------------------------------------------------------------------------------------------------------
 
+#ifndef MOMENTUM
+subroutine link_list(command)
+    !
+    ! Makes linked list of particles in each coarse mesh cell.
+    !
+
+    implicit none
+
+    integer(4) :: i, j, k, pp
+    integer(4) :: command
+    real(8) :: sec1, sec2
+
+    sec1 = mpi_wtime(ierr)
+
+    !
+    ! Initialize arrays to zero
+    !
+
+    if (command == 0) then
+        do k = 1, max_np
+            ll(k) = 0
+        enddo
+        do k = hoc_nc_l, hoc_nc_h
+            hoc(:, :, k) = 0
+        enddo
+    else
+        do k = 1, max_np_dm
+            ll_dm(k) = 0
+        enddo
+        do k = hoc_nc_l, hoc_nc_h
+            hoc_dm(:, :, k) = 0
+        enddo
+    endif
+
+    !
+    ! Now construct linked list
+    !
+
+    pp = 1
+    if (command == 0) then
+        do
+            if (pp > np_local) exit
+            i = floor(xvp(1, pp)/mesh_scale) + 1
+            j = floor(xvp(2, pp)/mesh_scale) + 1
+            k = floor(xvp(3, pp)/mesh_scale) + 1
+            if (i < hoc_nc_l .or. i > hoc_nc_h .or. &
+                j < hoc_nc_l .or. j > hoc_nc_h .or. &
+                k < hoc_nc_l .or. k > hoc_nc_h) then
+                write(*,*) "WARNING: LinkList Particle Deleted: ", xvp(1:3,pp)
+                xvp(:,pp) = xvp(:,np_local)
+                np_local = np_local - 1
+                cycle
+            else
+                ll(pp) = hoc(i, j, k)
+                hoc(i, j, k) = pp
+            endif
+            pp = pp + 1
+        enddo
+    else
+        do
+            if (pp > np_local_dm) exit
+            i = floor(xvp_dm(1, pp)/mesh_scale) + 1
+            j = floor(xvp_dm(2, pp)/mesh_scale) + 1
+            k = floor(xvp_dm(3, pp)/mesh_scale) + 1
+            if (i < hoc_nc_l .or. i > hoc_nc_h .or. &
+                j < hoc_nc_l .or. j > hoc_nc_h .or. &
+                k < hoc_nc_l .or. k > hoc_nc_h) then
+                write(*,*) "WARNING: LinkList Particle Deleted: ", xvp_dm(1:3,pp)
+                xvp_dm(:,pp) = xvp_dm(:,np_local_dm)
+                np_local_dm = np_local_dm - 1
+                cycle
+            else
+                ll_dm(pp) = hoc_dm(i, j, k)
+                hoc_dm(i, j, k) = pp
+            endif
+            pp = pp + 1
+        enddo
+    endif
+
+    sec2 = mpi_wtime(ierr)
+    if (rank == 0) write(*,*) "Finished link_list ... elapsed time = ", sec2 - sec1
+
+end subroutine link_list
+
+! -------------------------------------------------------------------------------------------------------
+
+subroutine buffer_particles(command)
+    !
+    ! Exchange coarse mesh buffers for finding halos near node edges. Add these
+    ! particles to the linked list.
+    !
+
+    implicit none
+
+    integer :: pp, i, j, k
+    integer :: np_buf, nppx, npmx, nppy, npmy, nppz, npmz
+    integer, dimension(mpi_status_size) :: status, sstatus, rstatus
+    integer :: tag, srequest, rrequest, sierr, rierr
+    real(4), parameter :: eps = 1.0e-03
+    integer(4) :: np_local_start, np_buffer_sent_local
+    integer(8) :: np_buffer_sent
+    real(8) :: sec1, sec2
+    integer(4) :: command
+
+    sec1 = mpi_wtime(ierr)
+
+    if (command == 0) then
+        np_local_start = np_local
+    else
+        np_local_start = np_local_dm
+    endif
+
+    !
+    ! Pass +x
+    ! 
+
+    tag = 11
+    np_buf = 0
+
+    do k = hoc_nc_l, hoc_nc_h
+        do j = hoc_nc_l, hoc_nc_h
+            do i = hoc_nc_h-hoc_pass_depth, hoc_nc_h
+                if (command == 0) then
+                    pp = hoc(i, j, k)
+                    do
+                        if (pp == 0) exit
+                        if (xvp(1, pp) >= nc_node_dim-rnf_buf) then
+                            np_buf = np_buf + 1
+                            send_buf((np_buf-1)*6+1:np_buf*6) = xvp(:, pp)
+                        endif
+                        pp = ll(pp)
+                    enddo
+                else
+                    pp = hoc_dm(i, j, k)
+                    do
+                        if (pp == 0) exit
+                        if (xvp_dm(1, pp) >= nc_node_dim-rnf_buf) then
+                            np_buf = np_buf + 1
+                            send_buf((np_buf-1)*6+1:np_buf*6) = xvp_dm(:, pp)
+                        endif
+                        pp = ll_dm(pp)
+                    enddo
+                endif
+            enddo
+        enddo
+    enddo
+
+    if (6*np_buf > np_buffer) then
+        write(*,*) "ERROR: Not enough space to send buffer particles: ", rank, np_buf, np_buffer
+        call mpi_abort(mpi_comm_world, ierr, ierr)
+    endif
+
+    nppx = np_buf
+
+    call mpi_sendrecv_replace(nppx, 1, mpi_integer, cart_neighbor(6), tag, &
+                              cart_neighbor(5), tag, mpi_comm_world, status, ierr)
+
+    if (command == 0) then
+        if (np_local+nppx > max_np) then
+            write(*,*) "ERROR: Not enough space to receive buffer particles (nppx): ", rank, np_local, nppx, max_np
+            call mpi_abort(mpi_comm_world, ierr, ierr)
+        endif
+    else
+        if (np_local_dm+nppx > max_np_dm) then
+            write(*,*) "ERROR: Not enough space to receive buffer particles (nppx): ", rank, np_local_dm, nppx, max_np_dm
+            call mpi_abort(mpi_comm_world, ierr, ierr)
+        endif
+    endif
+
+    call mpi_isend(send_buf, np_buf*6, mpi_real, cart_neighbor(6), &
+                   tag, mpi_comm_world, srequest, sierr)
+    call mpi_irecv(recv_buf, nppx*6, mpi_real, cart_neighbor(5), &
+                   tag, mpi_comm_world, rrequest, rierr)
+
+    call mpi_wait(srequest, sstatus, sierr)
+    call mpi_wait(rrequest, rstatus, rierr)
+
+    if (command == 0) then
+        do i = 1, nppx
+            xvp(:, np_local+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
+            xvp(1, np_local+i) = max(xvp(1,np_local+i)-nc_node_dim, -rnf_buf)
+        enddo
+    else
+        do i = 1, nppx
+            xvp_dm(:, np_local_dm+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
+            xvp_dm(1, np_local_dm+i) = max(xvp_dm(1,np_local_dm+i)-nc_node_dim, -rnf_buf)
+        enddo
+    endif
+
+    if (command == 0) then
+        np_local = np_local + nppx
+    else
+        np_local_dm = np_local_dm + nppx
+    endif
+
+    !
+    ! Pass -x
+    !
+
+    tag = 12
+    np_buf = 0
+
+    do k = hoc_nc_l, hoc_nc_h
+        do j = hoc_nc_l, hoc_nc_h
+            do i = hoc_nc_l, hoc_nc_l+hoc_pass_depth
+                if (command == 0) then
+                    pp = hoc(i, j, k)
+                    do
+                        if (pp == 0) exit
+                        if (xvp(1, pp) < rnf_buf) then
+                            np_buf = np_buf + 1
+                            send_buf((np_buf-1)*6+1:np_buf*6) = xvp(:, pp)
+                        endif
+                        pp = ll(pp)
+                    enddo
+                else
+                    pp = hoc_dm(i, j, k)
+                    do
+                        if (pp == 0) exit
+                        if (xvp_dm(1, pp) < rnf_buf) then
+                            np_buf = np_buf + 1
+                            send_buf((np_buf-1)*6+1:np_buf*6) = xvp_dm(:, pp)
+                        endif
+                        pp = ll_dm(pp)
+                    enddo
+                endif
+            enddo
+        enddo
+    enddo
+
+    if (6*np_buf > np_buffer) then
+        write(*,*) "ERROR: Not enough space to send buffer particles: ", rank, np_buf, np_buffer
+        call mpi_abort(mpi_comm_world, ierr, ierr)
+    endif
+
+    npmx = np_buf
+
+    call mpi_sendrecv_replace(npmx, 1, mpi_integer, cart_neighbor(5), tag, &
+                              cart_neighbor(6), tag, mpi_comm_world, status, ierr)
+
+    if (command == 0) then
+        if (np_local+npmx > max_np) then
+            write(*,*) "ERROR: Not enough space to receive buffer particles (npmx): ", rank, np_local, npmx, max_np
+            call mpi_abort(mpi_comm_world, ierr, ierr)
+        endif
+    else
+        if (np_local_dm+npmx > max_np_dm) then
+            write(*,*) "ERROR: Not enough space to receive buffer particles (npmx): ", rank, np_local_dm, npmx, max_np_dm
+            call mpi_abort(mpi_comm_world, ierr, ierr)
+        endif
+    endif
+
+    call mpi_isend(send_buf, np_buf*6, mpi_real, cart_neighbor(5), &
+                   tag, mpi_comm_world, srequest, sierr)
+    call mpi_irecv(recv_buf, npmx*6, mpi_real, cart_neighbor(6), &
+                   tag, mpi_comm_world, rrequest, rierr)
+
+    call mpi_wait(srequest, sstatus, sierr)
+    call mpi_wait(rrequest, rstatus, rierr)
+
+    if (command == 0) then
+        do i = 1, npmx
+            xvp(:, np_local+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
+            if (abs(xvp(1, np_local+i)) .lt. eps) then
+                if(xvp(1, np_local+i) < 0.) then
+                    xvp(1, np_local+i) = -eps
+                else
+                    xvp(1, np_local+i) = eps
+                endif
+            endif
+            xvp(1, np_local+i) = min(xvp(1, np_local+i)+real(nc_node_dim,4), &
+                                     nc_node_dim+rnf_buf-eps)
+        enddo
+    else
+        do i = 1, npmx
+            xvp_dm(:, np_local_dm+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
+            if (abs(xvp_dm(1, np_local_dm+i)) .lt. eps) then
+                if(xvp_dm(1, np_local_dm+i) < 0.) then
+                    xvp_dm(1, np_local_dm+i) = -eps
+                else
+                    xvp_dm(1, np_local_dm+i) = eps
+                endif
+            endif
+            xvp_dm(1, np_local_dm+i) = min(xvp_dm(1, np_local_dm+i)+real(nc_node_dim,4), &
+                                     nc_node_dim+rnf_buf-eps)
+        enddo
+    endif
+
+    if (command == 0) then
+        np_local = np_local + npmx
+    else
+        np_local_dm = np_local_dm + npmx
+    endif
+
+    !
+    ! Add additional particles to the linked list
+    !
+
+    if (command == 0) then
+        pp = np_local-npmx-nppx + 1
+        do
+            if (pp > np_local) exit
+            i = floor(xvp(1, pp)/mesh_scale) + 1
+            j = floor(xvp(2, pp)/mesh_scale) + 1
+            k = floor(xvp(3, pp)/mesh_scale) + 1
+#ifdef DIAG
+            if (i < hoc_nc_l .or. i > hoc_nc_h .or. &
+                j < hoc_nc_l .or. j > hoc_nc_h .or. &
+                k < hoc_nc_l .or. k > hoc_nc_h) then
+                write (*, *) 'BUFFER PARTICLE DELETED', xvp(1:3, pp)
+                xvp(:,pp) = xvp(:,np_local)
+                np_local = np_local - 1
+                cycle
+            endif
+#endif
+            ll(pp) = hoc(i, j, k)
+            hoc(i, j, k) = pp
+            pp = pp + 1
+        enddo
+    else
+        pp = np_local_dm-npmx-nppx + 1
+        do
+            if (pp > np_local_dm) exit
+            i = floor(xvp_dm(1, pp)/mesh_scale) + 1
+            j = floor(xvp_dm(2, pp)/mesh_scale) + 1
+            k = floor(xvp_dm(3, pp)/mesh_scale) + 1
+#ifdef DIAG
+            if (i < hoc_nc_l .or. i > hoc_nc_h .or. &
+                j < hoc_nc_l .or. j > hoc_nc_h .or. &
+                k < hoc_nc_l .or. k > hoc_nc_h) then
+                write (*, *) 'BUFFER PARTICLE DELETED', xvp_dm(1:3, pp)
+                xvp_dm(:,pp) = xvp_dm(:,np_local_dm)
+                np_local_dm = np_local_dm - 1
+                cycle
+            endif
+#endif
+            ll_dm(pp) = hoc_dm(i, j, k)
+            hoc_dm(i, j, k) = pp
+            pp = pp + 1
+        enddo
+    endif
+
+    !
+    ! Pass +y
+    ! 
+
+    tag = 13
+    np_buf = 0
+
+    do k = hoc_nc_l, hoc_nc_h
+        do j = hoc_nc_h-hoc_pass_depth, hoc_nc_h
+            do i = hoc_nc_l, hoc_nc_h
+                if (command == 0) then
+                    pp = hoc(i, j, k)
+                    do
+                        if (pp == 0) exit
+                        if (xvp(2, pp) >= nc_node_dim-rnf_buf) then
+                            np_buf = np_buf + 1
+                            send_buf((np_buf-1)*6+1:np_buf*6) = xvp(:, pp)
+                        endif
+                        pp = ll(pp)
+                    enddo
+                else
+                    pp = hoc_dm(i, j, k)
+                    do
+                        if (pp == 0) exit
+                        if (xvp_dm(2, pp) >= nc_node_dim-rnf_buf) then
+                            np_buf = np_buf + 1
+                            send_buf((np_buf-1)*6+1:np_buf*6) = xvp_dm(:, pp)
+                        endif
+                        pp = ll_dm(pp)
+                    enddo
+                endif
+            enddo
+        enddo
+    enddo
+
+    if (6*np_buf > np_buffer) then
+        write(*,*) "ERROR: Not enough space to send buffer particles: ", rank, np_buf, np_buffer
+        call mpi_abort(mpi_comm_world, ierr, ierr)
+    endif
+
+    nppy = np_buf
+
+    call mpi_sendrecv_replace(nppy, 1, mpi_integer, cart_neighbor(4), tag, &
+                              cart_neighbor(3), tag, mpi_comm_world, status, ierr)
+
+    if (command == 0) then
+        if (np_local+nppy > max_np) then
+            write(*,*) "ERROR: Not enough space to receive buffer particles (nppy): ", rank, np_local, nppy, max_np
+            call mpi_abort(mpi_comm_world, ierr, ierr)
+        endif
+    else
+        if (np_local_dm+nppy > max_np_dm) then
+            write(*,*) "ERROR: Not enough space to receive buffer particles (nppy): ", rank, np_local_dm, nppy, max_np_dm
+            call mpi_abort(mpi_comm_world, ierr, ierr)
+        endif
+    endif
+
+    call mpi_isend(send_buf, np_buf*6, mpi_real, cart_neighbor(4), &
+                   tag, mpi_comm_world, srequest, sierr)
+    call mpi_irecv(recv_buf, nppy*6, mpi_real, cart_neighbor(3), &
+                   tag, mpi_comm_world, rrequest, rierr)
+
+    call mpi_wait(srequest, sstatus, sierr)
+    call mpi_wait(rrequest, rstatus, rierr)
+
+    if (command == 0) then
+        do i = 1, nppy
+            xvp(:, np_local+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
+            xvp(2, np_local+i) = max(xvp(2,np_local+i)-nc_node_dim, -rnf_buf)
+        enddo
+    else
+        do i = 1, nppy
+            xvp_dm(:, np_local_dm+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
+            xvp_dm(2, np_local_dm+i) = max(xvp_dm(2,np_local_dm+i)-nc_node_dim, -rnf_buf)
+        enddo
+    endif
+
+    if (command == 0) then 
+        np_local = np_local + nppy
+    else
+        np_local_dm = np_local_dm + nppy
+    endif
+
+    !
+    ! Pass -y
+    !
+
+    tag = 14
+    np_buf = 0
+
+    do k = hoc_nc_l, hoc_nc_h
+        do j = hoc_nc_l, hoc_nc_l+hoc_pass_depth
+            do i = hoc_nc_l, hoc_nc_h
+                if (command == 0) then 
+                    pp = hoc(i, j, k)
+                    do
+                        if (pp == 0) exit
+                        if (xvp(2, pp) < rnf_buf) then
+                            np_buf = np_buf + 1
+                            send_buf((np_buf-1)*6+1:np_buf*6) = xvp(:, pp)
+                        endif
+                        pp = ll(pp)
+                    enddo
+                else
+                    pp = hoc_dm(i, j, k)
+                    do
+                        if (pp == 0) exit
+                        if (xvp_dm(2, pp) < rnf_buf) then
+                            np_buf = np_buf + 1
+                            send_buf((np_buf-1)*6+1:np_buf*6) = xvp_dm(:, pp)
+                        endif
+                        pp = ll_dm(pp)
+                    enddo
+                endif
+            enddo
+        enddo
+    enddo
+
+    if (6*np_buf > np_buffer) then
+        write(*,*) "ERROR: Not enough space to send buffer particles: ", rank, np_buf, np_buffer
+        call mpi_abort(mpi_comm_world, ierr, ierr)
+    endif
+
+    npmy = np_buf
+
+    call mpi_sendrecv_replace(npmy, 1, mpi_integer, cart_neighbor(3), tag, &
+                              cart_neighbor(4), tag, mpi_comm_world, status, ierr)
+
+    if (command == 0) then 
+        if (np_local+npmy > max_np) then
+            write(*,*) "ERROR: Not enough space to receive buffer particles (npmy): ", rank, np_local, npmy, max_np
+            call mpi_abort(mpi_comm_world, ierr, ierr)
+        endif
+    else
+        if (np_local_dm+npmy > max_np_dm) then
+            write(*,*) "ERROR: Not enough space to receive buffer particles (npmy): ", rank, np_local_dm, npmy, max_np_dm
+            call mpi_abort(mpi_comm_world, ierr, ierr)
+        endif
+    endif
+
+    call mpi_isend(send_buf, np_buf*6, mpi_real, cart_neighbor(3), &
+                   tag, mpi_comm_world, srequest, sierr)
+    call mpi_irecv(recv_buf, npmy*6, mpi_real, cart_neighbor(4), &
+                   tag, mpi_comm_world, rrequest, rierr)
+
+    call mpi_wait(srequest, sstatus, sierr)
+    call mpi_wait(rrequest, rstatus, rierr)
+
+    if (command == 0) then
+        do i = 1, npmy
+            xvp(:, np_local+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
+            if (abs(xvp(2, np_local+i)) .lt. eps) then
+                if(xvp(2, np_local+i) < 0.) then
+                    xvp(2, np_local+i) = -eps
+                else
+                    xvp(2, np_local+i) = eps
+                endif
+            endif
+            xvp(2, np_local+i) = min(xvp(2,np_local+i)+real(nc_node_dim,4), &
+                                     nc_node_dim+rnf_buf-eps)
+        enddo
+    else
+        do i = 1, npmy
+            xvp_dm(:, np_local_dm+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
+            if (abs(xvp_dm(2, np_local_dm+i)) .lt. eps) then
+                if(xvp_dm(2, np_local_dm+i) < 0.) then
+                    xvp_dm(2, np_local_dm+i) = -eps
+                else
+                    xvp_dm(2, np_local_dm+i) = eps
+                endif
+            endif
+            xvp_dm(2, np_local_dm+i) = min(xvp_dm(2,np_local_dm+i)+real(nc_node_dim,4), &
+                                     nc_node_dim+rnf_buf-eps)
+        enddo
+    endif
+
+    if (command == 0) then
+        np_local = np_local + npmy
+    else
+        np_local_dm = np_local_dm + npmy
+    endif
+
+    !
+    ! Add additional particles to the linked list 
+    !
+
+    if (command == 0) then
+        pp = np_local-npmy-nppy + 1
+        do
+            if (pp > np_local) exit
+            i = floor(xvp(1, pp)/mesh_scale) + 1
+            j = floor(xvp(2, pp)/mesh_scale) + 1
+            k = floor(xvp(3, pp)/mesh_scale) + 1
+#ifdef DIAG
+            if (i < hoc_nc_l .or. i > hoc_nc_h .or. &
+                j < hoc_nc_l .or. j > hoc_nc_h .or. &
+                k < hoc_nc_l .or. k > hoc_nc_h) then
+                write (*, *) 'BUFFER PARTICLE DELETED', xvp(1:3, pp)
+                xvp(:,pp) = xvp(:,np_local)
+                np_local = np_local - 1
+                cycle
+            endif
+#endif
+            ll(pp) = hoc(i, j, k)
+            hoc(i, j, k) = pp
+            pp = pp + 1
+        enddo
+    else
+        pp = np_local_dm-npmy-nppy + 1
+        do
+            if (pp > np_local_dm) exit
+            i = floor(xvp_dm(1, pp)/mesh_scale) + 1
+            j = floor(xvp_dm(2, pp)/mesh_scale) + 1
+            k = floor(xvp_dm(3, pp)/mesh_scale) + 1
+#ifdef DIAG
+            if (i < hoc_nc_l .or. i > hoc_nc_h .or. &
+                j < hoc_nc_l .or. j > hoc_nc_h .or. &
+                k < hoc_nc_l .or. k > hoc_nc_h) then
+                write (*, *) 'BUFFER PARTICLE DELETED', xvp_dm(1:3, pp)
+                xvp_dm(:,pp) = xvp_dm(:,np_local_dm)
+                np_local_dm = np_local_dm - 1
+                cycle
+            endif
+#endif
+            ll_dm(pp) = hoc_dm(i, j, k)
+            hoc_dm(i, j, k) = pp
+            pp = pp + 1
+        enddo
+    endif
+
+    !
+    ! Pass +z
+    ! 
+
+    tag = 15
+    np_buf = 0
+
+    do k = hoc_nc_h-hoc_pass_depth, hoc_nc_h
+        do j = hoc_nc_l, hoc_nc_h
+            do i = hoc_nc_l, hoc_nc_h
+                if (command == 0) then
+                    pp = hoc(i, j, k)
+                    do
+                        if (pp == 0) exit
+                        if (xvp(3, pp) >= nc_node_dim-rnf_buf) then
+                            np_buf = np_buf + 1
+                            send_buf((np_buf-1)*6+1:np_buf*6) = xvp(:, pp)
+                        endif
+                        pp = ll(pp)
+                    enddo
+                else
+                    pp = hoc_dm(i, j, k)
+                    do
+                        if (pp == 0) exit
+                        if (xvp_dm(3, pp) >= nc_node_dim-rnf_buf) then
+                            np_buf = np_buf + 1
+                            send_buf((np_buf-1)*6+1:np_buf*6) = xvp_dm(:, pp)
+                        endif
+                        pp = ll_dm(pp)
+                    enddo
+                endif
+            enddo
+        enddo
+    enddo
+
+    if (6*np_buf > np_buffer) then
+        write(*,*) "ERROR: Not enough space to send buffer particles: ", rank, np_buf, np_buffer
+        call mpi_abort(mpi_comm_world, ierr, ierr)
+    endif
+
+    nppz = np_buf
+
+    call mpi_sendrecv_replace(nppz, 1, mpi_integer, cart_neighbor(2), tag, &
+                              cart_neighbor(1), tag, mpi_comm_world, status, ierr)
+
+    if (command == 0) then
+        if (np_local+nppz > max_np) then
+            write(*,*) "ERROR: Not enough space to receive buffer particles (nppz):", rank, np_local, nppz, max_np
+            call mpi_abort(mpi_comm_world, ierr, ierr)
+        endif
+    else
+        if (np_local_dm+nppz > max_np_dm) then
+            write(*,*) "ERROR: Not enough space to receive buffer particles (nppz):", rank, np_local_dm, nppz, max_np_dm
+            call mpi_abort(mpi_comm_world, ierr, ierr)
+        endif
+    endif
+
+    call mpi_isend(send_buf, np_buf*6, mpi_real, cart_neighbor(2), &
+                   tag, mpi_comm_world, srequest, sierr)
+    call mpi_irecv(recv_buf, nppz*6, mpi_real, cart_neighbor(1), &
+                   tag, mpi_comm_world, rrequest, rierr)
+
+    call mpi_wait(srequest, sstatus, sierr)
+    call mpi_wait(rrequest, rstatus, rierr)
+
+    if (command == 0) then
+        do i = 1, nppz
+            xvp(:, np_local+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
+            xvp(3, np_local+i) = max(xvp(3,np_local+i)-nc_node_dim, -rnf_buf)
+        enddo
+    else
+        do i = 1, nppz
+            xvp_dm(:, np_local_dm+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
+            xvp_dm(3, np_local_dm+i) = max(xvp_dm(3,np_local_dm+i)-nc_node_dim, -rnf_buf)
+        enddo
+    endif
+
+    if (command == 0) then
+        np_local = np_local + nppz
+    else
+        np_local_dm = np_local_dm + nppz
+    endif
+
+    !
+    ! Pass -z
+    !
+
+    tag = 16
+    np_buf = 0
+
+    do k = hoc_nc_l, hoc_nc_l+hoc_pass_depth
+        do j = hoc_nc_l, hoc_nc_h
+            do i = hoc_nc_l, hoc_nc_h
+                if (command == 0) then
+                    pp = hoc(i, j, k)
+                    do
+                        if (pp == 0) exit
+                        if (xvp(3, pp) < rnf_buf) then
+                            np_buf = np_buf + 1
+                            send_buf((np_buf-1)*6+1:np_buf*6) = xvp(:, pp)
+                        endif
+                        pp = ll(pp)
+                    enddo
+                else
+                    pp = hoc_dm(i, j, k)
+                    do
+                        if (pp == 0) exit
+                        if (xvp_dm(3, pp) < rnf_buf) then
+                            np_buf = np_buf + 1
+                            send_buf((np_buf-1)*6+1:np_buf*6) = xvp_dm(:, pp)
+                        endif
+                        pp = ll_dm(pp)
+                    enddo
+                endif
+            enddo
+        enddo
+    enddo
+
+    if (6*np_buf > np_buffer) then
+        write(*,*) "ERROR: Not enough space to send buffer particles: ", rank, np_buf, np_buffer
+        call mpi_abort(mpi_comm_world, ierr, ierr)
+    endif
+
+    npmz = np_buf
+
+    call mpi_sendrecv_replace(npmz, 1, mpi_integer, cart_neighbor(1), tag, &
+                              cart_neighbor(2), tag, mpi_comm_world, status, ierr)
+
+    if (command == 0) then
+        if (np_local+npmz > max_np) then
+            write(*,*) "ERROR: Not enough space to receive buffer particles (npmz): ", rank, np_local, npmz, max_np
+            call mpi_abort(mpi_comm_world, ierr, ierr)
+        endif
+    else
+        if (np_local_dm+npmz > max_np_dm) then
+            write(*,*) "ERROR: Not enough space to receive buffer particles (npmz): ", rank, np_local_dm, npmz, max_np_dm
+            call mpi_abort(mpi_comm_world, ierr, ierr)
+        endif
+    endif
+
+    call mpi_isend(send_buf, np_buf*6, mpi_real, cart_neighbor(1), &
+                   tag, mpi_comm_world, srequest, sierr)
+    call mpi_irecv(recv_buf, npmz*6, mpi_real, cart_neighbor(2), &
+                   tag, mpi_comm_world, rrequest, rierr)
+
+    call mpi_wait(srequest, sstatus, sierr)
+    call mpi_wait(rrequest, rstatus, rierr)
+
+    if (command == 0) then
+        do i = 1, npmz
+            xvp(:, np_local+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
+            if (abs(xvp(3, np_local+i)) .lt. eps) then
+                if(xvp(3, np_local+i) < 0.) then
+                    xvp(3, np_local+i) = -eps
+                else
+                    xvp(3, np_local+i) = eps
+                endif
+            endif
+            xvp(3,np_local+i) = min(xvp(3,np_local+i)+real(nc_node_dim,4), &
+                                     nc_node_dim+rnf_buf-eps)
+        enddo
+    else
+        do i = 1, npmz
+            xvp_dm(:, np_local_dm+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
+            if (abs(xvp_dm(3, np_local_dm+i)) .lt. eps) then
+                if(xvp_dm(3, np_local_dm+i) < 0.) then
+                    xvp_dm(3, np_local_dm+i) = -eps
+                else
+                    xvp_dm(3, np_local_dm+i) = eps
+                endif
+            endif
+            xvp_dm(3,np_local_dm+i) = min(xvp_dm(3,np_local_dm+i)+real(nc_node_dim,4), &
+                                     nc_node_dim+rnf_buf-eps)
+        enddo
+    endif
+
+    if (command == 0) then
+        np_local = np_local + npmz
+    else
+        np_local_dm = np_local_dm + npmz
+    endif
+
+    !
+    ! Add additional particles to the linked list 
+    !
+
+    if (command == 0) then
+        pp = np_local-npmz-nppz + 1
+        do
+            if (pp > np_local) exit
+            i = floor(xvp(1, pp)/mesh_scale) + 1
+            j = floor(xvp(2, pp)/mesh_scale) + 1
+            k = floor(xvp(3, pp)/mesh_scale) + 1
+#ifdef DIAG
+            if (i < hoc_nc_l .or. i > hoc_nc_h .or. &
+                j < hoc_nc_l .or. j > hoc_nc_h .or. &
+                k < hoc_nc_l .or. k > hoc_nc_h) then
+                write (*, *) 'BUFFER PARTICLE DELETED', xvp(1:3, pp)
+                xvp(:,pp) = xvp(:,np_local)
+                np_local = np_local - 1
+                cycle
+            endif
+#endif
+            ll(pp) = hoc(i, j, k)
+            hoc(i, j, k) = pp
+            pp = pp + 1
+        enddo
+    else
+        pp = np_local_dm-npmz-nppz + 1
+        do
+            if (pp > np_local_dm) exit
+            i = floor(xvp_dm(1, pp)/mesh_scale) + 1
+            j = floor(xvp_dm(2, pp)/mesh_scale) + 1
+            k = floor(xvp_dm(3, pp)/mesh_scale) + 1
+#ifdef DIAG
+            if (i < hoc_nc_l .or. i > hoc_nc_h .or. &
+                j < hoc_nc_l .or. j > hoc_nc_h .or. &
+                k < hoc_nc_l .or. k > hoc_nc_h) then
+                write (*, *) 'BUFFER PARTICLE DELETED', xvp_dm(1:3, pp)
+                xvp_dm(:,pp) = xvp_dm(:,np_local_dm)
+                np_local_dm = np_local_dm - 1
+                cycle
+            endif
+#endif
+            ll_dm(pp) = hoc_dm(i, j, k)
+            hoc_dm(i, j, k) = pp
+            pp = pp + 1
+        enddo
+    endif
+
+    !
+    ! Collect some statistics
+    !
+
+    if (command == 0) then
+        np_buffer_sent_local = np_local - np_local_start
+    else
+        np_buffer_sent_local = np_local_dm - np_local_start
+    endif
+    call mpi_reduce(int(np_buffer_sent_local, kind=8), np_buffer_sent, 1, mpi_integer8, mpi_sum, 0, mpi_comm_world, ierr)
+
+    if (rank == 0) write(*,*) "Total Buffer Particles: ", np_buffer_sent
+
+    sec2 = mpi_wtime(ierr)
+    if (rank == 0) write(*,*) "Finished buffer_particles ... elapsed time = ", sec2 - sec1
+
+end subroutine buffer_particles
+
+! -------------------------------------------------------------------------------------------------------
+
+subroutine initialize_random_number
+    !
+    ! Initialize random number generator
+    !
+
+    implicit none
+
+    integer :: i, j, k
+    real(4) :: x
+    integer :: seedsize, clock
+    integer, dimension(8) :: values
+    integer(4), allocatable, dimension(:) :: iseed
+    integer(4), allocatable, dimension(:) :: iseed_all
+
+    call random_seed()
+    call random_seed(size=seedsize)
+
+    allocate(iseed(seedsize))
+    allocate(iseed_all(seedsize*nodes))
+
+    call system_clock(count=clock)
+    iseed = clock + 37 * (/ (i - 1, i = 1, 2) /)
+
+    call date_and_time(values=values)
+    if(rank==0) write(*,*) values(7:8), iseed
+
+    call random_seed(put=values(7:8))
+    call random_seed(put=iseed(1:seedsize))
+
+    if (rank == 0) then
+        write(*,*) 'Generating seeds'
+        do j = 1, nodes
+            do k = 1, seedsize
+                call random_number(x)
+                iseed_all((j-1)*seedsize+k) = int(x*huge(0))
+            enddo
+        enddo
+    endif
+    call mpi_scatter(iseed_all, seedsize, mpi_integer, iseed, seedsize, mpi_integer, 0, mpi_comm_world, ierr)
+
+    call random_seed(put=iseed(1:seedsize))
+
+    return
+
+end subroutine initialize_random_number
+
+! -------------------------------------------------------------------------------------------------------
+
+subroutine assign_groups(command)
+    !
+    ! To remove shot noise in autocorrelation we randomly divide all particles
+    ! into one of two groups (controlled by their value of GID). Then we
+    ! cross-correlate the two groups together.
+    !
+
+    implicit none
+
+    integer(4) :: command
+    integer :: k, np_tot, np0, np1
+    integer(8) :: np1_tot, np2_tot, npa_tot
+    real(4) :: r 
+    integer(1) :: g
+
+    if (command == 0) then
+        np_tot = np_local
+    else 
+        np_tot = np_local_dm
+    endif
+
+    np0 = 0
+    np1 = 0
+
+    do k = 1, np_tot
+
+        call random_number(r)
+        g = int(r+0.5)
+
+        if (g == 0) then
+            np0 = np0 + 1
+        else if (g == 1) then
+            np1 = np1 + 1
+        endif
+
+        if (command == 0) then
+            GID(k) = g
+        else 
+            GID_dm(k) = g
+        endif
+
+    enddo
+
+    call mpi_reduce(int(np_tot,kind=8), npa_tot, 1, mpi_integer8, mpi_sum, 0, mpi_comm_world, ierr)
+    call mpi_reduce(int(np0,kind=8), np1_tot, 1, mpi_integer8, mpi_sum, 0, mpi_comm_world, ierr)
+    call mpi_reduce(int(np1,kind=8), np2_tot, 1, mpi_integer8, mpi_sum, 0, mpi_comm_world, ierr)
+
+    if (rank == 0) then
+        write(*,*) "Groups assigned: ", np1_tot, np2_tot, npa_tot
+    endif
+
+    return
+
+end subroutine assign_groups
+
+! -------------------------------------------------------------------------------------------------------
+
+subroutine clear_groups
+    !
+    ! Assign all particles to group 0
+    !
+
+    implicit none
+
+    GID(:) = 0
+    GID_dm(:) = 0
+
+    return
+
+end subroutine clear_groups
+
+! -------------------------------------------------------------------------------------------------------
+
+subroutine velocity_density(command, glook, nfind)
+    !
+    ! Determine velocity field by taking the average velocity of the closest
+    ! particles to each grid centre.
+    ! 
+
+    implicit none
+
+    integer :: ind, i, j, k, pp, thread
+    integer :: ic, jc, kc
+    integer :: npart
+    real, dimension(3) :: dr, rc
+    real :: vx
+    integer(4) :: command, glook, nfind
+    logical :: converged
+    integer(8) :: num_notconverged, num2
+
+    real(8) time1, time2
+    time1 = mpi_wtime(ierr)
+
+    !
+    ! Initialize to zeros
+    !
+
+    do i = 0, nc_node_dim + 1
+        momden(:, :, i) = 0.
+    enddo
+
+    !
+    ! For each cell find the closest nfind particles and average their velocities
+    !
+
+    num_notconverged = 0
+
+    !$omp  parallel num_threads(nt) default(shared) private(i, j, k, thread, rc, npart, ic, jc, kc, ind, pp, dr, vx) reduction(+:num_notconverged)
+    thread = 1
+    thread = omp_get_thread_num() + 1
+    !$omp do
+    do k = 1, nc_node_dim
+        do j = 1, nc_node_dim
+            do i = 1, nc_node_dim
+
+                !! Centre of cell
+                rc(1) = i - 0.5
+                rc(2) = j - 0.5
+                rc(3) = k - 0.5
+
+                !! Number of total particles found
+                npart = 0
+
+                !! Determine whether or not this procedure converged
+                converged = .false.
+
+                if (command == 0) then
+                    do ind = 1, num_ngbhs
+
+                        !! Cell indices to search within
+                        ic = int((i-1)/mesh_scale) + 1 + cell_search(ind, 1)
+                        jc = int((j-1)/mesh_scale) + 1 + cell_search(ind, 2)
+                        kc = int((k-1)/mesh_scale) + 1 + cell_search(ind, 3)
+
+                        !! Loop over particles in this cell
+                        pp = hoc(ic, jc, kc)
+                        do
+                            if (pp == 0) exit
+                            if (GID(pp) == glook) then
+                                npart = npart + 1
+                                if (npart > max_npart_search) then
+                                    write(*,*) "ERROR: npart > max_npart_search. Consider increasing max_npart_search !!", max_npart_search
+                                    call mpi_abort(mpi_comm_world, ierr, ierr)
+                                endif
+                                dr(:) = xvp(:3,pp) - rc(:)
+                                rpos(thread, 1, npart) = xvp(3+cur_dimension,pp)
+                                rpos(thread, 2, npart) = dr(1)**2 + dr(2)**2 + dr(3)**2
+                            endif
+                            pp = ll(pp)
+                        enddo !! pp
+
+                        !! Exit if we have found at least nfind particles and we have completed an entire shell.
+                        if (npart >= nfind .and. done_shell(ind)) then
+                            converged = .true.
+                            exit
+                        endif
+
+                    enddo !! ind
+                else
+                    do ind = 1, num_ngbhs
+
+                        !! Cell indices to search within
+                        ic = int((i-1)/mesh_scale) + 1 + cell_search(ind, 1)
+                        jc = int((j-1)/mesh_scale) + 1 + cell_search(ind, 2)
+                        kc = int((k-1)/mesh_scale) + 1 + cell_search(ind, 3)
+
+                        !! Loop over particles in this cell
+                        pp = hoc_dm(ic, jc, kc)
+                        do
+                            if (pp == 0) exit
+                            if (GID_dm(pp) == glook) then
+                                npart = npart + 1
+                                if (npart > max_npart_search) then
+                                    write(*,*) "ERROR: npart > max_npart_search. Consider increasing max_npart_search !!", max_npart_search
+                                    call mpi_abort(mpi_comm_world, ierr, ierr)
+                                endif
+                                dr(:) = xvp_dm(:3,pp) - rc(:)
+                                rpos(thread, 1, npart) = xvp_dm(3+cur_dimension,pp)
+                                rpos(thread, 2, npart) = dr(1)**2 + dr(2)**2 + dr(3)**2
+                            endif
+                            pp = ll_dm(pp)
+                        enddo !! pp
+
+                        !! Exit if we have found at least nfind particles and we have completed an entire shell.
+                        if (npart >= nfind .and. done_shell(ind)) then
+                            converged = .true.
+                            exit
+                        endif 
+
+                    enddo !! ind
+                endif
+
+                !! Sort particles from closest to furthest from the cell centre 
+                ipos(thread, :npart) =  (/ (ic, ic=1, npart) /)
+                call indexedsort(npart, rpos(thread,2,:npart), ipos(thread,:npart))
+
+                !! Get the average of the closest particles 
+                vx = 0.
+                do ind = 1, nfind 
+                    vx = vx + rpos(thread, 1, ipos(thread, ind))
+                enddo
+                momden(i, j, k) = vx / nfind 
+
+                !! Count number of cells that did not converge 
+                if (converged .eqv. .false.) then
+                    num_notconverged = num_notconverged + 1
+                endif
+
+            enddo ! i
+        enddo ! j 
+    enddo ! k
+    !$omp end do
+    !$omp end parallel
+
+    call mpi_reduce(num_notconverged, num2, 1, mpi_integer8, mpi_sum, 0, mpi_comm_world, ierr)
+
+    time2 = mpi_wtime(ierr)
+    if (rank == 0) then 
+        write(*, *) "Finished velocity_density ... elapsed time = ", time2-time1
+        if (num2 /= 0) then
+            write(*,*) "WARNING: num_notconverged = ", num2, " ... consider increasing nfine_buf !!"
+            write(*,*) "         command, glook, nfind = ", command, glook, nfind
+        endif
+    endif
+
+    return
+
+end subroutine velocity_density
+
+#endif
+
+! -------------------------------------------------------------------------------------------------------
+
+#ifdef MOMENTUM
 subroutine mass_density(command)
     !
     ! Bin particles in position space to generate mass density field 
@@ -2031,6 +3295,7 @@ subroutine Gaussian_filter
 
 end subroutine Gaussian_filter
 #endif
+#endif
 
 ! -------------------------------------------------------------------------------------------------------
 
@@ -2160,6 +3425,7 @@ end subroutine buffer_momdensity
 
 ! -------------------------------------------------------------------------------------------------------
 
+#ifdef MOMENTUM
 subroutine buffer_massdensity
     !
     ! Accumulate buffer from adjacent nodes into physical volume.
@@ -2282,6 +3548,7 @@ subroutine buffer_massdensity
     return
 
 end subroutine buffer_massdensity
+#endif
 
 ! -------------------------------------------------------------------------------------------------------
 
