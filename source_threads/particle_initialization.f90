@@ -432,10 +432,13 @@
 ! Read in ICs
 ! ---------------------------------------------------------------------------------------------
 
+      write(z_s,'(f7.3)') z_i
+      z_s=adjustl(z_s)
+
       write(rank_s,'(i4)') rank
       rank_s=adjustl(rank_s)
 
-      ofile=ic_path//'xv'//rank_s(1:len_trim(rank_s))//'.ic'
+      ofile=ic_path//z_s(1:len_trim(z_s))//'xv'//rank_s(1:len_trim(rank_s))//'.dat'
       print *,'opening particle list:',ofile(1:len_trim(ofile))
 
       open(unit=20, file=ofile, status="old", iostat=fstat, access="stream")
@@ -444,7 +447,7 @@
          write(*,*) 'rank',rank,'file:',ofile
          call mpi_abort(mpi_comm_world,ierr,ierr)
       endif
-      read(20) np_local
+      read(20) np_local,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy
       if (np_local > max_np) then
          write(*,*) 'too many particles to store'
          write(*,*) 'rank',rank,'np_local',np_local,'max_np',max_np
@@ -459,7 +462,7 @@
         ! Open neutrino ICs
         !
 
-        ofile=ic_path//'xv'//rank_s(1:len_trim(rank_s))//'_nu.ic'
+        ofile=ic_path//z_s(1:len_trim(z_s))//'xv'//rank_s(1:len_trim(rank_s))//'_nu.dat'
         print *,'opening particle list:',ofile(1:len_trim(ofile))
 
         open(unit=20, file=ofile, status="old", iostat=fstat, access="stream")
@@ -470,7 +473,7 @@
         endif
       
         !! Read header
-        read(20) np_nu
+        read(20) np_nu,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy 
 
         !! Check if we have enough memory to store particles
         if (np_local+np_nu > max_np) then

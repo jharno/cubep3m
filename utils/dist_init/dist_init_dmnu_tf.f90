@@ -53,6 +53,7 @@ program dist_init
   !! NEUTRINO sims may use this:
   integer, parameter      :: nk=708
   character(*), parameter :: fntf = 'nu_transfer_out_z10.dat'
+  character(*), parameter :: vfntf = 'nu_veltransfer_out_z10.dat'
 
   !! Transfer function file
 !  integer, parameter      :: nk=922
@@ -148,7 +149,13 @@ program dist_init
   call noisemap
   call deltafield
   call potentialfield
+#ifdef NEUTRINOS
+  call dm(0)
+  call veltransfer
+  call dm(1)
+#else
   call dm
+#endif
 
   if (rank == 0) call writepowerspectra
 
@@ -616,6 +623,7 @@ end subroutine di_fftw
 
 #ifdef NEUTRINOS
     write(*,*) 'ratio_nudm_dim ', ratio_nudm_dim 
+    write(*,*) 'Dgrow ', Dgrow(scalefactor)
     write(*,*) 'Vphys2sim ',Vphys2sim
     write(*,*) 'nu_random ', nu_random
     write(*,*) 'nu_relfd ', nu_relfd    
@@ -1403,10 +1411,211 @@ end subroutine di_fftw
   end subroutine potentialfield
 
 !!------------------------------------------------------------------!!
+
+#ifdef NEUTRINOS
+subroutine veltransfer
+    !
+    ! Replacing Fourier density field delta(k) with delta(k) *
+    ! T_velocity(k)/T_density(k) where T_velocity(k) is the neutrino velocity
+    ! transfer function. Store results in phi and pass along to dm subroutine
+    ! with COMMAND == 1.
+    !
+
+    implicit none
+
+    integer :: k, j, i, l, kg, jg, ig, mg, ioerr
+    real(4) :: kz, ky, kx, kr, interpVTF,interpMTF, kphys
+    integer :: dx, dxy, ind
+    real, dimension(7,nk) :: vtf
+    integer, parameter :: nucol = 2 !6 for neutrinos, 2 for dm
+    character*180 :: fn
+    character(len=6) :: rank_s
+
+    real time1,time2
+    call cpu_time(time1)
+
+    !
+    ! Read neutrino density transfer function
+    !
+
+    if (rank==0) then
+        write(*,*) 'Reading ',fntf
+        open(11,file=fntf)
+        do k=1,nk
+            read(11,*) tf(1,k),tf(2,k),tf(3,k),tf(4,k),tf(5,k),tf(6,k),tf(7,k)
+        end do
+        close(11)
+    endif
+
+    call mpi_bcast(tf, 7*nk, mpi_real, 0, mpi_comm_world, ierr)
+
+    !
+    ! Read neutrino velocity transfer function
+    !
+
+    if (rank == 0) then
+        write(*,*) 'Reading ',vfntf
+        open(11,file=vfntf)
+        do k=1,nk
+            read(11,*) vtf(1,k),vtf(2,k),vtf(3,k),vtf(4,k),vtf(5,k),vtf(6,k),vtf(7,k)
+        end do
+        close(11)
+        !! Put vtf into simulation units
+        do j=2,7
+            do k=1, nk
+                vtf(j,k) = vtf(j,k) * Vphys2sim
+            enddo
+        enddo
+    endif
+
+    call mpi_bcast(vtf, 7*nk, mpi_real, 0, mpi_comm_world, ierr)
+
+    !
+    ! Transform slab from real space to Fourier space (slab was last modified in potentialfield 
+    ! where it stored the Zel'dovich potential field delta(k)/k^2 in real space). 
+    !
+
+    call di_fftw(1)
+
+    !
+    ! Multiply slab by T_vel(k)/T_den(k)*k^2 and then divide by k for finite difference. 
+    !
+
+#ifndef SLAB
+    dx  = fsize(1)
+    dxy = dx * fsize(2)
+    ind = 0
+#endif
+
+#ifdef SLAB
+    do k = 1, nc_slab
+        kg=k+nc_slab*rank
+        if (kg .lt. hc+2) then
+            kz=kg-1
+        else
+            kz=kg-1-nc
+        endif
+        !kz=2*sin(pi*kz/ncr)
+        do j = 1, nc
+            if (j .lt. hc+2) then
+                ky=j-1
+            else
+                ky=j-1-nc
+            endif
+            !ky=2*sin(pi*ky/ncr)
+            do i = 1, nc+2, 2
+                kx=(i-1)/2
+                !kx=2*sin(pi*kx/ncr)
+#else
+    do k = 1, nc_pen+mypadd
+        do j = 1, nc_node_dim
+            do i = 1, nc, 2
+                kg = ind / dxy
+                mg = ind - kg * dxy
+                jg = mg / dx
+                ig = mg - jg * dx
+                kg = fstart(3) + kg
+                jg = fstart(2) + jg
+                ig = 2 * (fstart(1) + ig) - 1
+                ind = ind + 1
+                if (kg < hc+2) then
+                    kz=kg-1
+                else
+                    kz=kg-1-nc
+                endif
+                if (jg < hc+2) then
+                    ky=jg-1
+                else
+                    ky=jg-1-nc
+                endif
+                kx = (ig-1)/2
+
+                !kphys = 2*pi*sqrt(kx**2+ky**2+kz**2)/box
+
+                kx = 2*sin(pi*kx/ncr)
+                ky = 2*sin(pi*ky/ncr)
+                kz = 2*sin(pi*kz/ncr)
+
+#endif
+                kr = sqrt(kx**2+ky**2+kz**2)
+                kphys = kr*2*pi/box
+
+                !! Interpolate vt(kphys) and t(kphys)
+                interpVTF = linear_interpolate(kphys, vtf(1,:), vtf(nucol,:), nk)
+                interpMTF = linear_interpolate(kphys, tf(1, :), tf(nucol,:), nk)
+
+                !! Multiply slab by interpVTF/interpMTF*kr**2/kr
+                slab(i:i+1, j, k) = slab(i:i+1, j, k) * interpVTF/interpMTF * kr * 2 * pi / ncr
+                if (kr .EQ. 0) slab(i:i+1,j,k) = 0.0
+            enddo
+        enddo
+    enddo
+
+    !
+    ! Inverse FFT potential field
+    !
+
+    call di_fftw(-1)
+
+    !
+    ! Put cube in phi
+    !
+
+    phi=0.0
+    phi(1:nc_node_dim,1:nc_node_dim,1:nc_node_dim)=cube
+    call mesh_buffer
+
+    call cpu_time(time2)
+    time2=(time2-time1)
+    if (rank == 0) write(*,"(f8.2,a)") time2,'  Called veltransfer'
+    return
+
+end subroutine veltransfer
+
+real(4) function linear_interpolate(xi, x, y, n)
+    !
+    ! Linearlly interpolates (x, y) at (xi, yi).
+    !
+
+    implicit none
+
+    real(4) :: xi
+    integer(4) :: n
+    real(4), dimension(n) :: x, y
+
+    real :: w1, w2, yi
+    integer :: i
+
+    if (xi <= x(1)) then
+        yi = y(1)
+    else if (xi >= x(n)) then
+        yi = y(n)
+    else
+        do i = 1, n-1
+            if (xi >= x(i) .and. xi <= x(i+1)) then
+                w1 = x(i+1) - xi
+                w2 = xi - x(i)
+                yi = (w1*y(i) + w2*y(i+1)) / (x(i+1)-x(i))
+                exit
+            endif
+        enddo
+    endif
+
+    linear_interpolate = yi
+
+end function linear_interpolate
+
+#endif
+
+!!------------------------------------------------------------------!!
     !! Dark matter data
     !! xvp(1:3) = x,y,z in grid units from 0 to nc
     !! xvp(4:6) = vx,vy,vz in km/s
-  subroutine dm
+#ifdef NEUTRINOS
+subroutine dm(command)
+#else
+subroutine dm
+#endif
     implicit none
     integer :: i,j,k,ioerr 
     integer :: i1,j1,k1,lb,ub
@@ -1417,36 +1626,61 @@ end subroutine di_fftw
     character*180 :: fn
 !! for more than 1+1e6 processes this will have to be increased
     character(len=6) :: rank_s
-    character(len=7) :: z_s
-    integer(4), dimension(11) :: header_garbage
 
 #ifdef NEUTRINOS
+    integer :: command
     integer :: l
     real(4) :: rnum1,rnum2,rnum3,rnum4
 #endif
 
     real time1,time2
     call cpu_time(time1)
-
-    write(z_s,'(f7.3)') z_i
-    z_s=adjustl(z_s)
  
+
     write(rank_s,'(i6)') rank
     rank_s=adjustl(rank_s)
-
-
 #ifdef NEUTRINOS
-    fn=scratch_path//z_s(1:len_trim(z_s))//'xv'//rank_s(1:len_trim(rank_s))//'_nu.dat'
-#else
-    fn=scratch_path//z_s(1:len_trim(z_s))//'xv'//rank_s(1:len_trim(rank_s))//'.dat'
-#endif
+    if (command == 0) then !! Open temporary file to store xvp for later use with command == 1
 
+      write(*,*) 'Caching xvp on disk'
+      write(rank_s,'(i6)') rank
+      rank_s=adjustl(rank_s)
+      fn=scratch_path//'deltaTEMP'//rank_s(1:len_trim(rank_s))
+      open(11,file=fn,status='replace',iostat=ioerr,access='stream')
+      if (ioerr /= 0) then
+        print *,'error opening xvp cache file:',fn
+        stop
+      endif
+
+    else !! Open temporary file for reading and output xv file for writing
+
+      !! Temp file
+      rank_s=adjustl(rank_s)
+      fn=scratch_path//'deltaTEMP'//rank_s(1:len_trim(rank_s))
+      open(31,file=fn,status='old',iostat=ioerr,access='stream')
+      if (ioerr /= 0) then
+        print *,'error opening Delta cache file:',fn
+        stop
+      endif
+
+      !! Output file
+      fn=scratch_path//'xv'//rank_s(1:len_trim(rank_s))//'_nu.ic'
+      open(11,file=fn,status='replace',iostat=ioerr,access='stream')
+      if (ioerr /= 0) then
+        print *,'error opening:',fn
+        stop
+      endif
+
+    endif
+#else
+    fn=scratch_path//'xv'//rank_s(1:len_trim(rank_s))//'.ic'
     open(11,file=fn,status='replace',iostat=ioerr,access='stream')
 
     if (ioerr /= 0) then
       print *,'error opening:',fn
       stop
     endif
+#endif
 
 #ifdef NEUTRINOS
     !! Read cdfTable
@@ -1461,14 +1695,14 @@ end subroutine di_fftw
     call mpi_bcast(cdf, 2*nv, mpi_real, 0, mpi_comm_world, ierr)
 #endif
 
-    !! Write the header in checkpoint format with zeros for all variables (except np_local)
     np_local=np_node_dim**3
-    header_garbage(:) = 0
-    write(11) np_local, header_garbage
+!!    write(11) np_local
 
     !! Displace particles
     !! Finite-difference potential to get displacement field
     vf=vfactor(scalefactor)
+
+    if (rank == 0) write(*,*) "-------> VF = ", vf
     do k=1,np_node_dim
        k1=(nc/np)*(k-1)+1
        do j=1,np_node_dim
@@ -1485,75 +1719,81 @@ end subroutine di_fftw
              xvp(3)=dis(3)+(k1-0.5)
 
 #ifdef NEUTRINOS
-             if (nu_random) then !! Uses Gaussian velocity distribution
+             if (command == 1) then !! Finding particle velocities
 
-                !uniform random #
-                call random_number(rnum1)
-                call random_number(rnum2)
+                 if (nu_random) then !! Uses Gaussian velocity distribution
 
-                !convert to gaussian 
-                rnum3=2*pi*rnum1
-                rnum4=sqrt(-2*log(rnum2))
+                    !uniform random #
+                    call random_number(rnum1)
+                    call random_number(rnum2)
 
-                rnum1=rnum4*cos(rnum3)
-                rnum2=rnum4*sin(rnum3)
+                    !convert to gaussian 
+                    rnum3=2*pi*rnum1
+                    rnum4=sqrt(-2*log(rnum2))
 
-                !Convert to real gaussian using dispersion
-                !scale factor cancels out in velocity dispersion and conversion factor
-                !sigma_nu = 181km/s / (mnu * a)
-                rnum1 = rnum1*Vphys2sim*(180.8892437/mass_neutrino/scalefactor/3.0**0.5) !Divide by sqrt3  
-                rnum2 = rnum2*Vphys2sim*(180.8892437/mass_neutrino/scalefactor/3.0**0.5) !for each individual component
+                    rnum1=rnum4*cos(rnum3)
+                    rnum2=rnum4*sin(rnum3)
 
-                xvp(4)=dis(1)*vf + rnum1
-                xvp(5)=dis(2)*vf + rnum2
+                    !Convert to real gaussian using dispersion
+                    !scale factor cancels out in velocity dispersion and conversion factor
+                    !sigma_nu = 181km/s / (mnu * a)
+                    rnum1 = rnum1*Vphys2sim*(180.8892437/mass_neutrino/scalefactor/3.0**0.5) !Divide by sqrt3  
+                    rnum2 = rnum2*Vphys2sim*(180.8892437/mass_neutrino/scalefactor/3.0**0.5) !for each individual component
 
-                call random_number(rnum3)
-                call random_number(rnum4)
+                    xvp(4)=dis(1)*vf + rnum1
+                    xvp(5)=dis(2)*vf + rnum2
 
-                rnum3=2*pi*rnum3
-                rnum4=sqrt(-2*log(rnum4))
+                    call random_number(rnum3)
+                    call random_number(rnum4)
 
-                rnum3=rnum4*cos(rnum3)
-                rnum3 = rnum3*Vphys2sim*(180.8892437/mass_neutrino/scalefactor/3.0**0.5)
+                    rnum3=2*pi*rnum3
+                    rnum4=sqrt(-2*log(rnum4))
 
-                xvp(6)=dis(3)*vf + rnum3
+                    rnum3=rnum4*cos(rnum3)
+                    rnum3 = rnum3*Vphys2sim*(180.8892437/mass_neutrino/scalefactor/3.0**0.5)
 
-              else if (nu_relfd) then !! Use Fermi-Dirac velocity distribution
+                    xvp(6)=dis(3)*vf + rnum3
 
-                call random_number(rnum1) !|vel|
-                call random_number(rnum2) !costheta
-                call random_number(rnum3) !phi
+                  else if (nu_relfd) then !! Use Fermi-Dirac velocity distribution
 
-                !Convert to fermi-dirac
-                do l=1,nv
-                    if (cdf(2,l).GT.rnum1) then
-                        rnum4 = cdf(2,l)-rnum1
-                        if ( (l.NE.1) .AND. (rnum1-cdf(2,l-1) .LT. rnum4) ) then
-                            rnum1 = cdf(1,l-1)
-                        else
-                            rnum1 = cdf(1,l)
+                    call random_number(rnum1) !|vel|
+                    call random_number(rnum2) !costheta
+                    call random_number(rnum3) !phi
+
+                    !Convert to fermi-dirac
+                    do l=1,nv
+                        if (cdf(2,l).GT.rnum1) then
+                            rnum4 = cdf(2,l)-rnum1
+                            if ( (l.NE.1) .AND. (rnum1-cdf(2,l-1) .LT. rnum4) ) then
+                                rnum1 = cdf(1,l-1)
+                            else
+                                rnum1 = cdf(1,l)
+                            endif
+                            exit
                         endif
-                        exit
-                    endif
-                enddo
+                    enddo
 
-                !convert to fermi-dirac with units rnum1<-rnum1*c*(kT/m)
-                rnum1 = rnum1 *(50.2476/mass_neutrino/scalefactor) !*ckT/m = 50.25
+                    !convert to fermi-dirac with units rnum1<-rnum1*c*(kT/m)
+                    rnum1 = rnum1 *(50.2476/mass_neutrino/scalefactor) !*ckT/m = 50.25
 
-                rnum2 = rnum2*2.0-1.0 !convert to range 1,-1
-                rnum3 = rnum3*2.0*pi  !convert to range 0,2pi
+                    rnum2 = rnum2*2.0-1.0 !convert to range 1,-1
+                    rnum3 = rnum3*2.0*pi  !convert to range 0,2pi
 
-                xvp(4)=dis(1)*vf + rnum1*(1.0-rnum2**2)**0.5*cos(rnum3)*Vphys2sim
-                xvp(5)=dis(2)*vf + rnum1*(1.0-rnum2**2)**0.5*sin(rnum3)*Vphys2sim
-                xvp(6)=dis(3)*vf + rnum1*rnum2*Vphys2sim
+                    xvp(4)=dis(1)*vf + rnum1*(1.0-rnum2**2)**0.5*cos(rnum3)*Vphys2sim
+                    xvp(5)=dis(2)*vf + rnum1*(1.0-rnum2**2)**0.5*sin(rnum3)*Vphys2sim
+                    xvp(6)=dis(3)*vf + rnum1*rnum2*Vphys2sim
 
-              else !! Uses linear theory velocity
+                  else !! Uses linear theory velocity
 
-                xvp(4)=dis(1)*vf
-                xvp(5)=dis(2)*vf
-                xvp(6)=dis(3)*vf
+                    read(31) xvp
+                    xvp(4) = dis(1)!*vf
+                    xvp(5) = dis(2)!*vf
+                    xvp(6) = dis(3)!*vf
 
-              endif
+                  endif
+
+            endif
+
 #else
              xvp(4)=dis(1)*vf
              xvp(5)=dis(2)*vf
@@ -1567,12 +1807,15 @@ end subroutine di_fftw
     enddo
 
     close(11)
+#ifdef NEUTRINOS
+    if (command == 1) close(31)
+#endif
 
     call cpu_time(time2)
     time2=(time2-time1)
     if (rank == 0) write(*,"(f8.2,a)") time2,'  Called dm'
     return
-  end subroutine dm
+end subroutine dm
 
 !!--------------------------------------------------------------!!
 
