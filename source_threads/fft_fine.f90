@@ -12,6 +12,8 @@ subroutine cubepm_fftw2(c, thread)
 #ifdef MKL
    include 'fftw3.f'
    include 'fftw3_mkl.f'
+#elif ESSL
+     include 'fftw3.f'
 #else
    include 'fftw3.f03'
 #endif
@@ -24,6 +26,7 @@ subroutine cubepm_fftw2(c, thread)
    integer(4) :: fft_threads = 1
 #endif   
 
+#ifndef ESSL
    if (firstfftw_nest) then
 
         call sfftw_init_threads(ierr)
@@ -35,13 +38,20 @@ subroutine cubepm_fftw2(c, thread)
         firstfftw_nest = .false.
 
    endif
+#else
+    firstfftw_nest = .false.
+#endif
 
    if (firstfftw2(thread)) then
 
+#ifndef ESSL
       call sfftw_plan_with_nthreads(fft_threads)
+#endif
       call sfftw_plan_dft_r2c_3d(fftw2_plan(thread),nf_tile,nf_tile,nf_tile,rho_f(:,:,:,thread),rho_f(:,:,:,thread),FFTW_MEASURE)
       call sfftw_plan_dft_c2r_3d(fftw2_iplan(thread),nf_tile,nf_tile,nf_tile,rho_f(:,:,:,thread),rho_f(:,:,:,thread),FFTW_MEASURE)
+#ifndef ESSL
       call sfftw_plan_with_nthreads(1) !! Call this again to avoid accidentally creating threaded coarse fftw plans
+#endif
 
      firstfftw2(thread)=.false.
 
