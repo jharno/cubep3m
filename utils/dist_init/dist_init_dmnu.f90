@@ -319,27 +319,43 @@ subroutine pack_pencils
 
     integer(4), dimension(2*nodes_dim) :: requests
     integer(4), dimension(MPI_STATUS_SIZE,2*nodes_dim) :: wait_status
+    integer(4) nc_pen_break, breakup
+    real(4) :: passGB
 
-    num_elements = nc_node_dim * nc_node_dim * nc_pen
+    !
+    ! Ensure that send/recv buffers are no larger than 1 GB (really after 2 GB we get problems)
+    !
+
+    breakup = 1
+    num_elements = nc_node_dim * nc_node_dim * nc_pen 
+    passGB = 4. * num_elements / 1024.**3
+    if (passGB > 1.) then
+        breakup = 2**ceiling(log(passGB)/log(2.))
+    endif
+    num_elements = num_elements / breakup
 
     !
     ! Send the data from cube to recv_cube
     !
 
-    do j = 0, nodes_dim - 1
-        pen_slice = j
-        tag  = rank**2
-        rtag = pen_neighbor_fm(j)**2
-        call mpi_isend(cube(1,1, pen_slice*nc_pen + 1), num_elements, &
-                       mpi_real, pen_neighbor_to(j), tag, mpi_comm_world, &
-                       requests(pen_slice+1),ierr)
-        call mpi_irecv(recv_cube(1,1,1,pen_slice), &
-                       num_elements, mpi_real, pen_neighbor_fm(j),rtag, &
-                       mpi_comm_world, requests(pen_slice+1+nodes_dim), &
-                       ierr)
-    enddo
+    do k = 1, breakup
+        nc_pen_break = nc_pen/breakup*(k-1)
+        do j = 0, nodes_dim - 1
+            pen_slice = j
+            tag  = rank**2
+            rtag = pen_neighbor_fm(j)**2
+            call mpi_isend(cube(1,1, pen_slice*nc_pen + nc_pen_break + 1), num_elements, &
+                           mpi_real, pen_neighbor_to(j), tag, mpi_comm_world, &
+                           requests(pen_slice+1),ierr)
+            call mpi_irecv(recv_cube(1,1,1+nc_pen_break,pen_slice), &
+                           num_elements, mpi_real, pen_neighbor_fm(j),rtag, &
+                           mpi_comm_world, requests(pen_slice+1+nodes_dim), &
+                           ierr)
+        enddo
 
-    call mpi_waitall(2*nodes_dim, requests, wait_status, ierr)
+        call mpi_waitall(2*nodes_dim, requests, wait_status, ierr)
+
+    enddo
 
     !
     ! Place this data into the pencils (stored in the slab array)
@@ -421,6 +437,8 @@ subroutine unpack_pencils
     integer(4) :: pen_slice,num_elements,tag,rtag
     integer(4), dimension(2*nodes_dim) :: requests
     integer(4), dimension(MPI_STATUS_SIZE,2*nodes_dim) :: wait_status
+    integer(4) nc_pen_break, breakup
+    real(4) :: passGB
 
     !
     ! Place data in the recv_cube buffer
@@ -437,26 +455,40 @@ subroutine unpack_pencils
         enddo
     enddo
 
-    num_elements = nc_node_dim * nc_node_dim * nc_pen
+    !
+    ! Ensure that send/recv buffers are no larger than 1 GB (really after 2 GB we get problems)
+    !
+
+    breakup = 1
+    num_elements = nc_node_dim * nc_node_dim * nc_pen 
+    passGB = 4. * num_elements / 1024.**3
+    if (passGB > 1.) then
+        breakup = 2**ceiling(log(passGB)/log(2.))
+    endif
+    num_elements = num_elements / breakup
 
     !
     ! Put this data back into cube
     !
 
-    do j = 0, nodes_dim - 1
-        pen_slice = j
-        tag  = rank**2
-        rtag = pen_neighbor_to(j)**2
-        call mpi_isend(recv_cube(1,1,1,pen_slice), num_elements, &
-                       mpi_real, pen_neighbor_fm(j), tag, mpi_comm_world, &
-                       requests(pen_slice+1),ierr)
-        call mpi_irecv(cube(1,1,pen_slice*nc_pen + 1), &
-                       num_elements, mpi_real, pen_neighbor_to(j),rtag, &
-                       mpi_comm_world, requests(pen_slice+1+nodes_dim), &
-                       ierr)
-    enddo
+    do k = 1, breakup
+        nc_pen_break = nc_pen/breakup*(k-1)
+        do j = 0, nodes_dim - 1
+            pen_slice = j
+            tag  = rank**2
+            rtag = pen_neighbor_to(j)**2
+            call mpi_isend(recv_cube(1,1,1+nc_pen_break,pen_slice), num_elements, &
+                           mpi_real, pen_neighbor_fm(j), tag, mpi_comm_world, &
+                           requests(pen_slice+1),ierr)
+            call mpi_irecv(cube(1,1,pen_slice*nc_pen + nc_pen_break + 1), &
+                           num_elements, mpi_real, pen_neighbor_to(j),rtag, &
+                           mpi_comm_world, requests(pen_slice+1+nodes_dim), &
+                           ierr)
+        enddo
 
-    call mpi_waitall(2*nodes_dim,requests, wait_status, ierr)
+        call mpi_waitall(2*nodes_dim,requests, wait_status, ierr)
+
+    enddo
 
 end subroutine unpack_pencils
 #endif
