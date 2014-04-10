@@ -6,9 +6,9 @@ import numpy
 # These ones are usually changed
 #
 
-nodes_dim      = 8
-tiles_node_dim = 16
-nf_tile        = 112 
+nodes_dim      = 2
+tiles_node_dim = 4
+nf_tile        = 176
 
 density_buffer = 1.5
 
@@ -19,8 +19,14 @@ srfac = 1
 pencil = True
 
 # These set the total number of threads
-cores          = 8
+cores          = 8 
 nested_threads = 2
+
+# Set this true if using neutrinos
+neutrinos = True
+
+# Set this true if not using extended pp
+no_extpp = True 
 
 #
 # These ones are usually not changed
@@ -56,6 +62,11 @@ nodes_pen   = nodes_dim
 nc_slab     = nc_dim / nodes
 nc_pen      = nc_node_dim / nodes_dim
 
+if not pencil:
+    if nc_dim%nodes != 0: print "\nERROR: nc_dim, nodes, nc_slab = ", nc_dim, nodes, nc_slab; exit()
+else:
+    if nc_node_dim%nodes_dim != 0: print "\nERROR: nc_node_dim, nodes_dim, nc_pen = ", nc_node_dim, nodes_dim, nc_pen; exit() 
+
 max_np  = int(density_buffer * (((nf_tile - 2 * nf_buf) * tiles_node_dim / 2)**3 + \
     (8 * nf_buf**3 + 6 * nf_buf * (((nf_tile - 2 * nf_buf) * tiles_node_dim)**2) + \
     12 * (nf_buf**2) * ((nf_tile - 2 * nf_buf) * tiles_node_dim)) / 8.))
@@ -63,7 +74,7 @@ max_buf = 2 * max_np / srfac
 
 nlist       = 5 * (nc_halo_max + 1)**3
 max_maxima  = 5 * nc_halo_max**3
-max_halo_np = nc**2
+max_halo_np = 5 * (nc_halo_max + 1)**3 
 
 print
 print "Sizes of various variables:"
@@ -236,10 +247,13 @@ print
 send_buf_PID = 8*max_buf
 recv_buf_PID = 8*max_buf
 PID          = 8*max_np
+if neutrinos:
+    PID /= 8; send_buf_PID /= 8; recv_buf_PID /= 8
 ll           = 4*max_np
 llf          = 4*max_llf*mesh_scale*mesh_scale*mesh_scale*cores*nested_threads
 pp_force_accum = 4*3*max_llf*cores*nested_threads
 pp_ext_force_accum = 4*max_np*cores
+if no_extpp: pp_ext_force_accum = 0
 pos = 4*4*max_halo_np
 finegrid = 4*ngrid_max**3
 ilist_odc = 4*max_halo_np
@@ -262,6 +276,13 @@ print "ilist_vir = ", ilist_vir / 1024. / 1024. / 1024.
 print "hpart_odc = ", hpart_odc / 1024. / 1024. / 1024.
 print "hpart_vir = ", hpart_odc / 1024. / 1024. / 1024.
 print "halo_mesh_mass = ", halo_mesh_mass / 1024. / 1024. / 1024.
+memGB2 = (PID+send_buf_PID+recv_buf_PID+ll+llf+pp_force_accum+pp_ext_force_accum+\
+    pos+finegrid+ilist_odc+ilist_vir+hpart_odc+hpart_odc+halo_mesh_mass) / 1024.**3
+print
+
+print "Total memeory from equivalenced and big arrays: " + str(memGB+memGB2) + " GB" 
+if no_extpp:
+    print "NOTE: You must comment out pp_ext_force_accum in the .fh file !!" 
 
 #
 # Size of equivalence arrays declared in dist_init_dm.f90 
@@ -272,14 +293,21 @@ print "Checking equivalence statements in dist_init_dm.f90 ... "
 print
 
 nc_node_dim = nc / nodes_dim
+nc_pen = nc / nodes_dim**2
 nc_slab     = nc / nodes
 nodes_slab  = nodes_dim**2
+nodes_pen   = nodes_dim
 
 # First statement
 
-phi       = (nc_node_dim + 2)**3
-slab_work = (nc + 2) * nc * nc_slab 
-recv_cube = nc_node_dim**2 * nc_slab * nodes_slab
+if pencil:
+    slab_work = nc * nc_node_dim * (nc_pen+2)
+    recv_cube = nc_node_dim**2 * nc_pen * nodes_pen
+else:
+    slab_work = (nc + 2) * nc * nc_slab
+    recv_cube = nc_node_dim**2 * nc_slab * nodes_slab
+
+phi = (nc_node_dim + 2)**3
 
 if not (phi >= slab_work and phi >= recv_cube):
 
@@ -290,7 +318,12 @@ if not (phi >= slab_work and phi >= recv_cube):
 
 # Second statement
 
-slab = (nc + 2) * nc * nc_slab 
+print 
+
+if pencil:
+    slab = nc * nc_node_dim * (nc_pen+2)
+else:
+    slab = (nc + 2) * nc * nc_slab 
 cube = nc_node_dim**3
 
 if cube > slab:
