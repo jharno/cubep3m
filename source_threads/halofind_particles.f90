@@ -34,9 +34,11 @@ subroutine halofind
     real(4), dimension(3) :: r_wrt_halo, v_wrt_halo, v2_wrt_halo, hpos
     integer, parameter :: N_p = 50
     real(4), dimension(N_p) :: E
+#ifndef NEUTRINOS
 #ifdef PID_FLAG
     integer(8), dimension(N_p) :: pid_halo
     real(4), dimension(6,N_p) ::xv_halo
+#endif
 #endif
     real(4) :: dist, speed, E_tmp
     real(4), dimension(6) :: I_ij
@@ -237,8 +239,10 @@ subroutine halofind
             v_disp = sqrt(v2_mean(1) + v2_mean(2) + v2_mean(3))
             var_x = real(imass_odc)/(real(imass_odc-1)) * (x2_mean - (x_mean-offset)**2)
 
+#ifndef NEUTRINOS
 #ifdef PID_FLAG
             pid_halo = 0
+#endif
 #endif
             E = 0.
             E_tmp = 0.
@@ -267,10 +271,12 @@ subroutine halofind
                     if (E_tmp < E(jj)) then
                         E(jj+1:N_p) = E(jj:N_p-1)
                         E(jj) = E_tmp
+#ifndef NEUTRINOS
 #ifdef PID_FLAG
                         pid_halo(jj+1:N_p) = pid_halo(jj:N_p-1)
                         pid_halo(jj) = PID(pp)
                         xv_halo(:,jj) = xv(:,pp)
+#endif
 #endif
                         exit
                     endif
@@ -279,6 +285,7 @@ subroutine halofind
 
             v2_wrt_halo(:) = v2_wrt_halo(:)/real(imass_odc)
 
+#ifndef NEUTRINOS
 #ifdef PID_FLAG
 #ifdef HVIR
             if (halo_write) write(12) hpos(:), mass_odc, mass_vir, r_odc, r_vir, x_mean, v_mean, l_CM, v2_wrt_halo, var_x, pid_halo, xv_halo
@@ -286,10 +293,13 @@ subroutine halofind
             if (halo_write) write(12) hpos(:), mass_odc, r_odc, x_mean, v_mean, l_CM, v2_wrt_halo, var_x, pid_halo, xv_halo
 #endif
 #else
+#endif
 #ifdef HVIR
             if (halo_write) write(12) hpos(:), mass_odc, mass_vir, r_odc, r_vir, x_mean, v_mean, l_CM, v2_wrt_halo, var_x, I_ij
 #else
             if (halo_write) write(12) hpos(:), mass_odc, r_odc, x_mean, v_mean, l_CM, v2_wrt_halo, var_x, I_ij
+#endif
+#ifndef NEUTRINOS
 #endif
 #endif
 

@@ -48,14 +48,14 @@
 
     ofile=output_path//z_s(1:len_trim(z_s))//'xvres'// &
          rank_s(1:len_trim(rank_s))//'.dat'
+#ifndef NEUTRINOS
 #ifdef PID_FLAG
     ofile2=output_path//z_s(1:len_trim(z_s))//'PIDres'// &
          rank_s(1:len_trim(rank_s))//'.dat'
 #endif
+#endif
 #ifdef NEUTRINOS
     ofile_nu=output_path//z_s(1:len_trim(z_s))//'xvres'// &
-         rank_s(1:len_trim(rank_s))//'_nu.dat'
-    ofile2_nu=output_path//z_s(1:len_trim(z_s))//'PIDres'// &
          rank_s(1:len_trim(rank_s))//'_nu.dat'
 #endif
 
@@ -164,6 +164,7 @@
 #endif
 
 !! Open PID file
+#ifndef NEUTRINOS
 #ifdef PID_FLAG
 
     open(unit=15, file=ofile2, status="replace", iostat=fstat, access="stream")
@@ -176,57 +177,8 @@
 
 !! This is the file header
 
-#ifdef NEUTRINOS
-
-    open(unit=25, file=ofile2_nu, status="replace", iostat=fstat, access="stream")
-
-    if (fstat /= 0) then
-      write(*,*) 'error opening PID file for write'
-      write(*,*) 'rank',rank,'file:',ofile2_nu
-      call mpi_abort(mpi_comm_world,ierr,ierr)
-    endif
-
-    write(15) np_dm,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
-              cur_projection,cur_halofind,mass_p
-    write(25) np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
-              cur_projection,cur_halofind,mass_p
-
-#else
-
     write(15) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
               cur_projection,cur_halofind,mass_p
-
-#endif 
-
-#ifdef NEUTRINOS
-
-    ind_check1 = 0
-    ind_check2 = 0
-
-    do i=1,num_writes
-      nplow=(i-1)*blocksize+1
-      nphigh=min(i*blocksize,np_local)
-      do j=nplow,nphigh
-        if (PID(j) == 1) then
-            write(15) PID(j)
-            ind_check1 = ind_check1 + 1
-        else
-            write(25) PID(j)
-            ind_check2 = ind_check2 + 1
-        endif
-      enddo
-    enddo
-
-    close(15)
-    close(25)
-
-    !! Consistency check
-    if (ind_check1 .ne. np_dm .or. ind_check2 .ne. np_nu) then
-        write(*,*) "Dark Matter checkpoint PID error: ind_checks ", ind_check1, np_dm, ind_check2, np_nu
-        call mpi_abort(mpi_comm_world,ierr,ierr)
-    endif
-
-#else
 
 !! Particle list
 !    do i=0,nodes-1
@@ -247,8 +199,7 @@
 
     close(15)
 
-#endif
-    
+#endif    
 #endif
 
 #ifdef MHD

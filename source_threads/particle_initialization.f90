@@ -185,6 +185,7 @@
         close(21)
 #endif
 
+#ifndef NEUTRINOS
 #ifdef PID_FLAG
 
       ofile=output_path//z_s(1:len_trim(z_s))//'PID'// &
@@ -219,40 +220,7 @@
       enddo
       close(21)
 
-#ifdef NEUTRINOS
-        ofile=output_path//z_s(1:len_trim(z_s))//'PID'// &
-            rank_s(1:len_trim(rank_s))//'_nu.dat'
-
-        open(unit=21, file=ofile, status="old", iostat=fstat, access="stream")
-        if (fstat /= 0) then
-            write(*,*) 'error opening checkpoint'
-            write(*,*) 'rank',rank,'file:',ofile
-            call mpi_abort(mpi_comm_world,ierr,ierr)
-        endif
-
-        !! Only store the local number of particles. All other info already read from dark matter checkpoint file.
-        read(21) np_nu,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy
-
-        if (np_local+np_nu > max_np) then
-            write(*,*) 'too many particles to store'
-            write(*,*) 'rank',rank,'np_local',np_local,'max_np',max_np
-            call mpi_abort(mpi_comm_world,ierr,ierr)
-        endif
-
-!       reduced to 32MB chunks because of intel compiler
-        blocksize=(32*1024*1024)/24
-        num_writes=np_nu/blocksize+1
-
-        do i = 1,num_writes
-            nplow=(i-1)*blocksize+1 + np_local
-            nphigh=min(i*blocksize,np_nu) + np_local
-            do j=nplow,nphigh
-                read(21) PID(j)
-            enddo
-        enddo
-        close(21)
 #endif
-
 #endif
 
 ! ---------------------------------------------------------------------------------------------
@@ -346,6 +314,7 @@
         close(21)
 #endif
 
+#ifndef NEUTRINOS
 #ifdef PID_FLAG
 
       ofile=output_path//reskill_prefix//'PIDres'// &
@@ -381,40 +350,7 @@
       enddo
       close(21)
 
-#ifdef NEUTRINOS
-        ofile=output_path//reskill_prefix//'PIDres'// &
-            rank_s(1:len_trim(rank_s))//'_nu.dat'
-
-        open(unit=21, file=ofile, status="old", iostat=fstat, access="stream")
-        if (fstat /= 0) then
-            write(*,*) 'error opening checkpoint'
-            write(*,*) 'rank',rank,'file:',ofile
-            call mpi_abort(mpi_comm_world,ierr,ierr)
-        endif
-
-        !! Only store the local number of particles. All other info already read from dark matter checkpoint file.
-        read(21) np_nu,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy
-
-        if (np_local+np_nu > max_np) then
-            write(*,*) 'too many particles to store'
-            write(*,*) 'rank',rank,'np_local',np_local,'max_np',max_np
-            call mpi_abort(mpi_comm_world,ierr,ierr)
-        endif
-
-!       reduced to 32MB chunks because of intel compiler
-        blocksize=(32*1024*1024)/24
-        num_writes=np_nu/blocksize+1
-
-        do i = 1,num_writes
-            nplow=(i-1)*blocksize+1 + np_local
-            nphigh=min(i*blocksize,np_nu) + np_local
-            do j=nplow,nphigh
-                read(21) PID(j)
-            enddo
-        enddo
-        close(21)
 #endif
-
 #endif
 
 ! ---------------------------------------------------------------------------------------------
@@ -487,27 +423,18 @@
 
 #endif 
 
-#ifdef PID_FLAG
-      write(*,*) 'np_local before delete', np_local, 'rank =', rank
-      !call delete_particles
-      !write(*,*) 'np_local after delete', np_local, 'rank =', rank
-
-
 #ifndef NEUTRINOS
-      do i=1,np_local
-         ! Assign a uniqe ID to particles in physical volumes.        
-         ! This assumes that every node starts with the same np_local
-         !PID(i) = int(i + rank*np_local,kind=8)
-         PID(i) = int(i,kind=8) + int(rank*int(np_local,kind=8),kind=8)
-      enddo
-#else
-        do i = 1, np_local
-            PID(i) = 1 !! All dark matter will have a PID of 1
+#ifdef PID_FLAG
+        write(*,*) 'np_local before delete', np_local, 'rank =', rank
+        !call delete_particles
+        !write(*,*) 'np_local after delete', np_local, 'rank =', rank
+
+        do i=1,np_local
+            ! Assign a uniqe ID to particles in physical volumes.        
+            ! This assumes that every node starts with the same np_local
+            !PID(i) = int(i + rank*np_local,kind=8)
+            PID(i) = int(i,kind=8) + int(rank*int(np_local,kind=8),kind=8)
         enddo
-        do i = np_local+1, np_local+np_nu
-            PID(i) = 2 !! All neutrinos will have a PID of 2 
-        enddo
-#endif
 
         if(rank==0)write(*,*) 'PID initialized' 
 
@@ -527,20 +454,7 @@
         write(21) PID(:np_local)
         close(21)
 
-#ifdef NEUTRINOS
-        fstat = 0
-
-        open(unit=21, file=ic_path//'PID'//rank_s(1:len_trim(rank_s))//'_nu.ic', iostat=fstat, access="stream")
-        if (fstat /= 0) then
-            write(*,*) 'error writing initial PID'
-            write(*,*) 'rank',rank,'file:',ic_path//'PID'//rank_s(1:len_trim(rank_s))//'_nu.ic'
-            call mpi_abort(mpi_comm_world,ierr,ierr)
-        endif
-        write(21) np_nu
-        write(21) PID(np_local+1:np_local+np_nu)
-        close(21)
 #endif
-
 #endif
 
 ! ---------------------------------------------------------------------------------------------
@@ -573,6 +487,21 @@
     if (rank == 0) write(*,*) 'total dark matter mass =', mass_p * np_total
 
 #ifdef NEUTRINOS
+    !
+    ! Assign 1 byte integer PIDs
+    !
+
+    do i = 1, np_local
+        PID(i) = 1 !! All dark matter will have a PID of 1
+    enddo
+    do i = np_local+1, np_local+np_nu
+        PID(i) = 2 !! All neutrinos will have a PID of 2 
+    enddo
+
+    !
+    ! Print some stats to screen
+    !
+
     npl8=int(np_nu,kind=8)
     call mpi_reduce(npl8,np_total_nu,1,MPI_INTEGER8, mpi_sum,0,mpi_comm_world,ierr)
     !! Append np_nu to np_local (must be done after PIDs and after mass calculation)
