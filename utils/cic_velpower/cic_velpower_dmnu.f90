@@ -67,6 +67,10 @@ program cic_velpower
   integer, parameter :: np=hc
   real, parameter    :: npr=np
 
+#ifdef LOGBIN
+  integer, parameter :: numbins = hc / 48 
+#endif
+
   !! internals
   integer, parameter :: max_checkpoints=100
   real, dimension(max_checkpoints) :: z_checkpoint
@@ -111,6 +115,7 @@ program cic_velpower
   real, dimension(3, 3, nc) :: pkmomdim
   real, dimension(3, 3, nc) :: pkmomdim_dm
   real, dimension(3, 3, nc) :: pkmomdim_dmnu
+  real, dimension(3, 3, nc) :: pkmomdim_rel
   real, dimension(3, nc) :: pkdm
 
   !! For pencils decomposition:
@@ -130,9 +135,9 @@ program cic_velpower
   real, dimension(nc_node_dim,nc_node_dim,nc_node_dim) :: cube
 #ifdef SLAB
   real, dimension(nc_node_dim,nc_node_dim,nc_slab,0:nodes_slab-1) :: recv_cube
-  real, dimension(nc+2,nc,nc_slab) :: slab, slab2, slab_work
+  real, dimension(nc+2,nc,nc_slab) :: slab, slab2, slab3, slab_work
 #else
-  real, dimension(nc, nc_node_dim, nc_pen+2) :: slab, slab2
+  real, dimension(nc, nc_node_dim, nc_pen+2) :: slab, slab2, slab3
   real, dimension(nc_node_dim, nc_node_dim, nc_pen, 0:nodes_pen-1) :: recv_cube
 #endif
 
@@ -143,7 +148,7 @@ program cic_velpower
   real, dimension(0:nc_node_dim+1, 0:nc_node_dim+1) :: massden_recv_buff
 #else
   !! Parameters for linked list
-  integer(4), parameter :: nfine_buf = 4
+  integer(4), parameter :: nfine_buf = 8
   integer(4), parameter :: mesh_scale = 2
   integer(4), parameter :: nc_buf = nfine_buf / mesh_scale
   integer(4), parameter :: nm_node_dim = nc_node_dim / mesh_scale
@@ -167,12 +172,24 @@ program cic_velpower
   !! Array storing what group each particle belongs to (for autocorrelation break each species 
   !! into two groups and then cross-correlate to remove shot noise)
   integer(1) :: GID(max_np), GID_dm(max_np_dm)
+  integer(1) :: GID_buf(np_buffer), GID_send_buf(np_buffer), GID_recv_buf(np_buffer)
+
+  integer(1), parameter :: g0 = 0
+  integer(1), parameter :: g1 = 1
 #endif
 
   !! Only work with one component of the velocity field at a time 
   real, dimension(0:nc_node_dim+1, 0:nc_node_dim+1, 0:nc_node_dim+1) :: momden
   real, dimension(0:nc_node_dim+1, 0:nc_node_dim+1) :: momden_send_buff
   real, dimension(0:nc_node_dim+1, 0:nc_node_dim+1) :: momden_recv_buff
+
+  !! For threading 
+  integer :: kt
+#ifdef SLAB
+  integer, parameter :: kt_stop = nc_slab
+#else
+  integer, parameter :: kt_stop = nc_pen+2
+#endif
 
   !! Equivalence arrays to save memory
   !! Must make sure that ONLY the largest array in each equivalence statement is on the common block. 
@@ -191,15 +208,17 @@ program cic_velpower
   !! Common block
 #ifdef SLAB
 #ifdef MOMENTUM
-  common xvp, xvp_dm, massden, recv_cube, momden, slab_work, slab, slab2, massden_send_buff, massden_recv_buff, pkmomdim, pkmomdim_dm, pkmomdim_dmnu, pkdm
+  common xvp, xvp_dm, massden, recv_cube, momden, slab_work, slab, slab2, slab3, massden_send_buff, massden_recv_buff, pkmomdim, pkmomdim_dm, pkmomdim_dmnu, pkmomdim_rel, pkdm
 #else
-  common xvp, xvp_dm, hoc, hoc_dm, ll, ll_dm, ipos, rpos, cell_search, done_shell, recv_cube, momden, slab_work, slab, slab2, momden_send_buff, momden_recv_buff, pkmomdim, pkmomdim_dm, pkmomdim_dmnu, pkdm, GID, GID_dm
+  common xvp, xvp_dm, hoc, hoc_dm, ll, ll_dm, ipos, rpos, cell_search, done_shell, recv_cube, momden, slab_work, slab, slab2, slab3, momden_send_buff, momden_recv_buff, pkmomdim, pkmomdim_dm, pkmomdim_dmnu, pkmomdim_rel, pkdm
+  common /gvar/ GID, GID_dm, GID_buf, GID_send_buf, GID_recv_buf 
 #endif
 #else
 #ifdef MOMENTUM
-  common xvp, xvp_dm, massden, recv_cube, momden, recv_buf, slab, slab2, massden_send_buff, massden_recv_buff, pkmomdim, pkmomdim_dm, pkmomdim_dmnu, pkdm
+  common xvp, xvp_dm, massden, recv_cube, momden, recv_buf, slab, slab2, slab3, massden_send_buff, massden_recv_buff, pkmomdim, pkmomdim_dm, pkmomdim_dmnu, pkmomdim_rel, pkdm
 #else
-  common xvp, xvp_dm, hoc, hoc_dm, ll, ll_dm, ipos, rpos, cell_search, done_shell, recv_cube, momden, recv_buf, slab, slab2, momden_send_buff, momden_recv_buff, pkmomdim, pkmomdim_dm, pkmomdim_dmnu, pkdm, GID, GID_dm
+  common xvp, xvp_dm, hoc, hoc_dm, ll, ll_dm, ipos, rpos, cell_search, done_shell, recv_cube, momden, recv_buf, slab, slab2, slab3, momden_send_buff, momden_recv_buff, pkmomdim, pkmomdim_dm, pkmomdim_dmnu, pkmomdim_rel, pkdm
+  common /gvar/ GID, GID_dm, GID_buf, GID_send_buf, GID_recv_buf
 #endif
 #endif
 
@@ -227,18 +246,18 @@ program cic_velpower
     call read_particles(0)
     call pass_particles(0)
 #ifndef MOMENTUM
+    call assign_groups(0)
     call link_list(0)
     call buffer_particles(0)
-    call assign_groups(0)
 #endif
 
     !! Read and pass dark matter particles (stored in xvp_dm)
     call read_particles(1)
     call pass_particles(1)
 #ifndef MOMENTUM
+    call assign_groups(1)
     call link_list(1)
     call buffer_particles(1)
-    call assign_groups(1)
 #endif
 
 #ifndef MOMENTUM
@@ -246,41 +265,96 @@ program cic_velpower
     ! Compute power spectra for both neutrinos and dark matter by separting each
     ! species into two groups and computing the cross-spectrum of the groups.
     ! This is done to remove shot noise which does not correlate between groups.
+    ! At the same time also compute the auto-power of the relative velocity field.
+    ! This also has to be done with the cross of two separate groups to remove noise.
     !
 
     do cur_dimension = 1, 3 !! Each x, y, z dimension
 
-        !! Determine cur_dimension component of velocity for group 0
-        call velocity_density(0, 0, N_closest_auto)
+        !! --------------------------------------------------------------------------------
+        !! NEUTRINOS
+        !! --------------------------------------------------------------------------------
+
+        !! Determine cur_dimension component of neutrino velocity for group 0
+        call velocity_density(0, g0, N_closest_auto)
         call buffer_momdensity
 
-        !! Fourier transform velocity field for group 0 and store in slab2
+        !! Fourier transform velocity field for neutrino group 0 and store in slab2
         call darkmatter
-        slab2(:,:,:) = slab(:,:,:)
+        !$omp parallel do num_threads(nt) default(shared) private(kt)
+        do kt = 1, kt_stop
+            slab2(:,:,kt) = slab(:,:,kt)
+        enddo
+        !$omp end parallel do 
 
-        !! Determine cur_dimension component of velocity for group 1
-        call velocity_density(0, 1, N_closest_auto)
+        !! Determine cur_dimension component of neutrino velocity for group 1
+        call velocity_density(0, g1, N_closest_auto)
         call buffer_momdensity
 
-        !! Fourier transform velocity field for group 1 and compute cross-correlation with group 0
+        !! Fourier transform velocity field for neutrino group 1 and compute cross-correlation with group 0
         call darkmatter
         call powerspectrum(slab, slab2, pkmomdim(cur_dimension,:,:))
 
-        !! Determine cur_dimension component of velocity for group 0
-        call velocity_density(1, 0, N_closest_auto)
+        !! --------------------------------------------------------------------------------
+        !! DARK MATTER
+        !! --------------------------------------------------------------------------------
+
+        !! Determine cur_dimension component of dark matter velocity for group 0 
+        call velocity_density(1, g0, N_closest_auto)
         call buffer_momdensity
 
-        !! Fourier transform velocity field for group 0 and store in slab2
+        !! Fourier transform velocity field for dark matter group 0 
         call darkmatter
-        slab2(:,:,:) = slab(:,:,:)
+    
+        !! slab3 now stores the relative velocity difference for group 0 (dark matter - neutrino)
+        !$omp parallel do num_threads(nt) default(shared) private(kt)
+        do kt = 1, kt_stop
+            slab3(:,:,kt) = slab(:,:,kt) - slab2(:,:,kt)
+        enddo
+        !$omp end parallel do 
 
-        !! Determine cur_dimension component of velocity for group 1
-        call velocity_density(1, 1, N_closest_auto)
+        !! Now store dark matter group 0 in slab2 (overwrites neutrino group 0)
+        !$omp parallel do num_threads(nt) default(shared) private(kt)
+        do kt = 1, kt_stop
+            slab2(:,:,kt) = slab(:,:,kt)
+        enddo
+        !$omp end parallel do 
+
+        !! Determine cur_dimension component of dark matter velocity for group 1
+        call velocity_density(1, g1, N_closest_auto)
         call buffer_momdensity
 
         !! Fourier transform velocity field for group 1 and compute cross-correlation with group 0
         call darkmatter
         call powerspectrum(slab, slab2, pkmomdim_dm(cur_dimension,:,:))
+
+        !! --------------------------------------------------------------------------------
+        !! DARK MATTER - NEUTRINO RELATIVE VELOCITY
+        !! --------------------------------------------------------------------------------
+
+        !! Store dark matter group 1 in slab2
+        !$omp parallel do num_threads(nt) default(shared) private(kt)
+        do kt = 1, kt_stop
+            slab2(:,:,kt) = slab(:,:,kt)
+        enddo
+        !$omp end parallel do 
+        
+        !! Recompute cur_dimension component of neutrino velocity for group 1
+        call velocity_density(0, g1, N_closest_auto)
+        call buffer_momdensity
+
+        !! Fourier transform velocity field for neutrino group 1
+        call darkmatter 
+
+        !! Now slab2 will store the relative velocity difference for group 1 (dark matter - neutrino)
+        !$omp parallel do num_threads(nt) default(shared) private(kt)
+        do kt = 1, kt_stop
+            slab2(:,:,kt) = slab2(:,:,kt) - slab(:,:,kt)
+        enddo
+        !$omp end parallel do
+
+        !! Compute relative velocity power spectra
+        call powerspectrum(slab2, slab3, pkmomdim_rel(cur_dimension,:,:))
 
     enddo
 
@@ -302,7 +376,7 @@ program cic_velpower
         call momentum2velocity
 #else
         !! Determine cur_dimension component of velocity for all particles (all in group 0 now)
-        call velocity_density(0, 0, N_closest_nu)
+        call velocity_density(0, g0, N_closest_nu)
         call buffer_momdensity
 #endif
 
@@ -317,7 +391,11 @@ program cic_velpower
 #endif
 
         !! Store neutrino Fourier field in slab 2 for cross spectra later
-        slab2(:,:,:) = slab(:,:,:)      
+        !$omp parallel do num_threads(nt) default(shared) private(kt)
+        do kt = 1, kt_stop
+            slab2(:,:,kt) = slab(:,:,kt)
+        enddo
+        !$omp end parallel do 
 
 #ifdef MOMENTUM
         !! Compute dark matter momentum density field for this dimension
@@ -330,7 +408,7 @@ program cic_velpower
         call momentum2velocity
 #else
         !! Determine cur_dimension component of velocity for all particles (all in group 0 now)
-        call velocity_density(1, 0, N_closest_nu)
+        call velocity_density(1, g0, N_closest_dm)
         call buffer_momdensity
 #endif
 
@@ -350,9 +428,12 @@ program cic_velpower
     enddo
 
     !! Write out the power spectra
-    if (rank == 0) call writepowerspectra(0)
-    if (rank == 0) call writepowerspectra(1)
-    if (rank == 0) call writepowerspectra(2)
+    if (rank == 0) then
+        call writepowerspectra(0)
+        call writepowerspectra(1)
+        call writepowerspectra(2)
+        call writepowerspectra(3)
+    endif
 
   enddo
 
@@ -575,6 +656,7 @@ subroutine initvar
         pkmomdim(:, :, k) = 0.
         pkmomdim_dm(:, :, k) = 0.
         pkmomdim_dmnu(:, :, k) = 0.
+        pkmomdim_rel(:, :, k) = 0.
         pkdm(:, k) = 0.
     enddo
 
@@ -812,27 +894,43 @@ subroutine pack_pencils
 
     integer(4), dimension(2*nodes_dim) :: requests
     integer(4), dimension(MPI_STATUS_SIZE,2*nodes_dim) :: wait_status
+    integer(4) nc_pen_break, breakup
+    real(4) :: passGB
 
+    !
+    ! Ensure that send/recv buffers are no larger than 1 GB (really after 2 GB we get problems)
+    !
+
+    breakup = 1
     num_elements = nc_node_dim * nc_node_dim * nc_pen
+    passGB = 4. * num_elements / 1024.**3
+    if (passGB > 1.) then
+        breakup = 2**ceiling(log(passGB)/log(2.))
+    endif
+    num_elements = num_elements / breakup
 
     !
     ! Send the data from cube to recv_cube
     !
 
-    do j = 0, nodes_dim - 1
-        pen_slice = j
-        tag  = rank**2
-        rtag = pen_neighbor_fm(j)**2
-        call mpi_isend(cube(1,1, pen_slice*nc_pen + 1), num_elements, &
-                       mpi_real, pen_neighbor_to(j), tag, mpi_comm_world, &
-                       requests(pen_slice+1),ierr)
-        call mpi_irecv(recv_cube(1,1,1,pen_slice), &
-                       num_elements, mpi_real, pen_neighbor_fm(j),rtag, &
-                       mpi_comm_world, requests(pen_slice+1+nodes_dim), &
-                       ierr)
-    enddo
+    do k = 1, breakup
+        nc_pen_break = nc_pen/breakup*(k-1)
+        do j = 0, nodes_dim - 1
+            pen_slice = j
+            tag  = rank**2
+            rtag = pen_neighbor_fm(j)**2
+            call mpi_isend(cube(1,1, pen_slice*nc_pen + nc_pen_break + 1), num_elements, &
+                           mpi_real, pen_neighbor_to(j), tag, mpi_comm_world, &
+                           requests(pen_slice+1),ierr)
+            call mpi_irecv(recv_cube(1,1,1+nc_pen_break,pen_slice), &
+                           num_elements, mpi_real, pen_neighbor_fm(j),rtag, &
+                           mpi_comm_world, requests(pen_slice+1+nodes_dim), &
+                           ierr)
+        enddo
 
-    call mpi_waitall(2*nodes_dim, requests, wait_status, ierr)
+        call mpi_waitall(2*nodes_dim, requests, wait_status, ierr)
+
+    enddo
 
     !
     ! Place this data into the pencils (stored in the slab array)
@@ -914,6 +1012,8 @@ subroutine unpack_pencils
     integer(4) :: pen_slice,num_elements,tag,rtag
     integer(4), dimension(2*nodes_dim) :: requests
     integer(4), dimension(MPI_STATUS_SIZE,2*nodes_dim) :: wait_status
+    integer(4) nc_pen_break, breakup
+    real(4) :: passGB
 
     !
     ! Place data in the recv_cube buffer
@@ -930,26 +1030,40 @@ subroutine unpack_pencils
         enddo
     enddo
 
+    !
+    ! Ensure that send/recv buffers are no larger than 1 GB (really after 2 GB we get problems)
+    !
+
+    breakup = 1
     num_elements = nc_node_dim * nc_node_dim * nc_pen
+    passGB = 4. * num_elements / 1024.**3
+    if (passGB > 1.) then
+        breakup = 2**ceiling(log(passGB)/log(2.))
+    endif
+    num_elements = num_elements / breakup
 
     !
     ! Put this data back into cube
     !
 
-    do j = 0, nodes_dim - 1
-        pen_slice = j
-        tag  = rank**2
-        rtag = pen_neighbor_to(j)**2
-        call mpi_isend(recv_cube(1,1,1,pen_slice), num_elements, &
-                       mpi_real, pen_neighbor_fm(j), tag, mpi_comm_world, &
-                       requests(pen_slice+1),ierr)
-        call mpi_irecv(cube(1,1,pen_slice*nc_pen + 1), &
-                       num_elements, mpi_real, pen_neighbor_to(j),rtag, &
-                       mpi_comm_world, requests(pen_slice+1+nodes_dim), &
-                       ierr)
-    enddo
+    do k = 1, breakup
+        nc_pen_break = nc_pen/breakup*(k-1)
+        do j = 0, nodes_dim - 1
+            pen_slice = j
+            tag  = rank**2
+            rtag = pen_neighbor_to(j)**2
+            call mpi_isend(recv_cube(1,1,1+nc_pen_break,pen_slice), num_elements, &
+                           mpi_real, pen_neighbor_fm(j), tag, mpi_comm_world, &
+                           requests(pen_slice+1),ierr)
+            call mpi_irecv(cube(1,1,pen_slice*nc_pen + nc_pen_break + 1), &
+                           num_elements, mpi_real, pen_neighbor_to(j),rtag, &
+                           mpi_comm_world, requests(pen_slice+1+nodes_dim), &
+                           ierr)
+        enddo
 
-    call mpi_waitall(2*nodes_dim,requests, wait_status, ierr)
+        call mpi_waitall(2*nodes_dim,requests, wait_status, ierr)
+
+    enddo
 
 end subroutine unpack_pencils
 #endif
@@ -1129,6 +1243,8 @@ subroutine writepowerspectra(command)
        fn=output_path//z_write(1:len_trim(z_write))//prefix//'-RSD.dat'
    else if (command == 2) then !! Dark matter-neutrino cross spectra
        fn=output_path//z_write(1:len_trim(z_write))//prefix//'-RSD_dmnu.dat'
+   else if (command == 3) then !! Dark matter-neutrino relative spectra
+       fn=output_path//z_write(1:len_trim(z_write))//prefix//'-RSD_rel.dat'
    endif
 #else
    if (command == 0) then !! Neutrino power spectra
@@ -1137,6 +1253,8 @@ subroutine writepowerspectra(command)
        fn=output_path//z_write(1:len_trim(z_write))//prefix//'.dat'
    else if (command == 2) then !! Dark matter-neutrino cross spectra
        fn=output_path//z_write(1:len_trim(z_write))//prefix//'_dmnu.dat'
+   else if (command == 3) then !! Dark matter-neutrino relative spectra
+       fn=output_path//z_write(1:len_trim(z_write))//prefix//'_rel.dat'
    endif
 #endif
 
@@ -1181,6 +1299,17 @@ subroutine writepowerspectra(command)
             pkdm(3, i) = pkmomdim_dmnu(1, 3, i)
         enddo
 
+    else if (command == 3) then
+
+        !! Sum over all three dimensions 
+        do i = 1, nc
+            do j = 1, 3
+                pkdm(1, i) = pkdm(1, i) + pkmomdim_rel(j, 1, i)
+                pkdm(2, i) = pkdm(2, i) + pkmomdim_rel(j, 2, i)
+            enddo
+            pkdm(3, i) = pkmomdim_rel(1, 3, i)
+        enddo
+
     endif
 
     !
@@ -1201,7 +1330,11 @@ subroutine writepowerspectra(command)
     write(*,*) 'Writing ', fn
     open(11, file=fn, recl=500)
 
+#ifdef LOGBIN
+    do k = 2, numbins + 1
+#else
     do k = 2, hc + 1
+#endif
 
 #ifdef NGP
        write(11,*) pkdm(3,k-1), pkdm(1:2,k-1)
@@ -1957,6 +2090,7 @@ subroutine buffer_particles(command)
                         if (xvp(1, pp) >= nc_node_dim-rnf_buf) then
                             np_buf = np_buf + 1
                             send_buf((np_buf-1)*6+1:np_buf*6) = xvp(:, pp)
+                            GID_send_buf(np_buf) = GID(pp)
                         endif
                         pp = ll(pp)
                     enddo
@@ -1967,6 +2101,7 @@ subroutine buffer_particles(command)
                         if (xvp_dm(1, pp) >= nc_node_dim-rnf_buf) then
                             np_buf = np_buf + 1
                             send_buf((np_buf-1)*6+1:np_buf*6) = xvp_dm(:, pp)
+                            GID_send_buf(np_buf) = GID_dm(pp)
                         endif
                         pp = ll_dm(pp)
                     enddo
@@ -2005,15 +2140,25 @@ subroutine buffer_particles(command)
     call mpi_wait(srequest, sstatus, sierr)
     call mpi_wait(rrequest, rstatus, rierr)
 
+    call mpi_isend(GID_send_buf, np_buf, mpi_integer1, cart_neighbor(6), &
+                   tag, mpi_comm_world, srequest, sierr)
+    call mpi_irecv(GID_recv_buf, nppx, mpi_integer1, cart_neighbor(5), &
+                   tag, mpi_comm_world, rrequest, rierr)
+
+    call mpi_wait(srequest, sstatus, sierr)
+    call mpi_wait(rrequest, rstatus, rierr)
+
     if (command == 0) then
         do i = 1, nppx
             xvp(:, np_local+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
             xvp(1, np_local+i) = max(xvp(1,np_local+i)-nc_node_dim, -rnf_buf)
+            GID(np_local+i) = GID_recv_buf(i)
         enddo
     else
         do i = 1, nppx
             xvp_dm(:, np_local_dm+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
             xvp_dm(1, np_local_dm+i) = max(xvp_dm(1,np_local_dm+i)-nc_node_dim, -rnf_buf)
+            GID_dm(np_local_dm+i) = GID_recv_buf(i)
         enddo
     endif
 
@@ -2040,6 +2185,7 @@ subroutine buffer_particles(command)
                         if (xvp(1, pp) < rnf_buf) then
                             np_buf = np_buf + 1
                             send_buf((np_buf-1)*6+1:np_buf*6) = xvp(:, pp)
+                            GID_send_buf(np_buf) = GID(pp)
                         endif
                         pp = ll(pp)
                     enddo
@@ -2050,6 +2196,7 @@ subroutine buffer_particles(command)
                         if (xvp_dm(1, pp) < rnf_buf) then
                             np_buf = np_buf + 1
                             send_buf((np_buf-1)*6+1:np_buf*6) = xvp_dm(:, pp)
+                            GID_send_buf(np_buf) = GID_dm(pp)
                         endif
                         pp = ll_dm(pp)
                     enddo
@@ -2088,9 +2235,18 @@ subroutine buffer_particles(command)
     call mpi_wait(srequest, sstatus, sierr)
     call mpi_wait(rrequest, rstatus, rierr)
 
+    call mpi_isend(GID_send_buf, np_buf, mpi_integer1, cart_neighbor(5), &
+                   tag, mpi_comm_world, srequest, sierr)
+    call mpi_irecv(GID_recv_buf, npmx, mpi_integer1, cart_neighbor(6), &
+                   tag, mpi_comm_world, rrequest, rierr)
+
+    call mpi_wait(srequest, sstatus, sierr)
+    call mpi_wait(rrequest, rstatus, rierr)
+
     if (command == 0) then
         do i = 1, npmx
             xvp(:, np_local+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
+            GID(np_local+i) = GID_recv_buf(i)
             if (abs(xvp(1, np_local+i)) .lt. eps) then
                 if(xvp(1, np_local+i) < 0.) then
                     xvp(1, np_local+i) = -eps
@@ -2104,6 +2260,7 @@ subroutine buffer_particles(command)
     else
         do i = 1, npmx
             xvp_dm(:, np_local_dm+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
+            GID_dm(np_local_dm+i) = GID_recv_buf(i)
             if (abs(xvp_dm(1, np_local_dm+i)) .lt. eps) then
                 if(xvp_dm(1, np_local_dm+i) < 0.) then
                     xvp_dm(1, np_local_dm+i) = -eps
@@ -2187,6 +2344,7 @@ subroutine buffer_particles(command)
                         if (xvp(2, pp) >= nc_node_dim-rnf_buf) then
                             np_buf = np_buf + 1
                             send_buf((np_buf-1)*6+1:np_buf*6) = xvp(:, pp)
+                            GID_send_buf(np_buf) = GID(pp)
                         endif
                         pp = ll(pp)
                     enddo
@@ -2197,6 +2355,7 @@ subroutine buffer_particles(command)
                         if (xvp_dm(2, pp) >= nc_node_dim-rnf_buf) then
                             np_buf = np_buf + 1
                             send_buf((np_buf-1)*6+1:np_buf*6) = xvp_dm(:, pp)
+                            GID_send_buf(np_buf) = GID_dm(pp)
                         endif
                         pp = ll_dm(pp)
                     enddo
@@ -2235,15 +2394,25 @@ subroutine buffer_particles(command)
     call mpi_wait(srequest, sstatus, sierr)
     call mpi_wait(rrequest, rstatus, rierr)
 
+    call mpi_isend(GID_send_buf, np_buf, mpi_integer1, cart_neighbor(4), &
+                   tag, mpi_comm_world, srequest, sierr)
+    call mpi_irecv(GID_recv_buf, nppy, mpi_integer1, cart_neighbor(3), &
+                   tag, mpi_comm_world, rrequest, rierr)
+
+    call mpi_wait(srequest, sstatus, sierr)
+    call mpi_wait(rrequest, rstatus, rierr)
+
     if (command == 0) then
         do i = 1, nppy
             xvp(:, np_local+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
             xvp(2, np_local+i) = max(xvp(2,np_local+i)-nc_node_dim, -rnf_buf)
+            GID(np_local+i) = GID_recv_buf(i)
         enddo
     else
         do i = 1, nppy
             xvp_dm(:, np_local_dm+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
             xvp_dm(2, np_local_dm+i) = max(xvp_dm(2,np_local_dm+i)-nc_node_dim, -rnf_buf)
+            GID_dm(np_local_dm+i) = GID_recv_buf(i)
         enddo
     endif
 
@@ -2270,6 +2439,7 @@ subroutine buffer_particles(command)
                         if (xvp(2, pp) < rnf_buf) then
                             np_buf = np_buf + 1
                             send_buf((np_buf-1)*6+1:np_buf*6) = xvp(:, pp)
+                            GID_send_buf(np_buf) = GID(pp)
                         endif
                         pp = ll(pp)
                     enddo
@@ -2280,6 +2450,7 @@ subroutine buffer_particles(command)
                         if (xvp_dm(2, pp) < rnf_buf) then
                             np_buf = np_buf + 1
                             send_buf((np_buf-1)*6+1:np_buf*6) = xvp_dm(:, pp)
+                            GID_send_buf(np_buf) = GID_dm(pp)
                         endif
                         pp = ll_dm(pp)
                     enddo
@@ -2318,9 +2489,18 @@ subroutine buffer_particles(command)
     call mpi_wait(srequest, sstatus, sierr)
     call mpi_wait(rrequest, rstatus, rierr)
 
+    call mpi_isend(GID_send_buf, np_buf, mpi_integer1, cart_neighbor(3), &
+                   tag, mpi_comm_world, srequest, sierr)
+    call mpi_irecv(GID_recv_buf, npmy, mpi_integer1, cart_neighbor(4), &
+                   tag, mpi_comm_world, rrequest, rierr)
+
+    call mpi_wait(srequest, sstatus, sierr)
+    call mpi_wait(rrequest, rstatus, rierr)
+
     if (command == 0) then
         do i = 1, npmy
             xvp(:, np_local+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
+            GID(np_local+i) = GID_recv_buf(i)
             if (abs(xvp(2, np_local+i)) .lt. eps) then
                 if(xvp(2, np_local+i) < 0.) then
                     xvp(2, np_local+i) = -eps
@@ -2334,6 +2514,7 @@ subroutine buffer_particles(command)
     else
         do i = 1, npmy
             xvp_dm(:, np_local_dm+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
+            GID_dm(np_local_dm+i) = GID_recv_buf(i)
             if (abs(xvp_dm(2, np_local_dm+i)) .lt. eps) then
                 if(xvp_dm(2, np_local_dm+i) < 0.) then
                     xvp_dm(2, np_local_dm+i) = -eps
@@ -2417,6 +2598,7 @@ subroutine buffer_particles(command)
                         if (xvp(3, pp) >= nc_node_dim-rnf_buf) then
                             np_buf = np_buf + 1
                             send_buf((np_buf-1)*6+1:np_buf*6) = xvp(:, pp)
+                            GID_send_buf(np_buf) = GID(pp)
                         endif
                         pp = ll(pp)
                     enddo
@@ -2427,6 +2609,7 @@ subroutine buffer_particles(command)
                         if (xvp_dm(3, pp) >= nc_node_dim-rnf_buf) then
                             np_buf = np_buf + 1
                             send_buf((np_buf-1)*6+1:np_buf*6) = xvp_dm(:, pp)
+                            GID_send_buf(np_buf) = GID_dm(pp)
                         endif
                         pp = ll_dm(pp)
                     enddo
@@ -2465,15 +2648,25 @@ subroutine buffer_particles(command)
     call mpi_wait(srequest, sstatus, sierr)
     call mpi_wait(rrequest, rstatus, rierr)
 
+    call mpi_isend(GID_send_buf, np_buf, mpi_integer1, cart_neighbor(2), &
+                   tag, mpi_comm_world, srequest, sierr)
+    call mpi_irecv(GID_recv_buf, nppz, mpi_integer1, cart_neighbor(1), &
+                   tag, mpi_comm_world, rrequest, rierr)
+
+    call mpi_wait(srequest, sstatus, sierr)
+    call mpi_wait(rrequest, rstatus, rierr)
+
     if (command == 0) then
         do i = 1, nppz
             xvp(:, np_local+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
             xvp(3, np_local+i) = max(xvp(3,np_local+i)-nc_node_dim, -rnf_buf)
+            GID(np_local+i) = GID_recv_buf(i)
         enddo
     else
         do i = 1, nppz
             xvp_dm(:, np_local_dm+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
             xvp_dm(3, np_local_dm+i) = max(xvp_dm(3,np_local_dm+i)-nc_node_dim, -rnf_buf)
+            GID_dm(np_local_dm+i) = GID_recv_buf(i)
         enddo
     endif
 
@@ -2500,6 +2693,7 @@ subroutine buffer_particles(command)
                         if (xvp(3, pp) < rnf_buf) then
                             np_buf = np_buf + 1
                             send_buf((np_buf-1)*6+1:np_buf*6) = xvp(:, pp)
+                            GID_send_buf(np_buf) = GID(pp)
                         endif
                         pp = ll(pp)
                     enddo
@@ -2510,6 +2704,7 @@ subroutine buffer_particles(command)
                         if (xvp_dm(3, pp) < rnf_buf) then
                             np_buf = np_buf + 1
                             send_buf((np_buf-1)*6+1:np_buf*6) = xvp_dm(:, pp)
+                            GID_send_buf(np_buf) = GID_dm(pp)
                         endif
                         pp = ll_dm(pp)
                     enddo
@@ -2548,9 +2743,18 @@ subroutine buffer_particles(command)
     call mpi_wait(srequest, sstatus, sierr)
     call mpi_wait(rrequest, rstatus, rierr)
 
+    call mpi_isend(GID_send_buf, np_buf, mpi_integer1, cart_neighbor(1), &
+                   tag, mpi_comm_world, srequest, sierr)
+    call mpi_irecv(GID_recv_buf, npmz, mpi_integer1, cart_neighbor(2), &
+                   tag, mpi_comm_world, rrequest, rierr)
+
+    call mpi_wait(srequest, sstatus, sierr)
+    call mpi_wait(rrequest, rstatus, rierr)
+
     if (command == 0) then
         do i = 1, npmz
             xvp(:, np_local+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
+            GID(np_local+i) = GID_recv_buf(i)
             if (abs(xvp(3, np_local+i)) .lt. eps) then
                 if(xvp(3, np_local+i) < 0.) then
                     xvp(3, np_local+i) = -eps
@@ -2564,6 +2768,7 @@ subroutine buffer_particles(command)
     else
         do i = 1, npmz
             xvp_dm(:, np_local_dm+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
+            GID_dm(np_local_dm+i) = GID_recv_buf(i)
             if (abs(xvp_dm(3, np_local_dm+i)) .lt. eps) then
                 if(xvp_dm(3, np_local_dm+i) < 0.) then
                     xvp_dm(3, np_local_dm+i) = -eps
@@ -2784,7 +2989,8 @@ subroutine velocity_density(command, glook, nfind)
     integer :: npart
     real, dimension(3) :: dr, rc
     real :: vx
-    integer(4) :: command, glook, nfind
+    integer(4) :: command, nfind
+    integer(1) :: glook
     logical :: converged
     integer(8) :: num_notconverged, num2
 
@@ -2919,7 +3125,7 @@ subroutine velocity_density(command, glook, nfind)
         write(*, *) "Finished velocity_density ... elapsed time = ", time2-time1
         if (num2 /= 0) then
             write(*,*) "WARNING: num_notconverged = ", num2, " ... consider increasing nfine_buf !!"
-            write(*,*) "         command, glook, nfind = ", command, glook, nfind
+            write(*,*) "         command, glook, nfind = ", command, glook, nfind 
         endif
     endif
 
@@ -3571,9 +3777,14 @@ end subroutine buffer_massdensity
 #endif
     real, dimension(3, nc) :: pktsum
 
-    real, dimension(nc) :: kcen, kcount
+    real(8), dimension(nc) :: kcen, kcount
+    real(8), dimension(nc) :: kcensum, kcountsum
     real    :: kavg
     integer :: ind, dx, dxy
+
+#ifdef LOGBIN
+    real :: k1r
+#endif
 
     real(8) time1, time2
     time1 = mpi_wtime(ierr)
@@ -3583,6 +3794,8 @@ end subroutine buffer_massdensity
 
     kcen(:)   = 0.
     kcount(:) = 0.
+    kcensum(:) = 0.
+    kcountsum(:) = 0.
 
 #ifndef SLAB
     dx  = fsize(1)
@@ -3637,10 +3850,17 @@ end subroutine buffer_massdensity
                 kr=sqrt(real(kx**2+ky**2+kz**2))
                 if(kx.eq.0 .and. ky <=0 .and. kz <=0)cycle;
                 if(kx.eq.0 .and. ky >0 .and. kz <0)cycle;
+#ifndef LOGBIN
                 if (kr .ne. 0) then
                     k1=ceiling(kr)
-                    k2=k1+1
                     w1=k1-kr
+#else
+                if (kr > 1. .and. kr <= hcr) then
+                    k1r = log10(kr)/log10(hcr)*numbins
+                    k1  = ceiling(k1r)
+                    w1 = k1-k1r
+#endif
+                    k2=k1+1
                     w2=1-w1
                     x = pi*real(kx)/ncr
                     y = pi*real(ky)/ncr
@@ -3676,8 +3896,13 @@ end subroutine buffer_massdensity
                     pkt(2,k2,k)=pkt(2,k2,k)+w2*pow**2
                     pkt(3,k2,k)=pkt(3,k2,k)+w2
 
+#ifdef LOGBIN
+                    kcen(k1) = kcen(k1) + w1 * log10(kr)
+                    kcen(k2) = kcen(k2) + w2 * log10(kr)
+#else
                     kcen(k1) = kcen(k1) + w1 * kr
                     kcen(k2) = kcen(k2) + w2 * kr
+#endif
 
                     kcount(k1) = kcount(k1) + w1
                     kcount(k2) = kcount(k2) + w2
@@ -3698,6 +3923,8 @@ end subroutine buffer_massdensity
 
     !! Reduce to rank 0
     call mpi_reduce(pkt(:,:,1),pktsum,3*nc,mpi_real,mpi_sum,0,mpi_comm_world,ierr)
+    call mpi_reduce(kcen, kcensum, nc, mpi_real8, mpi_sum, 0, mpi_comm_world, ierr)
+    call mpi_reduce(kcount, kcountsum, nc, mpi_real8, mpi_sum, 0, mpi_comm_world, ierr)
 
     !! Divide by weights
     !! pk(1,k) stores pk(k)
@@ -3717,7 +3944,11 @@ end subroutine buffer_massdensity
                 pk(1:2,k)=pktsum(1:2,k)/pktsum(3,k)
                 pk(2,k)=sqrt(abs((pk(2,k)-pk(1,k)**2)/(pktsum(3,k)-1)))
 
-                kavg = kcen(k) / kcount(k)
+#ifdef LOGBIN
+                kavg = real(10**(kcensum(k) / kcountsum(k)), kind=4)
+#else
+                kavg = real(kcensum(k) / kcountsum(k), kind=4)
+#endif
                 pk(3,k) = 2. * pi * kavg / box
 
 #ifdef NGP
@@ -3758,7 +3989,9 @@ subroutine writevelocityfield(command)
     ! Determine conversion to proper velocity [km/s]
     !
 
-    zcur      = z_checkpoint(cur_checkpoint)
+    if (rank == 0)  zcur = z_checkpoint(cur_checkpoint)
+    call mpi_bcast(zcur, 1, mpi_real, 0, mpi_comm_world, ierr)
+
     vsim2phys = 300. * sqrt(omega_m) * box * (1. + zcur) / 2. / nc
 
     if (rank == 0) write(*,*) "zcur = ", zcur, "vsim2phys = ", vsim2phys
@@ -3767,7 +4000,7 @@ subroutine writevelocityfield(command)
     ! Checkpoint and rank strings
     !
 
-    write(z_write, '(f7.3)') z_checkpoint(cur_checkpoint)
+    write(z_write, '(f7.3)') zcur
     z_write = adjustl(z_write)
 
     write(rank_string, '(i4)') rank

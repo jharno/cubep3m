@@ -20,8 +20,12 @@
 !! * Optional flags:
 !!   -DNGP: Uses NGP interpolation for binning of the power spectrum. 
 !!   -DSLAB: Alternatively run with FFTW slab decomposition instead of P3DFFT pencil decomposition.
+!!   -DLOGBIN: Use this to compute power spectrum with logarithmically spaced bins. Can change number of bins below.
+!!   -DCOARSE_HACK: Enables a hack to coarsen the grid for which the particles are interpolated to.
+!!                  Must be used in conjunction to a change made in the parameters file (see below).
 !!   -Dwrite_den: Writes gridded density fields to binary files. 
 !!   -Dwrite_poisson: Writes the gridded Poisson field to binary files.
+!!   -DGROUPS: Instead of using PoissinNoise subroutine, remove noise by splitting each population into two groups.
 !!   -DKAISER: Adjusts for redshift space distortions.
 !!   -DPLPLOT: Plots power spectra at end.
 !!   -DDEBUG: Output useful debugging information.
@@ -31,7 +35,16 @@ program cic_power_dmnu
   implicit none
 
   include 'mpif.h'
+#ifndef COARSE_HACK
   include '../../parameters'
+#else
+  !! parameters_hack should have the following line changed from:
+  !! integer(4),   parameter :: nc = (nf_tile-2*nf_buf)*tiles_node_dim*nodes_dim 
+  !! to something like:
+  !! integer, parameter :: coarsen_factor = 4
+  !! integer(4),   parameter :: nc = (nf_tile-2*nf_buf)*tiles_node_dim*nodes_dim / coarsen_factor
+  include '../../parameters_hack'
+#endif
 
   logical, parameter :: correct_kernel=.false.
   character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints'
@@ -43,8 +56,16 @@ program cic_power_dmnu
 
   !! np is the number of particles
   !! np should be set to nc (1:1), hc (1:2), or qc (1:4)
+#ifndef COARSE_HACK
   integer, parameter :: np=hc
+#else
+  integer, parameter :: np=hc*coarsen_factor
+#endif
   real, parameter    :: npr=np
+
+#ifdef LOGBIN
+  integer, parameter :: numbins = hc / 48 
+#endif
 
   !! internals
   integer, parameter :: max_checkpoints=100
@@ -58,6 +79,8 @@ program cic_power_dmnu
   integer(4), parameter :: max_np = density_buffer * ( ((nf_tile-2*nf_buf)*tiles_node_dim/2)**3 + &
                                   (8*nf_buf**3 + 6*nf_buf*(((nf_tile-2*nf_buf)*tiles_node_dim)**2) + &
                                   12*(nf_buf**2)*((nf_tile-2*nf_buf)*tiles_node_dim))/8.0 )
+
+  integer(4), parameter :: max_np_dm = max_np / ratio_nudm_dim**3
   integer(4), parameter :: np_buffer=int(2./3.*max_np)
 
   integer(4), parameter :: nodes = nodes_dim * nodes_dim * nodes_dim
@@ -69,7 +92,10 @@ program cic_power_dmnu
   integer(4), dimension(3) :: slab_coord, cart_coords
   integer(4) :: slab_rank, mpi_comm_cart, cart_rank, rank, ierr
 
-  integer(4) :: np_local
+  integer(4) :: np_local, np_local_dm
+#ifdef GROUPS
+  real(4) :: np_groups(0:1), np_groups_dm(0:1)
+#endif
   integer(8) :: plan, iplan
   logical :: firstfftw
 
@@ -78,6 +104,7 @@ program cic_power_dmnu
 
   !! Dark matter arrays
   real, dimension(6,max_np) :: xvp
+  real, dimension(6,max_np_dm) :: xvp_dm
   real, dimension(3,np_buffer) :: xp_buf
   real, dimension(3*np_buffer) :: send_buf, recv_buf
   real, dimension(0:nc_node_dim+1,0:nc_node_dim+1,0:nc_node_dim+1) :: den 
@@ -113,24 +140,41 @@ program cic_power_dmnu
   real, dimension(nc_node_dim, nc_node_dim, nc_pen, 0:nodes_pen-1) :: recv_cube
 #endif
 
+#ifdef GROUPS
+  !! Array storing what group each particle belongs to (for autocorrelation break each species 
+  !! into two groups and then cross-correlate to remove shot noise)
+  integer(1) :: GID(max_np)
+#endif
+
   !! Equivalence arrays to save memory
 #ifdef SLAB
   equivalence (den,slab_work,recv_cube,xp_buf)
 #else
   equivalence (den,recv_cube,xp_buf) 
 #endif
+#ifndef GROUPS
   equivalence (xvp,slab,cube)
+#else
+  equivalence (slab,cube)
+#endif
 
   !! Common block
 #ifdef PLPLOT
- common xvp,send_buf,den_buf,den,recv_buf,pkdm,poisson_dm,poisson_nu,pkplot,slab2
+ common xvp,xvp_dm,send_buf,den_buf,den,recv_buf,pkdm,poisson_dm,poisson_nu,pkplot,slab2
 #else
-  common xvp,send_buf,den_buf,den,recv_buf,pkdm,poisson_dm,poisson_nu,slab2
+ common xvp,xvp_dm,send_buf,den_buf,den,recv_buf,pkdm,poisson_dm,poisson_nu,slab2
+#endif
+#ifdef GROUPS
+  common /gvar/ slab, GID
 #endif
 
 !!---start main--------------------------------------------------------------!!
 
     call mpi_initialize
+#ifdef GROUPS
+  call initialize_random_number
+#endif
+
     if (rank == 0) call writeparams
     firstfftw=.true.  ! initialize fftw so that it generates the plans
   
@@ -139,31 +183,78 @@ program cic_power_dmnu
     do cur_checkpoint = 1, num_checkpoints
         
         call initvar
-    
-        !! Compute Poisson noise first so don't overwrite slab's later
-        call PoissonNoise(0) 
-        call powerspectrum(slab,slab,poisson_dm)
-        call PoissonNoise(1) 
-        call powerspectrum(slab,slab,poisson_nu)
 
-        !! Read dark matter particles and compute its power spectra
+#ifndef GROUPS 
+        !
+        ! Compute Poisson noise first so don't overwrite slab's later
+        !
+
+        call PoissonNoise(0) 
+        call powerspectrum(slab,slab,poisson_nu)
+        call PoissonNoise(1) 
+        call powerspectrum(slab,slab,poisson_dm)
+#endif
+
+        !
+        ! Compute neutrino power spectrum
+        !
+
         call read_particles(0)
-        call pass_particles
+        call pass_particles(0)
+#ifdef GROUPS
+        !! Randomly assign neutrinos to one of two groups 
+        call assign_groups(0)
+        !! Fourier transform density field for group 0 and store in slab2
+        call darkmatter(0, 0, 0)
+        slab2(:,:,:) = slab(:,:,:)
+        !! Fourier transform density field for group 1 and compute correlation with group 0
+        call darkmatter(0, 1, 0)
+        call powerspectrum(slab,slab2,pkdm)
+#else
         call darkmatter(0)
         call powerspectrum(slab,slab,pkdm)
+#endif
         if (rank == 0) call writepowerspectra(0)
     
+#ifndef GROUPS
         !! Store dark matter Fourier field in slab2 for cross spectra later
         slab2(:,:,:) = slab(:,:,:) 
-    
-        !! Read neutrino particles and compute its power spectra
+#endif    
+
+        !
+        ! Compute dark matter power spectrum
+        !
+ 
         call read_particles(1)
-        call pass_particles
+        call pass_particles(1)
+#ifdef GROUPS
+        !! Randomly assign dark matter to one of two groups 
+        call assign_groups(1)
+        !! Fourier transform density field for group 0 and store in slab2
+        call darkmatter(1, 0, 0)
+        slab2(:,:,:) = slab(:,:,:)
+        !! Fourier transform density field for group 1 and compute correlation with group 0
+        call darkmatter(1, 1, 0)
+        call powerspectrum(slab,slab2,pkdm)
+#else
         call darkmatter(1)
         call powerspectrum(slab,slab,pkdm)
+#endif
         if (rank == 0) call writepowerspectra(1)
 
-        !! Compute cross power spectra
+        !
+        ! Compute cross power spectra
+        !
+
+#ifdef GROUPS
+        !! Put all particles into group 0
+        call clear_groups
+        !! Fourier transform neutrino density field and store in slab2
+        call darkmatter(0, 0, 1)
+        slab2(:,:,:) = slab(:,:,:)
+        !! Fourier transform dark matter density field and cross with neutrinos
+        call darkmatter(1, 0, 1) 
+#endif
         call powerspectrum(slab,slab2,pkdm)
         if (rank == 0) call writepowerspectra(2)
 
@@ -321,28 +412,20 @@ contains
     write(rank_string,'(i4)') rank
     rank_string=adjustl(rank_string)
 
-    if (command == 0) then !! We are reading dark matter
-
-        if (rank == 0) write(*,*) "Reading dark matter particles..."
-
-        if(z_write .eq. z_i) then
-           check_name=ic_path//'xv'//rank_string(1:len_trim(rank_string))//'.ic'
-        else
-           check_name=output_path//z_string(1:len_trim(z_string))//'xv'// &
-                   rank_string(1:len_trim(rank_string))//'.dat'
-        endif
-
-    else !! We are reading neutrinos
-
-        if (rank == 0) write(*,*) "Reading neutrino particles..."
-
+    if (command == 0) then
         if(z_write .eq. z_i) then
            check_name=ic_path//'xv'//rank_string(1:len_trim(rank_string))//'_nu.ic'
         else
            check_name=output_path//z_string(1:len_trim(z_string))//'xv'// &
                    rank_string(1:len_trim(rank_string))//'_nu.dat'
         endif
-
+    else
+        if(z_write .eq. z_i) then
+           check_name=ic_path//'xv'//rank_string(1:len_trim(rank_string))//'.ic'
+        else
+           check_name=output_path//z_string(1:len_trim(z_string))//'xv'// &
+                   rank_string(1:len_trim(rank_string))//'.dat'
+        endif
     endif
 
 !! open checkpoint    
@@ -356,28 +439,62 @@ contains
     endif
 
 !! read in checkpoint header data
-    if(z_write .eq. z_i)then
-       read(21) np_local
-       a = 1.0/(1.0 + z_i)
+
+    if (command == 0) then
+        read(21) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint, &
+                   sim_projection,sim_halofind,mass_p
     else
-    read(21) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint, &
-               sim_projection,sim_halofind,mass_p
+        read(21) np_local_dm,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint, &
+                   sim_projection,sim_halofind,mass_p
     endif
 
-    if (np_local > max_np) then
-      write(*,*) 'too many particles to store'
-      write(*,*) 'rank',rank,'np_local',np_local,'max_np',max_np
-      call mpi_abort(mpi_comm_world,ierr,ierr)
+    !! Check for memory problems
+    if (command == 0) then
+        if (np_local > max_np) then
+          write(*,*) 'ERROR: Too many particles to store in memory!'
+          write(*,*) 'rank', rank, 'np_local', np_local, 'max_np', max_np
+          call mpi_abort(mpi_comm_world, ierr, ierr)
+        endif
+    else
+        if (np_local_dm > max_np_dm) then
+          write(*,*) 'ERROR: Too many particles to store in memory!'
+          write(*,*) 'rank', rank, 'np_local', np_local, 'max_np', max_np
+          call mpi_abort(mpi_comm_world, ierr, ierr)
+        endif
     endif
 
-!! tally up total number of particles
-    call mpi_reduce(real(np_local,kind=4),np_total,1,mpi_real, &
-                         mpi_sum,0,mpi_comm_world,ierr)
-    if (rank == 0) write(*,*) 'number of particles =', int(np_total,8)
+    !! Tally up total number of particles
+    if (command == 0) then
+        call mpi_reduce(real(np_local, kind=4), np_total, 1, mpi_real, &
+                         mpi_sum, 0, mpi_comm_world, ierr)
+    else
+        call mpi_reduce(real(np_local_dm, kind=4), np_total, 1, mpi_real, &
+                         mpi_sum, 0, mpi_comm_world, ierr)
+    endif
 
-    do j=1, np_local
-        read(21) xvp(:,j)
-    enddo
+    if (rank == 0) write(*,*) 'Total number of particles = ', int(np_total,8)
+
+    if (command == 0) then
+        do j=1, np_local
+            read(21) xvp(:,j)
+        enddo
+    else
+        do j=1, np_local_dm
+            read(21) xvp_dm(:,j)
+        enddo
+    endif
+
+#ifdef COARSE_HACK
+    if (command == 0) then
+        do j=1, np_local
+            xvp(1:3,j) = xvp(1:3,j)/coarsen_factor
+        enddo
+    else
+        do j=1, np_local_dm
+            xvp_dm(1:3,j) = xvp_dm(1:3,j)/coarsen_factor
+        enddo
+    endif
+#endif
 
     close(21)
  
@@ -386,10 +503,14 @@ contains
     !Red Shift Distortion: x_z -> x_z +  v_z/H(Z)   
     !Converting seconds into simulation time units
     !cancels the H0...
-    
-    xvp(3,:)=xvp(3,:) + xvp(6,:)*1.5/sqrt(a*(1+a*(1-omega_m-omega_l)/omega_m + omega_l/omega_m*a**3))  
 
-    call pass_particles
+    if (command == 0) then
+        xvp(3,:)=xvp(3,:) + xvp(6,:)*1.5/sqrt(a*(1+a*(1-omega_m-omega_l)/omega_m + omega_l/omega_m*a**3))
+    else
+        xvp_dm(3,:)=xvp_dm(3,:) + xvp_dm(6,:)*1.5/sqrt(a*(1+a*(1-omega_m-omega_l)/omega_m + omega_l/omega_m*a**3))
+    endif
+
+    call pass_particles(command)
 
     if(rank==0) then
        write(*,*) '**********************'
@@ -467,27 +588,43 @@ subroutine pack_pencils
 
     integer(4), dimension(2*nodes_dim) :: requests
     integer(4), dimension(MPI_STATUS_SIZE,2*nodes_dim) :: wait_status
+    integer(4) nc_pen_break, breakup
+    real(4) :: passGB
 
+    !
+    ! Ensure that send/recv buffers are no larger than 1 GB (really after 2 GB we get problems)
+    !
+
+    breakup = 1
     num_elements = nc_node_dim * nc_node_dim * nc_pen
+    passGB = 4. * num_elements / 1024.**3
+    if (passGB > 1.) then
+        breakup = 2**ceiling(log(passGB)/log(2.))
+    endif
+    num_elements = num_elements / breakup
 
     !
     ! Send the data from cube to recv_cube
     !
 
-    do j = 0, nodes_dim - 1
-        pen_slice = j
-        tag  = rank**2
-        rtag = pen_neighbor_fm(j)**2
-        call mpi_isend(cube(1,1, pen_slice*nc_pen + 1), num_elements, &
-                       mpi_real, pen_neighbor_to(j), tag, mpi_comm_world, &
-                       requests(pen_slice+1),ierr)
-        call mpi_irecv(recv_cube(1,1,1,pen_slice), &
-                       num_elements, mpi_real, pen_neighbor_fm(j),rtag, &
-                       mpi_comm_world, requests(pen_slice+1+nodes_dim), &
-                       ierr)
-    enddo
+    do k = 1, breakup
+        nc_pen_break = nc_pen/breakup*(k-1)
+        do j = 0, nodes_dim - 1
+            pen_slice = j
+            tag  = rank**2
+            rtag = pen_neighbor_fm(j)**2
+            call mpi_isend(cube(1,1, pen_slice*nc_pen + nc_pen_break + 1), num_elements, &
+                           mpi_real, pen_neighbor_to(j), tag, mpi_comm_world, &
+                           requests(pen_slice+1),ierr)
+            call mpi_irecv(recv_cube(1,1,1+nc_pen_break,pen_slice), &
+                           num_elements, mpi_real, pen_neighbor_fm(j),rtag, &
+                           mpi_comm_world, requests(pen_slice+1+nodes_dim), &
+                           ierr)
+        enddo
 
-    call mpi_waitall(2*nodes_dim, requests, wait_status, ierr)
+        call mpi_waitall(2*nodes_dim, requests, wait_status, ierr)
+
+    enddo
 
     !
     ! Place this data into the pencils (stored in the slab array)
@@ -536,8 +673,6 @@ subroutine unpack_slab
 
     num_elements = nc_node_dim * nc_node_dim * nc_slab
 
-    call mpi_barrier(mpi_comm_world,ierr)
-
 !! swap data
 
    do j = 0, nodes_dim - 1
@@ -571,6 +706,8 @@ subroutine unpack_pencils
     integer(4) :: pen_slice,num_elements,tag,rtag
     integer(4), dimension(2*nodes_dim) :: requests
     integer(4), dimension(MPI_STATUS_SIZE,2*nodes_dim) :: wait_status
+    integer(4) nc_pen_break, breakup
+    real(4) :: passGB
 
     !
     ! Place data in the recv_cube buffer
@@ -587,26 +724,40 @@ subroutine unpack_pencils
         enddo
     enddo
 
+    !
+    ! Ensure that send/recv buffers are no larger than 1 GB (really after 2 GB we get problems)
+    !
+
+    breakup = 1
     num_elements = nc_node_dim * nc_node_dim * nc_pen
+    passGB = 4. * num_elements / 1024.**3
+    if (passGB > 1.) then
+        breakup = 2**ceiling(log(passGB)/log(2.))
+    endif
+    num_elements = num_elements / breakup
 
     !
     ! Put this data back into cube
     !
 
-    do j = 0, nodes_dim - 1
-        pen_slice = j
-        tag  = rank**2
-        rtag = pen_neighbor_to(j)**2
-        call mpi_isend(recv_cube(1,1,1,pen_slice), num_elements, &
-                       mpi_real, pen_neighbor_fm(j), tag, mpi_comm_world, &
-                       requests(pen_slice+1),ierr)
-        call mpi_irecv(cube(1,1,pen_slice*nc_pen + 1), &
-                       num_elements, mpi_real, pen_neighbor_to(j),rtag, &
-                       mpi_comm_world, requests(pen_slice+1+nodes_dim), &
-                       ierr)
-    enddo
+    do k = 1, breakup
+        nc_pen_break = nc_pen/breakup*(k-1)
+        do j = 0, nodes_dim - 1
+            pen_slice = j
+            tag  = rank**2
+            rtag = pen_neighbor_to(j)**2
+            call mpi_isend(recv_cube(1,1,1+nc_pen_break,pen_slice), num_elements, &
+                           mpi_real, pen_neighbor_fm(j), tag, mpi_comm_world, &
+                           requests(pen_slice+1),ierr)
+            call mpi_irecv(cube(1,1,pen_slice*nc_pen + nc_pen_break + 1), &
+                           num_elements, mpi_real, pen_neighbor_to(j),rtag, &
+                           mpi_comm_world, requests(pen_slice+1+nodes_dim), &
+                           ierr)
+        enddo
 
-    call mpi_waitall(2*nodes_dim,requests, wait_status, ierr)
+        call mpi_waitall(2*nodes_dim,requests, wait_status, ierr)
+
+    enddo
 
 end subroutine unpack_pencils
 #endif
@@ -781,17 +932,17 @@ end subroutine cp_fftw
 #endif
 
 #ifdef KAISER
-    if (command == 0) then !! Dark matter power spectra
+    if (command == 1) then !! Dark matter power spectra
         fn=output_path//z_write(1:len_trim(z_write))//prefix//'-RSD.dat' 
-    else if (command == 1) then !! Neutrino power spectra
+    else if (command == 0) then !! Neutrino power spectra
         fn=output_path//z_write(1:len_trim(z_write))//prefix//'-RSD_nu.dat'
     else !! Dark matter-neutrino cross spectra
         fn=output_path//z_write(1:len_trim(z_write))//prefix//'-RSD_dmnu.dat'
     endif
 #else
-    if (command == 0) then !! Dark matter power spectra
+    if (command == 1) then !! Dark matter power spectra
         fn=output_path//z_write(1:len_trim(z_write))//prefix//'.dat'
-    else if (command == 1) then !! Neutrino power spectra
+    else if (command == 0) then !! Neutrino power spectra
         fn=output_path//z_write(1:len_trim(z_write))//prefix//'_nu.dat'
     else !! Dark matter-neutrino cross spectra
         fn=output_path//z_write(1:len_trim(z_write))//prefix//'_dmnu.dat'
@@ -800,24 +951,36 @@ end subroutine cp_fftw
 
     write(*,*) 'Writing ',fn
     open(11,file=fn,recl=500)
+#ifdef LOGBIN
+    do k=2,numbins+1
+#else
     do k=2,hc+1
+#endif
        kr=2*pi*(k-1)/box
 #ifdef NGP
-       if (command == 0) then
+#ifdef GROUPS
+         write(11,*) pkdm(3,k-1),pkdm(1:2,k-1)
+#else
+       if (command == 1) then
          write(11,*) pkdm(3,k-1),pkdm(1:2,k-1),poisson_dm(1:2,k-1)
-       else if (command == 1) then
+       else if (command == 0) then
          write(11,*) pkdm(3,k-1),pkdm(1:2,k-1),poisson_nu(1:2,k-1)
        else !! No poission noise with cross spectra
          write(11,*) pkdm(3,k-1),pkdm(1:2,k-1)
        endif
+#endif
 #else
-       if (command == 0) then
+#ifdef GROUPS
+         write(11,*) pkdm(3,k),pkdm(1:2,k)
+#else
+       if (command == 1) then
          write(11,*) pkdm(3,k),pkdm(1:2,k),poisson_dm(1:2,k)
-       else if (command == 1) then
+       else if (command == 0) then
          write(11,*) pkdm(3,k),pkdm(1:2,k),poisson_nu(1:2,k)
        else !! No poission noise with cross spectra
          write(11,*) pkdm(3,k),pkdm(1:2,k)
        endif
+#endif
 #endif
 #ifdef PLPLOT
        kp=k-1
@@ -840,7 +1003,12 @@ end subroutine cp_fftw
 
 !!------------------------------------------------------------------!!
 
-  subroutine darkmatter(command)
+#ifdef GROUPS
+subroutine darkmatter(command, glook, canwrite)
+#else
+subroutine darkmatter(command)
+#endif
+
     implicit none
     integer :: i,j,k, fstat
     integer :: i1,j1,k1
@@ -851,6 +1019,9 @@ end subroutine cp_fftw
     character(len=4) :: rank_string
     character(len=100) :: check_name
     integer :: command
+#ifdef GROUPS
+    integer(4) :: glook, canwrite
+#endif
 
     real time1,time2
     call cpu_time(time1)
@@ -862,54 +1033,64 @@ end subroutine cp_fftw
     enddo
 
     !! Assign masses to grid to compute dm power spectrum
+#ifdef GROUPS
+    call cicmass(command, glook)
+#else
     call cicmass(command)
+#endif
 
     !! have to accumulate buffer density 
     call mesh_buffer
     cube=den(1:nc_node_dim,1:nc_node_dim,1:nc_node_dim)
 
 #ifdef write_den
-!! generate checkpoint names on each node
-    if (rank==0) then
-       z_write = z_checkpoint(cur_checkpoint)
-       print *,'Wrinting density to file for z = ',z_write
-    endif
+#ifdef GROUPS
+    if (canwrite == 1) then
+#endif
+    !! generate checkpoint names on each node
+        if (rank==0) then
+           z_write = z_checkpoint(cur_checkpoint)
+           print *,'Wrinting density to file for z = ',z_write
+        endif
 
-    call mpi_bcast(z_write,1,mpi_real,0,mpi_comm_world,ierr)
+        call mpi_bcast(z_write,1,mpi_real,0,mpi_comm_world,ierr)
 
-    write(z_string,'(f7.3)') z_write
-    z_string=adjustl(z_string)
-    write(rank_string,'(i4)') rank
-    rank_string=adjustl(rank_string)
+        write(z_string,'(f7.3)') z_write
+        z_string=adjustl(z_string)
+        write(rank_string,'(i4)') rank
+        rank_string=adjustl(rank_string)
 
 #ifdef KAISER
-    if (command == 0) then !! Dark matter
-    check_name=output_path//z_string(1:len_trim(z_string))//'den'// &
-               rank_string(1:len_trim(rank_string))//'-rsd.dat'
-    else !! Neutrinos
-    check_name=output_path//z_string(1:len_trim(z_string))//'den'// &
-               rank_string(1:len_trim(rank_string))//'-rsd_nu.dat'
-    endif
+        if (command == 1) then !! Dark matter
+        check_name=output_path//z_string(1:len_trim(z_string))//'den'// &
+                   rank_string(1:len_trim(rank_string))//'-rsd.dat'
+        else !! Neutrinos
+        check_name=output_path//z_string(1:len_trim(z_string))//'den'// &
+                   rank_string(1:len_trim(rank_string))//'-rsd_nu.dat'
+        endif
 #else 
-    if (command == 0) then !! Dark matter
-    check_name=output_path//z_string(1:len_trim(z_string))//'den'// &
-               rank_string(1:len_trim(rank_string))//'.dat'
-    else !! Neutrinos
-    check_name=output_path//z_string(1:len_trim(z_string))//'den'// &
-               rank_string(1:len_trim(rank_string))//'_nu.dat'
-    endif
+        if (command == 1) then !! Dark matter
+        check_name=output_path//z_string(1:len_trim(z_string))//'den'// &
+                   rank_string(1:len_trim(rank_string))//'.dat'
+        else !! Neutrinos
+        check_name=output_path//z_string(1:len_trim(z_string))//'den'// &
+                   rank_string(1:len_trim(rank_string))//'_nu.dat'
+        endif
 #endif
 
-!! open and write density file   
-    open(unit=21,file=check_name,status="replace",iostat=fstat,access="stream")
+    !! open and write density file   
+        open(unit=21,file=check_name,status="replace",iostat=fstat,access="stream")
 
-    if (fstat /= 0) then
-      write(*,*) 'error opening density file'
-      write(*,*) 'rank',rank,'file:',check_name
-      call mpi_abort(mpi_comm_world,ierr,ierr)
+        if (fstat /= 0) then
+          write(*,*) 'error opening density file'
+          write(*,*) 'rank',rank,'file:',check_name
+          call mpi_abort(mpi_comm_world,ierr,ierr)
+        endif
+
+        write(21) cube
+#ifdef GROUPS
     endif
-
-    write(21) cube
+#endif
 #endif
 
     sum_dm_local=sum(cube) 
@@ -944,7 +1125,7 @@ end subroutine cp_fftw
       dsum=dsumt/real(nc)**3
       dvar=sqrt(dvart/real(nc)**3)
       write(*,*)
-      if (command == 0) then
+      if (command == 1) then
           write(*,*) 'DM min    ',dmint
           write(*,*) 'DM max    ',dmaxt
           write(*,*) 'Delta sum ',real(dsum,8)
@@ -969,6 +1150,7 @@ end subroutine cp_fftw
 
 !!------------------------------------------------------------------!!
 
+#ifndef GROUPS
   subroutine PoissonNoise(command)
     implicit none
     integer :: i,j,k, fstat
@@ -991,15 +1173,20 @@ end subroutine cp_fftw
     enddo
 
     ! Randomize positions across all nodes, hence np_local should be equal
-    if (command == 0) then !! Dark matter are further reduced by factor of ratio_nudm_dim 
-        np_local = (np_node_dim/ratio_nudm_dim)**3
-    else
-        np_local = np_node_dim**3
+    if (command == 0) then 
+        np_local = np_node_dim**3 
+    else !! Dark matter are further reduced by factor of ratio_nudm_dim 
+        np_local_dm = (np_node_dim/ratio_nudm_dim)**3
     endif
 
     ! Assign particles to random positions between 0 and nc_node_dim
-    call random_number(xvp(1:3,:np_local))
-    xvp(1:3,:np_local) = xvp(1:3,:np_local)*nc_node_dim
+    if (command == 0) then
+        call random_number(xvp(1:3,:np_local))
+        xvp(1:3,:np_local) = xvp(1:3,:np_local)*nc_node_dim
+    else
+        call random_number(xvp_dm(1:3,:np_local_dm))
+        xvp_dm(1:3,:np_local_dm) = xvp_dm(1:3,:np_local_dm)*nc_node_dim
+    endif
 
     !! Assign masses to grid to compute dm power spectrum
     call cicmass(command)
@@ -1023,7 +1210,7 @@ end subroutine cp_fftw
     rank_string=adjustl(rank_string)
 
 #ifdef KAISER
-    if (command == 0) then !! Dark matter
+    if (command == 1) then !! Dark matter
     check_name=output_path//z_string(1:len_trim(z_string))//'den-poisson'// &
                rank_string(1:len_trim(rank_string))//'-rsd.dat'
     else !! Neutrinos
@@ -1031,7 +1218,7 @@ end subroutine cp_fftw
                rank_string(1:len_trim(rank_string))//'-rsd_nu.dat'
     endif
 #else 
-    if (command == 0) then !! Dark matter
+    if (command == 1) then !! Dark matter
     check_name=output_path//z_string(1:len_trim(z_string))//'den-poisson'// &
                rank_string(1:len_trim(rank_string))//'.dat'
     else !! Neutrinos
@@ -1100,337 +1287,419 @@ end subroutine cp_fftw
     return
 
   end subroutine PoissonNoise
+#endif
 
 !!------------------------------------------------------------------!!
 
-  subroutine pass_particles
+subroutine pass_particles(command)
+    !
+    ! Pass particles inside buffer space to their appropriate nodes.
+    !
+
     implicit none
 
-    integer i,pp,np_buf,np_exit,npo,npi
-    integer*8 np_final
+    integer i,pp,np_buf,np_exit,np_final,npo,npi
     real x(3),lb,ub
     integer, dimension(mpi_status_size) :: status,sstatus,rstatus
     integer :: tag,srequest,rrequest,sierr,rierr
     real(4), parameter :: eps = 1.0e-03
+    integer(4) :: command
 
-    lb=0.0
-    ub=real(nc_node_dim)
+    real(8) time1, time2
+    time1 = mpi_wtime(ierr)
 
-    np_buf=0
-    pp=1
+    !
+    ! Identify particles within the buffer
+    !
+
+    lb = 0.
+    ub = real(nc_node_dim)
+
+    np_buf = 0
+    pp = 1
+
     do
-      if (pp > np_local) exit
-      x=xvp(:3,pp)
-      if (x(1) < lb .or. x(1) >= ub .or. x(2) < lb .or. x(2) >= ub .or. &
-          x(3) < lb .or. x(3) >= ub ) then
-!        write (*,*) 'PARTICLE OUT',xv(:,pp)
-        np_buf=np_buf+1
-        if (np_buf > np_buffer) then
-          print *,rank,'np_buffer =',np_buffer,'exceeded - np_buf =',np_buf
-          call mpi_abort(mpi_comm_world,ierr,ierr)
-        endif 
-        xp_buf(:,np_buf)=xvp(:3,pp)
-        xvp(:,pp)=xvp(:,np_local)
-        np_local=np_local-1
-        cycle 
-      endif
-      pp=pp+1
+
+        if (command == 0) then
+            if (pp > np_local) exit
+        else
+            if (pp > np_local_dm) exit
+        endif
+
+        !! Read its position  
+        if (command == 0) then
+            x = xvp(1:3, pp)
+        else
+            x = xvp_dm(1:3, pp)
+        endif
+
+        !! See if it lies within the buffer
+        if (x(1) < lb .or. x(1) >= ub .or. x(2) < lb .or. x(2) >= ub .or. &
+            x(3) < lb .or. x(3) >= ub ) then
+
+            !! Make sure we aren't exceeding the maximum
+            np_buf = np_buf + 1
+
+            if (np_buf > np_buffer) then
+                print *, rank, 'np_buffer =', np_buffer, 'exceeded - np_buf =', np_buf
+                call mpi_abort(mpi_comm_world, ierr, ierr)
+            endif
+
+            if (command == 0) then
+                xp_buf(:, np_buf) = xvp(1:3, pp)
+                xvp(:, pp)        = xvp(:, np_local)
+                np_local          = np_local - 1
+            else
+                xp_buf(:, np_buf) = xvp_dm(1:3, pp)
+                xvp_dm(:, pp)     = xvp_dm(:, np_local_dm)
+                np_local_dm       = np_local_dm - 1
+            endif
+
+            cycle
+
+        endif
+
+        pp = pp + 1
+
     enddo
- 
-    call mpi_reduce(np_buf,np_exit,1,mpi_integer,mpi_sum,0, &
-                    mpi_comm_world,ierr) 
+
+    call mpi_reduce(np_buf, np_exit, 1, mpi_integer, mpi_sum, 0, &
+                    mpi_comm_world, ierr)
 
 #ifdef DEBUG
-    do i=0,nodes-1
-      if (rank==i) print *,rank,'np_exit=',np_buf
-      call mpi_barrier(mpi_comm_world,ierr)
+    do i = 0, nodes-1
+      if (rank == i) print *, rank, 'np_exit = ', np_buf
+      call mpi_barrier(mpi_comm_world, ierr)
     enddo
 #endif 
 
-    if (rank == 0) print *,'total exiting particles =',np_exit
+    if (rank == 0) print *,'Total exiting particles = ',np_exit
 
-! pass +x
+    !
+    ! Pass +x
+    !
 
-    tag=11 
-    npo=0
-    pp=1
-    do 
+    !! Find particles that need to be passed
+
+    tag = 11
+    npo = 0
+    pp  = 1
+    do
       if (pp > np_buf) exit
-      if (xp_buf(1,pp) >= ub) then
-        npo=npo+1
-        send_buf((npo-1)*3+1:npo*3)=xp_buf(:,pp)
-        xp_buf(:,pp)=xp_buf(:,np_buf)
-        np_buf=np_buf-1
+      if (xp_buf(1, pp) >= ub) then
+        npo = npo + 1
+        send_buf((npo-1)*6+1:npo*6) = xp_buf(:, pp)
+        xp_buf(:, pp) = xp_buf(:, np_buf)
+        np_buf = np_buf - 1
         cycle
       endif
-      pp=pp+1
+      pp = pp + 1
     enddo
 
 #ifdef DEBUG
-    do i=0,nodes-1
-      if (rank==i) print *,rank,'np_out=',npo
-      call mpi_barrier(mpi_comm_world,ierr)
+    do i = 0, nodes-1
+      if (rank == i) print *, rank, 'np_out=', npo
+      call mpi_barrier(mpi_comm_world, ierr)
     enddo
 #endif 
 
     npi = npo
 
-    call mpi_sendrecv_replace(npi,1,mpi_integer,cart_neighbor(6), &
-                              tag,cart_neighbor(5),tag,mpi_comm_world, &
-                              status,ierr) 
+    call mpi_sendrecv_replace(npi, 1, mpi_integer, cart_neighbor(6), &
+                              tag, cart_neighbor(5), tag, mpi_comm_world, &
+                              status, ierr)
 
-    call mpi_isend(send_buf,npo*3,mpi_real,cart_neighbor(6), &
-                   tag,mpi_comm_world,srequest,sierr)
-    call mpi_irecv(recv_buf,npi*3,mpi_real,cart_neighbor(5), &
-                   tag,mpi_comm_world,rrequest,rierr)
-    call mpi_wait(srequest,sstatus,sierr)
-    call mpi_wait(rrequest,rstatus,rierr)
+    call mpi_isend(send_buf, npo*6, mpi_real, cart_neighbor(6), &
+                   tag, mpi_comm_world, srequest, sierr)
+    call mpi_irecv(recv_buf, npi*6, mpi_real, cart_neighbor(5), &
+                   tag, mpi_comm_world, rrequest, rierr)
+    call mpi_wait(srequest, sstatus, sierr)
+    call mpi_wait(rrequest, rstatus, rierr)
 
-    do pp=1,npi
-      xp_buf(:,np_buf+pp)=recv_buf((pp-1)*3+1:pp*3)
-      xp_buf(1,np_buf+pp)=max(xp_buf(1,np_buf+pp)-ub,lb)
+    do pp = 1, npi
+      xp_buf(:, np_buf + pp) = recv_buf((pp-1)*6+1:pp*6)
+      xp_buf(1, np_buf + pp) = max(xp_buf(1, np_buf+pp) - ub, lb)
     enddo
 
 #ifdef DEBUG
-    do i=0,nodes-1
-      if (rank==i) print *,rank,'x+ np_local=',np_local
-      call mpi_barrier(mpi_comm_world,ierr)
+    do i = 0, nodes-1
+      if (rank == i .and. command == 0) print *, rank, 'x+ np_local=', np_local
+      if (rank == i .and. command == 1) print *, rank, 'x+ np_local_dm=',
+np_local_dm
+      call mpi_barrier(mpi_comm_world, ierr)
     enddo
 #endif 
 
-    pp=1
-    do 
-      if (pp > npi) exit 
-      x=xp_buf(:,np_buf+pp)
-      if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
-          x(3) >= lb .and. x(3) < ub ) then
-        np_local=np_local+1
-        xvp(:3,np_local)=x
-        xp_buf(:,np_buf+pp)=xp_buf(:,np_buf+npi)
-        npi=npi-1
-        cycle
-      endif
-      pp=pp+1
-    enddo
-   
-    np_buf=np_buf+npi
+    pp = 1
 
-#ifdef DEBUG
-    do i=0,nodes-1
-      if (rank==i) print *,rank,'x+ np_exit=',np_buf,np_local
-      call mpi_barrier(mpi_comm_world,ierr)
-    enddo
-#endif 
-
-! pass -x
-
-    tag=12
-    npo=0
-    pp=1
-    do
-      if (pp > np_buf) exit
-      if (xp_buf(1,pp) < lb) then
-        npo=npo+1
-        send_buf((npo-1)*3+1:npo*3)=xp_buf(:,pp)
-        xp_buf(:,pp)=xp_buf(:,np_buf)
-        np_buf=np_buf-1
-        cycle 
-      endif
-      pp=pp+1
-    enddo
-
-    npi = npo
-
-    call mpi_sendrecv_replace(npi,1,mpi_integer,cart_neighbor(5), &
-                              tag,cart_neighbor(6),tag,mpi_comm_world, &
-                              status,ierr)
-
-    call mpi_isend(send_buf,npo*3,mpi_real,cart_neighbor(5), &
-                   tag,mpi_comm_world,srequest,sierr)
-    call mpi_irecv(recv_buf,npi*3,mpi_real,cart_neighbor(6), &
-                   tag,mpi_comm_world,rrequest,rierr)
-    call mpi_wait(srequest,sstatus,sierr)
-    call mpi_wait(rrequest,rstatus,rierr)
-
-    do pp=1,npi
-      xp_buf(:,np_buf+pp)=recv_buf((pp-1)*3+1:pp*3)
-      xp_buf(1,np_buf+pp)=min(xp_buf(1,np_buf+pp)+ub,ub-eps)
-    enddo
-
-    pp=1
     do
       if (pp > npi) exit
-      x=xp_buf(:,np_buf+pp)
+      x = xp_buf(:, np_buf + pp)
       if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
           x(3) >= lb .and. x(3) < ub ) then
-        np_local=np_local+1
-        xvp(:3,np_local)=x
-        xp_buf(:,np_buf+pp)=xp_buf(:,np_buf+npi)
-        npi=npi-1
-        cycle 
+        if (command == 0) then
+            np_local = np_local + 1
+            xvp(1:3, np_local) = x
+        else
+            np_local_dm = np_local_dm + 1
+            xvp_dm(1:3, np_local_dm) = x
+        endif
+        xp_buf(:, np_buf+pp) = xp_buf(:, np_buf+npi)
+        npi = npi - 1
+        cycle
       endif
-      pp=pp+1
+      pp = pp + 1
     enddo
-  
-    np_buf=np_buf+npi
 
-! pass +y
+    np_buf = np_buf + npi
 
-    tag=13 
-    npo=0
-    pp=1
-    do 
+#ifdef DEBUG
+    do i = 0, nodes-1
+      if (rank == i .and. command == 0) print *, rank, 'x+ np_exit=', np_buf, np_local
+      if (rank == i .and. command == 1) print *, rank, 'x+ np_exit=', np_buf, np_local_dm
+      call mpi_barrier(mpi_comm_world, ierr)
+    enddo
+#endif 
+
+    !
+    ! Pass -x
+    !
+
+    tag = 12
+    npo = 0
+    pp  = 1
+    do
       if (pp > np_buf) exit
-      if (xp_buf(2,pp) >= ub) then
-        npo=npo+1
-        send_buf((npo-1)*3+1:npo*3)=xp_buf(:,pp)
-        xp_buf(:,pp)=xp_buf(:,np_buf)
-        np_buf=np_buf-1
-        cycle 
+      if (xp_buf(1, pp) < lb) then
+        npo = npo + 1
+        send_buf((npo-1)*6+1:npo*6) = xp_buf(:, pp)
+        xp_buf(:, pp) = xp_buf(:, np_buf)
+        np_buf = np_buf - 1
+        cycle
       endif
-      pp=pp+1
+      pp = pp + 1
     enddo
 
     npi = npo
 
-    call mpi_sendrecv_replace(npi,1,mpi_integer,cart_neighbor(4), &
-                              tag,cart_neighbor(3),tag,mpi_comm_world, &
-                              status,ierr) 
+    call mpi_sendrecv_replace(npi, 1, mpi_integer, cart_neighbor(5), &
+                              tag, cart_neighbor(6), tag, mpi_comm_world, &
+                              status, ierr)
 
-    call mpi_isend(send_buf,npo*3,mpi_real,cart_neighbor(4), &
-                   tag,mpi_comm_world,srequest,sierr)
-    call mpi_irecv(recv_buf,npi*3,mpi_real,cart_neighbor(3), &
-                   tag,mpi_comm_world,rrequest,rierr)
-    call mpi_wait(srequest,sstatus,sierr)
-    call mpi_wait(rrequest,rstatus,rierr)
+    call mpi_isend(send_buf, npo*6, mpi_real, cart_neighbor(5), &
+                   tag, mpi_comm_world, srequest, sierr)
+    call mpi_irecv(recv_buf, npi*6, mpi_real, cart_neighbor(6), &
+                   tag, mpi_comm_world, rrequest, rierr)
+    call mpi_wait(srequest, sstatus, sierr)
+    call mpi_wait(rrequest, rstatus, rierr)
 
-    do pp=1,npi
-      xp_buf(:,np_buf+pp)=recv_buf((pp-1)*3+1:pp*3)
-      xp_buf(2,np_buf+pp)=max(xp_buf(2,np_buf+pp)-ub,lb)
+    do pp = 1, npi
+      xp_buf(:, np_buf+pp) = recv_buf((pp-1)*6+1:pp*6)
+      xp_buf(1, np_buf+pp) = min(xp_buf(1,np_buf+pp) + ub, ub-eps)
     enddo
 
-    pp=1
-    do 
-      if (pp > npi) exit 
-      x=xp_buf(:,np_buf+pp)
+    pp = 1
+    do
+      if (pp > npi) exit
+      x = xp_buf(:, np_buf+pp)
       if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
           x(3) >= lb .and. x(3) < ub ) then
-        np_local=np_local+1
-        xvp(:3,np_local)=x
-        xp_buf(:,np_buf+pp)=xp_buf(:,np_buf+npi)
-        npi=npi-1
-        cycle 
+        if (command == 0) then
+            np_local = np_local + 1
+            xvp(1:3, np_local) = x
+        else
+            np_local_dm = np_local_dm + 1
+            xvp_dm(1:3, np_local_dm) = x
+        endif
+        xp_buf(:, np_buf+pp) = xp_buf(:, np_buf+npi)
+        npi = npi - 1
+        cycle
       endif
-      pp=pp+1
+      pp = pp + 1
     enddo
-   
-    np_buf=np_buf+npi
 
-! pass -y
+    np_buf = np_buf + npi
 
-    tag=14
-    npo=0
-    pp=1
+    !
+    ! Pass +y
+    !
+
+    tag = 13
+    npo = 0
+    pp  = 1
+    do
+      if (pp > np_buf) exit
+      if (xp_buf(2, pp) >= ub) then
+        npo = npo + 1
+        send_buf((npo-1)*6+1:npo*6) = xp_buf(:, pp)
+        xp_buf(:, pp) = xp_buf(:, np_buf)
+        np_buf = np_buf - 1
+        cycle
+      endif
+      pp = pp + 1
+    enddo
+
+    npi = npo
+
+    call mpi_sendrecv_replace(npi, 1, mpi_integer, cart_neighbor(4), &
+                              tag, cart_neighbor(3), tag, mpi_comm_world, &
+                              status, ierr)
+
+    call mpi_isend(send_buf, npo*6, mpi_real, cart_neighbor(4), &
+                   tag, mpi_comm_world, srequest, sierr)
+    call mpi_irecv(recv_buf, npi*6, mpi_real, cart_neighbor(3), &
+                   tag, mpi_comm_world, rrequest, rierr)
+    call mpi_wait(srequest, sstatus, sierr)
+    call mpi_wait(rrequest, rstatus, rierr)
+
+    do pp = 1, npi
+      xp_buf(:, np_buf+pp) = recv_buf((pp-1)*6+1:pp*6)
+      xp_buf(2, np_buf+pp) = max(xp_buf(2, np_buf+pp)-ub, lb)
+    enddo
+
+    pp = 1
+    do
+      if (pp > npi) exit
+      x = xp_buf(:, np_buf+pp)
+      if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
+          x(3) >= lb .and. x(3) < ub ) then
+        if (command == 0) then
+            np_local = np_local + 1
+            xvp(1:3, np_local) = x
+        else
+            np_local_dm = np_local_dm + 1
+            xvp_dm(1:3, np_local_dm) = x
+        endif
+        xp_buf(:, np_buf+pp) = xp_buf(:, np_buf+npi)
+        npi = npi-1
+        cycle
+      endif
+      pp = pp + 1
+    enddo
+
+    np_buf = np_buf + npi
+
+    !
+    ! Pass -y
+    !
+
+    tag = 14
+    npo = 0
+    pp  = 1
     do
       if (pp > np_buf) exit
       if (xp_buf(2,pp) < lb) then
-        npo=npo+1
-        send_buf((npo-1)*3+1:npo*3)=xp_buf(:,pp)
-        xp_buf(:,pp)=xp_buf(:,np_buf)
-        np_buf=np_buf-1
+        npo = npo+1
+        send_buf((npo-1)*6+1:npo*6) = xp_buf(:, pp)
+        xp_buf(:, pp) = xp_buf(:, np_buf)
+        np_buf = np_buf - 1
         cycle
       endif
-      pp=pp+1
+      pp = pp + 1
     enddo
 
     npi = npo
 
-    call mpi_sendrecv_replace(npi,1,mpi_integer,cart_neighbor(3), &
-                              tag,cart_neighbor(4),tag,mpi_comm_world, &
-                              status,ierr)
+    call mpi_sendrecv_replace(npi, 1, mpi_integer, cart_neighbor(3), &
+                              tag, cart_neighbor(4), tag, mpi_comm_world, &
+                              status, ierr)
 
-    call mpi_isend(send_buf,npo*3,mpi_real,cart_neighbor(3), &
-                   tag,mpi_comm_world,srequest,sierr)
-    call mpi_irecv(recv_buf,npi*3,mpi_real,cart_neighbor(4), &
-                   tag,mpi_comm_world,rrequest,rierr)
-    call mpi_wait(srequest,sstatus,sierr)
-    call mpi_wait(rrequest,rstatus,rierr)
+    call mpi_isend(send_buf, npo*6, mpi_real, cart_neighbor(3), &
+                   tag, mpi_comm_world, srequest, sierr)
+    call mpi_irecv(recv_buf, npi*6, mpi_real, cart_neighbor(4), &
+                   tag, mpi_comm_world, rrequest, rierr)
+    call mpi_wait(srequest, sstatus, sierr)
+    call mpi_wait(rrequest, rstatus, rierr)
 
-    do pp=1,npi
-      xp_buf(:,np_buf+pp)=recv_buf((pp-1)*3+1:pp*3)
-      xp_buf(2,np_buf+pp)=min(xp_buf(2,np_buf+pp)+ub,ub-eps)
+    do pp = 1, npi
+      xp_buf(:, np_buf+pp) = recv_buf((pp-1)*6+1:pp*6)
+      xp_buf(2, np_buf+pp) = min(xp_buf(2, np_buf+pp)+ub, ub-eps)
     enddo
 
-    pp=1
+    pp = 1
     do
       if (pp > npi) exit
-      x=xp_buf(:,np_buf+pp)
+      x = xp_buf(:, np_buf+pp)
       if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
           x(3) >= lb .and. x(3) < ub ) then
-        np_local=np_local+1
-        xvp(:3,np_local)=x
-        xp_buf(:,np_buf+pp)=xp_buf(:,np_buf+npi)
+        if (command == 0) then
+            np_local = np_local+1
+            xvp(1:3, np_local) = x
+        else
+            np_local_dm = np_local_dm+1
+            xvp_dm(1:3, np_local_dm) = x
+        endif
+        xp_buf(:, np_buf+pp) = xp_buf(:, np_buf+npi)
         npi=npi-1
-        cycle 
+        cycle
       endif
-      pp=pp+1
+      pp = pp + 1
     enddo
-  
-    np_buf=np_buf+npi
 
-! pass +z
+    np_buf = np_buf + npi
 
-    tag=15 
-    npo=0
-    pp=1
-    do 
+    !
+    ! Pass +z
+    !
+
+    tag = 15
+    npo = 0
+    pp  = 1
+    do
       if (pp > np_buf) exit
-      if (xp_buf(3,pp) >= ub) then
-        npo=npo+1
-        send_buf((npo-1)*3+1:npo*3)=xp_buf(:,pp)
-        xp_buf(:,pp)=xp_buf(:,np_buf)
-        np_buf=np_buf-1
-        cycle 
+      if (xp_buf(3, pp) >= ub) then
+        npo = npo + 1
+        send_buf((npo-1)*6+1:npo*6) = xp_buf(:, pp)
+        xp_buf(:, pp) = xp_buf(:, np_buf)
+        np_buf = np_buf - 1
+        cycle
       endif
-      pp=pp+1
+      pp = pp + 1
     enddo
 
     npi = npo
 
     call mpi_sendrecv_replace(npi,1,mpi_integer,cart_neighbor(2), &
                               tag,cart_neighbor(1),tag,mpi_comm_world, &
-                              status,ierr) 
+                              status,ierr)
 
-    call mpi_isend(send_buf,npo*3,mpi_real,cart_neighbor(2), &
+    call mpi_isend(send_buf,npo*6,mpi_real,cart_neighbor(2), &
                    tag,mpi_comm_world,srequest,sierr)
-    call mpi_irecv(recv_buf,npi*3,mpi_real,cart_neighbor(1), &
+    call mpi_irecv(recv_buf,npi*6,mpi_real,cart_neighbor(1), &
                    tag,mpi_comm_world,rrequest,rierr)
     call mpi_wait(srequest,sstatus,sierr)
     call mpi_wait(rrequest,rstatus,rierr)
 
     do pp=1,npi
-      xp_buf(:,np_buf+pp)=recv_buf((pp-1)*3+1:pp*3)
+      xp_buf(:,np_buf+pp)=recv_buf((pp-1)*6+1:pp*6)
       xp_buf(3,np_buf+pp)=max(xp_buf(3,np_buf+pp)-ub,lb)
     enddo
 
     pp=1
-    do 
-      if (pp > npi) exit 
+    do
+      if (pp > npi) exit
       x=xp_buf(:,np_buf+pp)
       if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
           x(3) >= lb .and. x(3) < ub ) then
-        np_local=np_local+1
-        xvp(:3,np_local)=x
+        if (command == 0) then
+            np_local=np_local+1
+            xvp(1:3,np_local)=x
+        else
+            np_local_dm=np_local_dm+1
+            xvp_dm(1:3,np_local_dm)=x
+        endif
         xp_buf(:,np_buf+pp)=xp_buf(:,np_buf+npi)
         npi=npi-1
-        cycle 
+        cycle
       endif
       pp=pp+1
     enddo
-   
+
     np_buf=np_buf+npi
 
-! pass -z
+    !
+    ! Pass -z
+    !
 
     tag=16
     npo=0
@@ -1439,7 +1708,7 @@ end subroutine cp_fftw
       if (pp > np_buf) exit
       if (xp_buf(3,pp) < lb) then
         npo=npo+1
-        send_buf((npo-1)*3+1:npo*3)=xp_buf(:,pp)
+        send_buf((npo-1)*6+1:npo*6)=xp_buf(:,pp)
         xp_buf(:,pp)=xp_buf(:,np_buf)
         np_buf=np_buf-1
         cycle
@@ -1453,15 +1722,15 @@ end subroutine cp_fftw
                               tag,cart_neighbor(2),tag,mpi_comm_world, &
                               status,ierr)
 
-    call mpi_isend(send_buf,npo*3,mpi_real,cart_neighbor(1), &
+    call mpi_isend(send_buf,npo*6,mpi_real,cart_neighbor(1), &
                    tag,mpi_comm_world,srequest,sierr)
-    call mpi_irecv(recv_buf,npi*3,mpi_real,cart_neighbor(2), &
+    call mpi_irecv(recv_buf,npi*6,mpi_real,cart_neighbor(2), &
                    tag,mpi_comm_world,rrequest,rierr)
     call mpi_wait(srequest,sstatus,sierr)
     call mpi_wait(rrequest,rstatus,rierr)
 
     do pp=1,npi
-      xp_buf(:,np_buf+pp)=recv_buf((pp-1)*3+1:pp*3)
+      xp_buf(:,np_buf+pp)=recv_buf((pp-1)*6+1:pp*6)
       xp_buf(3,np_buf+pp)=min(xp_buf(3,np_buf+pp)+ub,ub-eps)
     enddo
 
@@ -1471,15 +1740,20 @@ end subroutine cp_fftw
       x=xp_buf(:,np_buf+pp)
       if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
           x(3) >= lb .and. x(3) < ub ) then
-        np_local=np_local+1
-        xvp(:3,np_local)=x
+        if (command == 0) then
+            np_local=np_local+1
+            xvp(1:3,np_local)=x
+        else
+            np_local_dm=np_local_dm+1
+            xvp_dm(1:3,np_local_dm)=x
+        endif
         xp_buf(:,np_buf+pp)=xp_buf(:,np_buf+npi)
         npi=npi-1
-        cycle 
+        cycle
       endif
       pp=pp+1
     enddo
-  
+
     np_buf=np_buf+npi
 
 #ifdef DEBUG
@@ -1494,44 +1768,225 @@ end subroutine cp_fftw
 
     if (rank == 0) print *,'total buffered particles =',np_exit
 
-    call mpi_reduce(np_local,np_final,1,mpi_integer,mpi_sum,0, &
+    if (command == 0) then
+        call mpi_reduce(np_local,np_final,1,mpi_integer,mpi_sum,0, &
                     mpi_comm_world,ierr)
+    else
+        call mpi_reduce(np_local_dm,np_final,1,mpi_integer,mpi_sum,0, &
+                    mpi_comm_world,ierr)
+    endif
 
     if (rank == 0) then
-      print *,'total particles =',int(np_final,8)
+      print *,'total particles =',np_final
+      if (np_final /= np**3) then
+        print *,'ERROR: total number of particles incorrect after passing'
+      endif
     endif
- 
+
 !!  Check for particles out of bounds
 
-    do i=1,np_local
-      if (xvp(1,i) < 0 .or. xvp(1,i) >= nc_node_dim .or. &
-          xvp(2,i) < 0 .or. xvp(2,i) >= nc_node_dim .or. &
-          xvp(3,i) < 0 .or. xvp(3,i) >= nc_node_dim) then
-        print *,'particle out of bounds',rank,i,xvp(:3,i),nc_node_dim
-      endif
-    enddo
+    if (command == 0) then
+        do i=1,np_local
+          if (xvp(1,i) < 0 .or. xvp(1,i) >= nc_node_dim .or. &
+              xvp(2,i) < 0 .or. xvp(2,i) >= nc_node_dim .or. &
+              xvp(3,i) < 0 .or. xvp(3,i) >= nc_node_dim) then
+            print *,'particle out of bounds',rank,i,xvp(:3,i),nc_node_dim
+          endif
+        enddo
+    else
+        do i=1,np_local_dm
+          if (xvp_dm(1,i) < 0 .or. xvp_dm(1,i) >= nc_node_dim .or. &
+              xvp_dm(2,i) < 0 .or. xvp_dm(2,i) >= nc_node_dim .or. &
+              xvp_dm(3,i) < 0 .or. xvp_dm(3,i) >= nc_node_dim) then
+            print *,'particle out of bounds',rank,i,xvp_dm(:3,i),nc_node_dim
+          endif
+        enddo
+    endif
 
-  end subroutine pass_particles
+    time2 = mpi_wtime(ierr)
+    if (rank == 0) write(*, *) "Finished pass_particles ... elapsed time = ", time2-time1
+
+    return
+
+end subroutine pass_particles
 
 !------------------------------------------------------------!
 
+#ifdef GROUPS
+subroutine initialize_random_number
+    !
+    ! Initialize random number generator
+    !
+
+    implicit none
+
+    integer :: i, j, k
+    real(4) :: x
+    integer :: seedsize, clock
+    integer, dimension(8) :: values
+    integer(4), allocatable, dimension(:) :: iseed
+    integer(4), allocatable, dimension(:) :: iseed_all
+
+    call random_seed()
+    call random_seed(size=seedsize)
+
+    allocate(iseed(seedsize))
+    allocate(iseed_all(seedsize*nodes))
+
+    call system_clock(count=clock)
+    iseed = clock + 37 * (/ (i - 1, i = 1, 2) /)
+
+    call date_and_time(values=values)
+    if(rank==0) write(*,*) values(7:8), iseed
+
+    call random_seed(put=values(7:8))
+    call random_seed(put=iseed(1:seedsize))
+
+    if (rank == 0) then
+        write(*,*) 'Generating seeds'
+        do j = 1, nodes
+            do k = 1, seedsize
+                call random_number(x)
+                iseed_all((j-1)*seedsize+k) = int(x*huge(0))
+            enddo
+        enddo
+    endif
+    call mpi_scatter(iseed_all, seedsize, mpi_integer, iseed, seedsize, mpi_integer, 0, mpi_comm_world, ierr)
+
+    call random_seed(put=iseed(1:seedsize))
+
+    return
+
+end subroutine initialize_random_number
+
+!------------------------------------------------------------!
+
+subroutine assign_groups(command)
+    !
+    ! To remove shot noise in autocorrelation we randomly divide all particles
+    ! into one of two groups (controlled by their value of GID). Then we
+    ! cross-correlate the two groups together.
+    !
+
+    implicit none
+
+    integer(4) :: command
+    integer :: k, np_tot, np0, np1
+    integer(8) :: np1_tot, np2_tot, npa_tot
+    real(4) :: r
+    integer(1) :: g
+
+    if (command == 0) then
+        np_tot = np_local
+    else
+        np_tot = np_local_dm
+    endif
+
+    np0 = 0
+    np1 = 0
+
+    do k = 1, np_tot
+
+        call random_number(r)
+        g = int(r+0.5)
+
+        if (g == 0) then
+            np0 = np0 + 1
+        else if (g == 1) then
+            np1 = np1 + 1
+        endif
+
+        GID(k) = g
+
+    enddo
+
+    call mpi_allreduce(int(np_tot,kind=8), npa_tot, 1, mpi_integer8, mpi_sum, mpi_comm_world, ierr)
+    call mpi_allreduce(int(np0,kind=8), np1_tot, 1, mpi_integer8, mpi_sum, mpi_comm_world, ierr)
+    call mpi_allreduce(int(np1,kind=8), np2_tot, 1, mpi_integer8, mpi_sum, mpi_comm_world, ierr)
+
+    if (command == 0) then
+        np_groups(0) = real(np1_tot)
+        np_groups(1) = real(np2_tot)
+    else
+        np_groups_dm(0) = real(np1_tot)
+        np_groups_dm(1) = real(np2_tot)
+    endif
+
+    if (rank == 0) then
+        write(*,*) "Groups assigned: ", np1_tot, np2_tot, npa_tot
+    endif
+
+    return
+
+end subroutine assign_groups
+
+!------------------------------------------------------------!
+
+subroutine clear_groups
+    !
+    ! Assign all particles to group 0
+    !
+
+    implicit none
+
+    GID(:) = 0
+
+    np_groups(0) = real(np)**3 
+    np_groups_dm(0) = (real(np)/ratio_nudm_dim)**3 
+    np_groups(1) = 0.
+    np_groups_dm(1) = 0.
+
+    return
+
+end subroutine clear_groups
+#endif
+
+!------------------------------------------------------------!
+
+#ifdef GROUPS
+  subroutine cicmass(command, glook)
+#else
   subroutine cicmass(command)
+#endif
     implicit none
     real :: mp
-    integer :: i,i1,i2,j1,j2,k1,k2
+    integer :: i,i1,i2,j1,j2,k1,k2,np_total
     real    :: x,y,z,dx1,dx2,dy1,dy2,dz1,dz2,vf,v(3)
     integer :: command
+#ifdef GROUPS
+    integer(4) :: glook
+#endif
 
-    if (command == 0) then !! Dark matter are further reduced by factor of ratio_nudm_dim 
+    if (command == 1) then !! Dark matter are further reduced by factor of ratio_nudm_dim 
+#ifdef GROUPS
+        mp = ncr**3 / np_groups_dm(glook)
+#else
         mp = (ncr/(np/ratio_nudm_dim))**3
+#endif
+        np_total = np_local_dm
     else
+#ifdef GROUPS
+        mp = ncr**3 / np_groups(glook)
+#else
         mp = (ncr/np)**3
+#endif
+        np_total = np_local
     endif 
 
-    do i=1,np_local
-       x=xvp(1,i)-0.5
-       y=xvp(2,i)-0.5
-       z=xvp(3,i)-0.5
+    do i=1,np_total 
+#ifdef GROUPS
+       if (GID(i) /= glook) cycle
+#endif
+
+       if (command == 0) then
+         x=xvp(1,i)-0.5
+         y=xvp(2,i)-0.5
+         z=xvp(3,i)-0.5
+       else
+         x=xvp_dm(1,i)-0.5
+         y=xvp_dm(2,i)-0.5
+         z=xvp_dm(3,i)-0.5
+       endif
 
        i1=floor(x)+1
        i2=i1+1
@@ -1589,9 +2044,14 @@ end subroutine cp_fftw
 #endif
     real, dimension(3,nc) :: pktsum
 
-    real, dimension(nc) :: kcen, kcount
+    real(8), dimension(nc) :: kcen, kcount
+    real(8), dimension(nc) :: kcensum, kcountsum
     real    :: kavg
     integer :: ind, dx, dxy
+
+#ifdef LOGBIN
+    real :: k1r
+#endif
 
     real time1,time2
     call cpu_time(time1)
@@ -1601,6 +2061,8 @@ end subroutine cp_fftw
 
     kcen(:)   = 0.
     kcount(:) = 0.
+    kcensum(:) = 0.
+    kcountsum(:) = 0.
 
 #ifndef SLAB
     dx  = fsize(1)
@@ -1655,10 +2117,17 @@ end subroutine cp_fftw
                 kr=sqrt(real(kx**2+ky**2+kz**2))
                 if(kx.eq.0 .and. ky <=0 .and. kz <=0)cycle;
                 if(kx.eq.0 .and. ky >0 .and. kz <0)cycle;
+#ifndef LOGBIN
                 if (kr .ne. 0) then
                     k1=ceiling(kr)
-                    k2=k1+1
                     w1=k1-kr
+#else
+                if (kr > 1. .and. kr <= hcr) then
+                    k1r = log10(kr)/log10(hcr)*numbins
+                    k1  = ceiling(k1r) 
+                    w1 = k1-k1r
+#endif
+                    k2=k1+1
                     w2=1-w1
                     x = pi*real(kx)/ncr
                     y = pi*real(ky)/ncr
@@ -1694,8 +2163,13 @@ end subroutine cp_fftw
                     pkt(2,k2,k)=pkt(2,k2,k)+w2*pow**2
                     pkt(3,k2,k)=pkt(3,k2,k)+w2
 
+#ifdef LOGBIN
+                    kcen(k1) = kcen(k1) + w1 * log10(kr)
+                    kcen(k2) = kcen(k2) + w2 * log10(kr)
+#else
                     kcen(k1) = kcen(k1) + w1 * kr
                     kcen(k2) = kcen(k2) + w2 * kr
+#endif
 
                     kcount(k1) = kcount(k1) + w1
                     kcount(k2) = kcount(k2) + w2
@@ -1716,6 +2190,8 @@ end subroutine cp_fftw
 
     !! Reduce to rank 0
     call mpi_reduce(pkt(:,:,1),pktsum,3*nc,mpi_real,mpi_sum,0,mpi_comm_world,ierr)
+    call mpi_reduce(kcen, kcensum, nc, mpi_real8, mpi_sum, 0, mpi_comm_world, ierr)
+    call mpi_reduce(kcount, kcountsum, nc, mpi_real8, mpi_sum, 0, mpi_comm_world, ierr)
 
     !! Divide by weights
     !! pk(1,k) stores pk(k)
@@ -1728,7 +2204,11 @@ end subroutine cp_fftw
           pk(1:2,k)=pktsum(1:2,k)/pktsum(3,k)
           pk(2,k)=sqrt(abs((pk(2,k)-pk(1,k)**2)/(pktsum(3,k)-1)))
 
-          kavg = kcen(k) / kcount(k)
+#ifdef LOGBIN
+          kavg = real(10**(kcensum(k) / kcountsum(k)), kind=4)
+#else
+          kavg = real(kcensum(k) / kcountsum(k), kind=4)
+#endif
           pk(3,k) = 2. * pi * kavg / box
 
 #ifdef NGP
