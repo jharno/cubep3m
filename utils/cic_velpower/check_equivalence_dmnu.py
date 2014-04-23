@@ -70,10 +70,9 @@ if pencil:
     recv_cube = 4 * (nc_node_dim**2 * nc_pen * nodes_pen) 
 else:
     recv_cube = 4 * (nc_node_dim**2 * nc_slab * nodes_slab)
-xp_buf = 6 * np_buffer
+xp_buf = 4 * 6 * np_buffer
 
 maxeq1 = max(recv_cube, xp_buf)
-
 
 if maxeq1 != recv_cube:
 
@@ -102,7 +101,7 @@ if pencil:
     slab_work = 0
 else:
     slab_work = 4 * ((nc + 2) * nc * nc_slab)
-recv_buf = 6*np_buffer
+recv_buf = 4 * 6 * np_buffer
 
 maxeq3 = max(slab_work, recv_buf)
 
@@ -144,8 +143,8 @@ if not MOMENTUM:
     hoc_dm = 4 * ((nm_node_dim+2*nc_buf)**3) 
     ll  = 4 * max_np
     ll_dm = ll / ratio_nudm_dim**3
-    ipos = 2 * nt * max_npart_search
-    rpos = 2 * nt * max_npart_search
+    ipos = 4 * 2 * nt * max_npart_search
+    rpos = 4 * 2 * nt * max_npart_search
 else:
     hoc = 0
     hoc_dm = 0
