@@ -3011,7 +3011,7 @@ subroutine velocity_density(command, glook, nfind)
 
     num_notconverged = 0
 
-    !$omp  parallel num_threads(nt) default(shared) private(i, j, k, thread, rc, npart, ic, jc, kc, ind, pp, dr, vx) reduction(+:num_notconverged)
+    !$omp  parallel num_threads(nt) default(shared) private(i, j, k, thread, rc, npart, ic, jc, kc, ind, pp, dr, vx, converged) reduction(+:num_notconverged)
     thread = 1
     thread = omp_get_thread_num() + 1
     !$omp do

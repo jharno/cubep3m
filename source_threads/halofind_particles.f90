@@ -285,23 +285,20 @@ subroutine halofind
 
             v2_wrt_halo(:) = v2_wrt_halo(:)/real(imass_odc)
 
-#ifndef NEUTRINOS
-#ifdef PID_FLAG
+#if defined(PID_FLAG) && !defined(NEUTRINOS)
 #ifdef HVIR
             if (halo_write) write(12) hpos(:), mass_odc, mass_vir, r_odc, r_vir, x_mean, v_mean, l_CM, v2_wrt_halo, var_x, pid_halo, xv_halo
 #else
             if (halo_write) write(12) hpos(:), mass_odc, r_odc, x_mean, v_mean, l_CM, v2_wrt_halo, var_x, pid_halo, xv_halo
 #endif
 #else
-#endif
 #ifdef HVIR
             if (halo_write) write(12) hpos(:), mass_odc, mass_vir, r_odc, r_vir, x_mean, v_mean, l_CM, v2_wrt_halo, var_x, I_ij
 #else
             if (halo_write) write(12) hpos(:), mass_odc, r_odc, x_mean, v_mean, l_CM, v2_wrt_halo, var_x, I_ij
 #endif
-#ifndef NEUTRINOS
 #endif
-#endif
+
 
         endif !! i_odc test 
 
