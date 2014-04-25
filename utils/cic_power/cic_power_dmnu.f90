@@ -414,14 +414,16 @@ contains
 
     if (command == 0) then
         if(z_write .eq. z_i) then
-           check_name=ic_path//'xv'//rank_string(1:len_trim(rank_string))//'_nu.ic'
+           check_name=ic_path//z_string(1:len_trim(z_string))//'xv'// &
+                   rank_string(1:len_trim(rank_string))//'_nu.dat'
         else
            check_name=output_path//z_string(1:len_trim(z_string))//'xv'// &
                    rank_string(1:len_trim(rank_string))//'_nu.dat'
         endif
     else
         if(z_write .eq. z_i) then
-           check_name=ic_path//'xv'//rank_string(1:len_trim(rank_string))//'.ic'
+           check_name=ic_path//z_string(1:len_trim(z_string))//'xv'// &
+                   rank_string(1:len_trim(rank_string))//'.dat'
         else
            check_name=output_path//z_string(1:len_trim(z_string))//'xv'// &
                    rank_string(1:len_trim(rank_string))//'.dat'
