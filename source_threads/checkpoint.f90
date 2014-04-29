@@ -89,7 +89,8 @@
       nphigh=min(i*blocksize,np_local)
 !!      print *,rank,nplow,nphigh,np_local
       do j=nplow,nphigh
-        write(12) xv(:,j)
+        !write(12) xv(:,j)
+        write(12) xv(1:3,j) - shake_offset, xv(4:6,j)
       enddo
     enddo
 

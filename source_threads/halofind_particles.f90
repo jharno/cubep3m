@@ -273,15 +273,15 @@ subroutine halofind
 
 #ifdef PID_FLAG
 #ifdef HVIR
-            if (halo_write) write(12) hpos(:), mass_odc, mass_vir, r_odc, r_vir, x_mean, v_mean, l_CM, v2_wrt_halo, var_x, pid_halo, xv_halo
+            if (halo_write) write(12) hpos(:)-shake_offset, mass_odc, mass_vir, r_odc, r_vir, x_mean, v_mean, l_CM, v2_wrt_halo, var_x, pid_halo, xv_halo
 #else
-            if (halo_write) write(12) hpos(:), mass_odc, r_odc, x_mean, v_mean, l_CM, v2_wrt_halo, var_x, pid_halo, xv_halo
+            if (halo_write) write(12) hpos(:)-shake_offset, mass_odc, r_odc, x_mean, v_mean, l_CM, v2_wrt_halo, var_x, pid_halo, xv_halo
 #endif
 #else
 #ifdef HVIR
-            if (halo_write) write(12) hpos(:), mass_odc, mass_vir, r_odc, r_vir, x_mean, v_mean, l_CM, v2_wrt_halo, var_x, I_ij
+            if (halo_write) write(12) hpos(:)-shake_offset, mass_odc, mass_vir, r_odc, r_vir, x_mean, v_mean, l_CM, v2_wrt_halo, var_x, I_ij
 #else
-            if (halo_write) write(12) hpos(:), mass_odc, r_odc, x_mean, v_mean, l_CM, v2_wrt_halo, var_x, I_ij
+            if (halo_write) write(12) hpos(:)-shake_offset, mass_odc, r_odc, x_mean, v_mean, l_CM, v2_wrt_halo, var_x, I_ij
 #endif
 #endif
 
