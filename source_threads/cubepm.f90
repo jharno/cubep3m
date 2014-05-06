@@ -178,6 +178,10 @@ if (rank == 0) write(*,*) 'finished kernel init',t_elapsed(wc_counter)
     if (rank == 0) write(*,*) 'finished backward gas sweep',t_elapsed(wc_counter)
 #endif
 
+#ifdef ZOOMCHECK
+    call zoomcheckpoint
+#endif
+
 #ifdef CHECKPOINT_KILL
     !! Determine if it is time to write a checkpoint before being killed
     kill_step = .false.
