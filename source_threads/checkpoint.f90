@@ -122,10 +122,20 @@
       nphigh=min(i*blocksize,np_local)
       do j=nplow,nphigh
         if (PID(j) == 1) then
+#ifdef DISP_MESH
+            write(12) xv(1:3,j) - shake_offset
+            write(12) xv(4:6,j)
+#else
             write(12) xv(:,j)
+#endif
             ind_check1 = ind_check1 + 1
         else
+#ifdef DISP_MESH
+            write(22) xv(1:3,j) - shake_offset
+            write(22) xv(4:6,j)
+#else
             write(22) xv(:,j)
+#endif
             ind_check2 = ind_check2 + 1
         endif
       enddo
@@ -155,7 +165,12 @@
       nphigh=min(i*blocksize,np_local)
 !!      print *,rank,nplow,nphigh,np_local
       do j=nplow,nphigh
+#ifdef DISP_MESH
+        write(12) xv(1:3,j) - shake_offset
+        write(12) xv(4:6,j)
+#else
         write(12) xv(:,j)
+#endif
       enddo
     enddo
 

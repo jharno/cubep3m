@@ -1,9 +1,8 @@
 ! -------------------------------------------------------------------------------------------------------
 ! CubeP3M inline halofinder written by JD Emberson September 2013.
-! Determines mass of halos with overdensity halo_odc (set in cubepm.par) by
-! searching over the local particle distribution around each fine mesh density
-! peak. Use flag -DHVIR if aslo want to determine the mass of the halo evaulated
-! at its virial radius (a function of redshift). 
+! Determines mass of halos with overdensity halo_vir (function of redshift) as
+! well as halo_odc (specified in cubepm.par; independent of redshift) by  
+! searching over the local particle distribution around each fine mesh density peak.
 ! -------------------------------------------------------------------------------------------------------
  
 subroutine halofind 
@@ -39,16 +38,17 @@ subroutine halofind
     integer(8), dimension(N_p) :: pid_halo
     real(4), dimension(6,N_p) ::xv_halo
 #endif
+#else
+    real(4), dimension(3) :: x_mean_nu, v_mean_nu
+    integer(4) :: n_nu
 #endif
     real(4) :: dist, speed, E_tmp
     real(4), dimension(6) :: I_ij
     real(8) :: st1, st2
     integer(8) :: np_halo_local_odc, np_halo_odc, nhalo_tot, num_candidates_tot
-#ifdef HVIR
     real(4) :: xflat, halo_vir, mass_vir, r_vir
     integer(8) :: imass_vir, i_vir
     integer(8) :: np_halo_local_vir, np_halo_vir
-#endif
 
     !
     ! Find halo candidates based on local overdensities for each tile
@@ -78,14 +78,12 @@ subroutine halofind
 
     call mpi_reduce(int(num_candidates, kind=8), num_candidates_tot, 1, mpi_integer8, mpi_sum, 0, mpi_comm_world, ierr)
 
-#ifdef HVIR
     !
     ! Determine Delta_vir using equation (6) of Bryan et al. (1997) for a flat universe
     !
 
     xflat    = (omega_m / a**3) / (omega_m / a**3 + omega_l) - 1.
     halo_vir = 18.*pi**2 + 82.*xflat - 39.*xflat**2
-#endif
 
     !
     ! Open halo file
@@ -126,9 +124,7 @@ subroutine halofind
 
     !! Initialize so that no particles are yet part of a halo
     hpart_odc = 0
-#ifdef HVIR
     hpart_vir = 0
-#endif
 
 #ifdef NEUTRINOS
     !! Exclude neutrinos from being included in halos by
@@ -136,9 +132,7 @@ subroutine halofind
     do i = 1, np_local
         if (PID(i) > 1) then
             hpart_odc(i) = 1
-#ifdef HVIR
             hpart_vir(i) = 1
-#endif
         endif
     enddo 
 #endif
@@ -148,19 +142,13 @@ subroutine halofind
 
     !! Write file header (will rewrite nhalo later)
     write(12) nhalo
-    write(12) halo_odc
-#ifdef HVIR
     write(12) halo_vir
-#endif       
+    write(12) halo_odc
 
     if (rank == 0) then
 
         write(*,*) "Searching over ", num_candidates_tot, " halo candidates..."
-#ifndef HVIR
-        write(*,*) "halo_odc = ", halo_odc
-#else
-        write(*,*) "halo_odc, halo_vir = ", halo_odc, halo_vir
-#endif
+        write(*,*) "halo_vir, halo_odc = ", halo_vir, halo_odc
 
     endif
 
@@ -171,23 +159,17 @@ subroutine halofind
         hpos(:)    = ipeak(:, iloc)
 
         !! Search for particles by looking at local particle distribution
-        call find_halo_particles(halo_odc, mass_proxy, hpos(:), r_odc, i_odc)
-#ifdef HVIR
-        call find_halo_particles(halo_vir, mass_proxy, hpos(:), r_vir, i_vir, DOVIR=1)
-#endif
+        call find_halo_particles(halo_vir, mass_proxy, hpos(:), r_vir, i_vir, 1)
+        call find_halo_particles(halo_odc, mass_proxy, hpos(:), r_odc, i_odc, 2)
 
         !! The following conditions must pass to be considered a halo
-#ifndef HVIR
-        if (i_odc >= min_halo_particles) then
-#else
-        if (i_odc >= min_halo_particles .and. i_vir >= min_halo_particles) then
-#endif
+        if (i_vir >= min_halo_particles .and. i_odc >= min_halo_particles) then
 
             !! Halo ticker
             nhalo = nhalo + 1
 
             !! Initialize halo properties
-            imass_odc = 0
+            imass_vir = 0
             x_mean = 0.
             x2_mean = 0.
             v_mean = 0.
@@ -198,9 +180,9 @@ subroutine halofind
             l_CM = 0.
 
             !! Loop over particles in this halo to get halo properties 
-            do ii = 1, i_odc
-                pp = ilist_odc(ii)
-                imass_odc = imass_odc + 1
+            do ii = 1, i_vir
+                pp = ilist_vir(ii)
+                imass_vir = imass_vir + 1
                 x_mean = x_mean + xv(:3, pp)
                 x2_mean = x2_mean + xv(:3, pp)**2
                 v_mean = v_mean + xv(4:, pp)
@@ -211,33 +193,36 @@ subroutine halofind
                 l(3) = l(3) + (dx(2)*xv(4,pp) - dx(1)*xv(5,pp))
 
                 !! Remove this particle from future halo candidates
-                hpart_odc(pp) = 1
-            enddo
-
-#ifdef HVIR
-            imass_vir = 0
-            do ii = 1, i_vir
-                pp = ilist_vir(ii)
-                imass_vir = imass_vir + 1
-
-                !! Remove this particle from future halo candidates
                 hpart_vir(pp) = 1
             enddo
-            mass_vir = mass_p * imass_vir
+
+            imass_odc = 0
+            do ii = 1, i_odc
+                pp = ilist_odc(ii)
+                imass_odc = imass_odc + 1
+
+                !! Remove this particle from future halo candidates
+                hpart_odc(pp) = 1
+            enddo
+            mass_odc = mass_p * imass_odc
+
+#ifdef NEUTRINOS
+            call neutrino_properties(hpos(:), 2*r_vir, x_mean_nu, v_mean_nu, n_nu)
+            x_mean_nu = x_mean_nu + offset 
 #endif
 
-            mass_odc = mass_p * imass_odc
+            mass_vir = mass_p * imass_vir
             hpos(:) = hpos(:) + offset
-            x_mean = x_mean/real(imass_odc) + offset
-            x2_mean = x2_mean/real(imass_odc)
-            v_mean = v_mean/real(imass_odc)
-            v2_mean = v2_mean/real(imass_odc)
-            l = l/real(imass_odc)
+            x_mean = x_mean/real(imass_vir) + offset
+            x2_mean = x2_mean/real(imass_vir)
+            v_mean = v_mean/real(imass_vir)
+            v2_mean = v2_mean/real(imass_vir)
+            l = l/real(imass_vir)
             l_CM(1) = l(1) - (x_mean(3)*v_mean(2) - x_mean(2)*v_mean(3))
             l_CM(2) = l(2) - (x_mean(1)*v_mean(3) - x_mean(3)*v_mean(1))
             l_CM(3) = l(3) - (x_mean(2)*v_mean(1) - x_mean(1)*v_mean(2))
             v_disp = sqrt(v2_mean(1) + v2_mean(2) + v2_mean(3))
-            var_x = real(imass_odc)/(real(imass_odc-1)) * (x2_mean - (x_mean-offset)**2)
+            var_x = real(imass_vir)/(real(imass_vir-1)) * (x2_mean - (x_mean-offset)**2)
 
 #ifndef NEUTRINOS
 #ifdef PID_FLAG
@@ -249,8 +234,8 @@ subroutine halofind
             I_ij = 0.
 
             ii = 1
-            do ii = 1, i_odc
-                pp = ilist_odc(ii)
+            do ii = 1, i_vir
+                pp = ilist_vir(ii)
 
                 r_wrt_halo = xv(:3,pp) - (x_mean - offset)
                 v_wrt_halo = xv(4:,pp) - v_mean
@@ -264,7 +249,7 @@ subroutine halofind
                 I_ij(6) = I_ij(6)+r_wrt_halo(3)*r_wrt_halo(3)
 
                 speed = sqrt(v_wrt_halo(1)**2 +v_wrt_halo(2)**2 + v_wrt_halo(3)**2)
-                E_tmp = 0.5*(speed)**2 - imass_odc*mass_p*G/dist
+                E_tmp = 0.5*(speed)**2 - imass_vir*mass_p*G/dist
 
                 !! Find the most bound particles
                 do jj = 1, N_p
@@ -283,24 +268,25 @@ subroutine halofind
                 enddo
             enddo
 
-            v2_wrt_halo(:) = v2_wrt_halo(:)/real(imass_odc)
+            v2_wrt_halo(:) = v2_wrt_halo(:)/real(imass_vir)
+
+#ifdef DISP_MESH
+            !! Subtract shake offset
+            hpos = hpos - shake_offset
+            x_mean = x_mean - shake_offset
+#ifdef NEUTRINOS 
+            x_mean_nu = x_mean_nu - shake_offset
+#endif
+#endif
 
 #if defined(PID_FLAG) && !defined(NEUTRINOS)
-#ifdef HVIR
-            if (halo_write) write(12) hpos(:), mass_odc, mass_vir, r_odc, r_vir, x_mean, v_mean, l_CM, v2_wrt_halo, var_x, pid_halo, xv_halo
+            if (halo_write) write(12) hpos(:), mass_vir, mass_odc, r_vir, r_odc, x_mean, v_mean, l_CM, v2_wrt_halo, var_x, pid_halo, xv_halo
 #else
-            if (halo_write) write(12) hpos(:), mass_odc, r_odc, x_mean, v_mean, l_CM, v2_wrt_halo, var_x, pid_halo, xv_halo
-#endif
-#else
-#ifdef HVIR
-            if (halo_write) write(12) hpos(:), mass_odc, mass_vir, r_odc, r_vir, x_mean, v_mean, l_CM, v2_wrt_halo, var_x, I_ij
-#else
-            if (halo_write) write(12) hpos(:), mass_odc, r_odc, x_mean, v_mean, l_CM, v2_wrt_halo, var_x, I_ij
-#endif
+            if (halo_write) write(12) hpos(:), mass_vir, mass_odc, r_vir, r_odc, x_mean, v_mean, l_CM, v2_wrt_halo, var_x, I_ij, x_mean_nu, v_mean_nu, n_nu 
 #endif
 
 
-        endif !! i_odc test 
+        endif !! i_vir/i_odc test 
 
     enddo !! iloc loop 
 
@@ -318,17 +304,23 @@ subroutine halofind
 
     np_halo_local_odc = 0
     do ii = 1, np_local
+#ifdef NEUTRINOS
+        if (PID(ii) == 1 .and. hpart_odc(ii) == 1) np_halo_local_odc = np_halo_local_odc + 1
+#else
         if (hpart_odc(ii) == 1) np_halo_local_odc = np_halo_local_odc + 1
+#endif
     enddo
     call mpi_reduce(np_halo_local_odc, np_halo_odc, 1, mpi_integer8, mpi_sum, 0, mpi_comm_world, ierr)
 
-#ifdef HVIR
     np_halo_local_vir = 0
     do ii = 1, np_local
+#ifdef NEUTRINOS
+        if (PID(ii) == 1 .and. hpart_vir(ii) == 1) np_halo_local_vir = np_halo_local_vir + 1
+#else
         if (hpart_vir(ii) == 1) np_halo_local_vir = np_halo_local_vir + 1
+#endif
     enddo
     call mpi_reduce(np_halo_local_vir, np_halo_vir, 1, mpi_integer8, mpi_sum, 0, mpi_comm_world, ierr)
-#endif
 
     call mpi_reduce(int(nhalo, kind=8), nhalo_tot, 1, mpi_integer8, mpi_sum, 0, mpi_comm_world, ierr)
 
@@ -339,11 +331,7 @@ subroutine halofind
     if (rank == 0) then
 
         write(*,*) "Done ... found ", nhalo_tot, " halos"
-#ifndef HVIR
-        write(*,*) "Total Particles found in halos = ", np_halo_odc
-#else
-        write(*,*) "Total Particles found in halos = ", np_halo_odc, np_halo_vir
-#endif
+        write(*,*) "Total Particles found in halos = ", np_halo_vir, np_halo_odc
 
         if (search_fail > 0) then
             write(*,*) "CONSIDER INCREASING search_ratio ... search_fail = ", search_fail
@@ -489,7 +477,7 @@ subroutine find_halo_particles(HODC, HMASS, HPOS, RODC, ITOT, DOVIR)
     real(4), dimension(3), intent(inout) :: HPOS
     real(4), intent(out) :: RODC
     integer(8), intent(out) :: ITOT
-    integer(4), intent(in), optional :: DOVIR
+    integer(4), intent(in) :: DOVIR
     logical :: HALOVIR
 
     real :: r, dgrid, maxfinegrid, rrefine, rsearch
@@ -504,10 +492,10 @@ subroutine find_halo_particles(HODC, HMASS, HPOS, RODC, ITOT, DOVIR)
     integer, parameter :: refine_ratio = 5
 
     !
-    ! Determine which overdensity we are trying to reach (only matters ifdef HVIR)
+    ! Determine which overdensity we are trying to reach 
     !
 
-    if (present(DOVIR)) then
+    if (DOVIR == 1) then
 
         HALOVIR = .true.
 
@@ -562,40 +550,7 @@ subroutine find_halo_particles(HODC, HMASS, HPOS, RODC, ITOT, DOVIR)
 
     np_search = 0
 
-#ifdef HVIR
-    if (.not. HALOVIR) then
-#endif
-
-        do k = csbox(3,1), csbox(3,2)
-            do j = csbox(2,1), csbox(2,2)
-                do i = csbox(1,1), csbox(1,2)
-                    pp = hoc(i, j, k)
-                    do
-                        if (pp == 0) exit
-                        if (hpart_odc(pp) == 0) then !! particle is not yet part of a halo
-                            p(:) = xv(:3, pp)
-                            dr   = HPOS(:) - p(:)
-                            r    = sqrt(dr(1)**2 + dr(2)**2 + dr(3)**2)
-                            if (r < rsearch) then
-                                np_search = np_search + 1
-                                pos(np_search, 1:3) = p(:)
-                                ilist_odc(np_search) = pp
-                                if (r < rrefine) then
-                                    ii = int((p(1)-frbox(1,1))/dgrid) + 1
-                                    jj = int((p(2)-frbox(2,1))/dgrid) + 1
-                                    kk = int((p(3)-frbox(3,1))/dgrid) + 1
-                                    finegrid(ii, jj, kk) = finegrid(ii, jj, kk) + 1
-                                endif
-                            endif
-                        endif
-                        pp = ll(pp)
-                    enddo !! pp loop
-                enddo !! i loop
-            enddo !! j loop
-        enddo !! k loop
-
-#ifdef HVIR
-    else
+    if (HALOVIR) then
 
         do k = csbox(3,1), csbox(3,2)
             do j = csbox(2,1), csbox(2,2)
@@ -623,30 +578,60 @@ subroutine find_halo_particles(HODC, HMASS, HPOS, RODC, ITOT, DOVIR)
                     enddo !! pp loop
                 enddo !! i loop
             enddo !! j loop
+        enddo !! k loo
+
+    else
+
+        !! Same as above but do not find a new centre. Use the centre determined
+        !! from halo_vir which was called first.
+
+        do k = csbox(3,1), csbox(3,2)
+            do j = csbox(2,1), csbox(2,2)
+                do i = csbox(1,1), csbox(1,2)
+                    pp = hoc(i, j, k)
+                    do
+                        if (pp == 0) exit
+                        if (hpart_odc(pp) == 0) then !! particle is not yet part of a halo
+                            p(:) = xv(:3, pp)
+                            dr   = HPOS(:) - p(:)
+                            r    = sqrt(dr(1)**2 + dr(2)**2 + dr(3)**2)
+                            if (r < rsearch) then
+                                np_search = np_search + 1
+                                pos(np_search, 1:3) = p(:)
+                                ilist_odc(np_search) = pp
+                            endif
+                        endif
+                        pp = ll(pp)
+                    enddo !! pp loop
+                enddo !! i loop
+            enddo !! j loop
         enddo !! k loop
 
     endif
-#endif
 
-    !
-    ! Find refined mesh density maximum
-    !
+    if (HALOVIR) then
 
-    maxfinegrid = 0.
+        !
+        ! Find refined mesh density maximum
+        !
 
-    do k = 1, ngrid(3)
-       do j = 1, ngrid(2)
-          do i = 1, ngrid(1)
-             if (finegrid(i, j, k) > maxfinegrid) then
-                maxfinegrid = finegrid(i, j, k)
-                HPOS(1) = frbox(1,1) + (i-0.5)*dgrid
-                HPOS(2) = frbox(2,1) + (j-0.5)*dgrid
-                HPOS(3) = frbox(3,1) + (k-0.5)*dgrid
-             endif
-             finegrid(i, j, k) = 0. !! Set to zero for next candidate
-          enddo
-       enddo
-    enddo
+        maxfinegrid = 0.
+
+        do k = 1, ngrid(3)
+           do j = 1, ngrid(2)
+              do i = 1, ngrid(1)
+                 if (finegrid(i, j, k) > maxfinegrid) then
+                    maxfinegrid = finegrid(i, j, k)
+                    HPOS(1) = frbox(1,1) + (i-0.5)*dgrid
+                    HPOS(2) = frbox(2,1) + (j-0.5)*dgrid
+                    HPOS(3) = frbox(3,1) + (k-0.5)*dgrid
+                 endif
+                 finegrid(i, j, k) = 0. !! Set to zero for next candidate
+              enddo
+           enddo
+        enddo
+
+    endif
 
     !
     ! Sort the particles within the search region based on their distance from the centre.
@@ -661,15 +646,11 @@ subroutine find_halo_particles(HODC, HMASS, HPOS, RODC, ITOT, DOVIR)
 
     isortpos(:np_search) = (/ (i, i=1, np_search) /)
     call indexedsort(np_search, pos(:, 4), isortpos(:))
-#ifdef HVIR
-    if (.not. HALOVIR) then
-#endif
-        ilist_odc(:np_search) = ilist_odc(isortpos(:np_search))
-#ifdef HVIR
-    else
+    if (HALOVIR) then
         ilist_vir(:np_search) = ilist_vir(isortpos(:np_search))
+    else
+        ilist_odc(:np_search) = ilist_odc(isortpos(:np_search))
     endif
-#endif 
 
     !
     ! Move one particle at a time until we reach the radius for which the desired overdensity is obtained.
@@ -711,6 +692,77 @@ subroutine find_halo_particles(HODC, HMASS, HPOS, RODC, ITOT, DOVIR)
     if (ITOT == 0) search_fail = search_fail + 1
 
 end subroutine find_halo_particles 
+
+! -------------------------------------------------------------------------------------------------------
+
+#ifdef NEUTRINOS
+subroutine neutrino_properties(HPOS, RSEARCH, XMEAN, VMEAN, NNU) 
+    !
+    ! Finds the mean velocity of all neutrinos within a radius of RSEARCH from
+    ! the halo centre HPOS
+    !
+
+    implicit none
+
+    include "cubep3m.fh"
+    include "mpif.h"
+
+    real(4), dimension(3), intent(in) :: HPOS
+    real(4), intent(in) :: RSEARCH
+    real(4), dimension(3), intent(out) :: XMEAN, VMEAN
+    integer(4), intent(out) :: NNU
+
+    integer :: csbox(3, 2)
+    integer :: pp, k, j, i
+    real :: r  
+    real :: dr(3), p(3)
+
+    !! Coarse mesh cells within the search region
+    csbox(:, 1) = int((HPOS(:)-RSEARCH)/mesh_scale) + 1
+    csbox(:, 2) = int((HPOS(:)+RSEARCH)/mesh_scale) + 1
+
+    !! Exclude coarse mesh cells in the search region that lie within the tile buffer
+    csbox(1, 1) = max(csbox(1, 1), hoc_nc_l)
+    csbox(1, 2) = min(csbox(1, 2), hoc_nc_h)
+    csbox(2, 1) = max(csbox(2, 1), hoc_nc_l)
+    csbox(2, 2) = min(csbox(2, 2), hoc_nc_h)
+    csbox(3, 1) = max(csbox(3, 1), hoc_nc_l)
+    csbox(3, 2) = min(csbox(3, 2), hoc_nc_h)
+   
+    !! Initialize mean velocity and particle counter
+    XMEAN(:) = 0.
+    VMEAN(:) = 0.
+    NNU = 0
+
+    do k = csbox(3,1), csbox(3,2)
+        do j = csbox(2,1), csbox(2,2)
+            do i = csbox(1,1), csbox(1,2)
+                pp = hoc(i, j, k)
+                do
+                    if (pp == 0) exit
+                    if (PID(pp) > 1) then !! this is a neutrino
+                        p(:) = xv(:3, pp)
+                        dr   = HPOS(:) - p(:)
+                        r    = sqrt(dr(1)**2 + dr(2)**2 + dr(3)**2)
+                        if (r <= RSEARCH) then
+                            XMEAN(:) = XMEAN(:) + p(:)
+                            VMEAN(:) = VMEAN(:) + xv(4:6, pp)
+                            NNU = NNU + 1
+                        endif
+                    endif
+                    pp = ll(pp)
+                enddo !! pp loop
+            enddo !! i loop
+        enddo !! j loop
+    enddo !! k loop
+
+    if (NNU > 0) then
+        XMEAN(:) = XMEAN(:) / NNU
+        VMEAN(:) = VMEAN(:) / NNU
+    endif
+ 
+end subroutine neutrino_properties 
+#endif 
 
 ! -------------------------------------------------------------------------------------------------------
 
