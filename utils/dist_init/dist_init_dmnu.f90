@@ -51,9 +51,11 @@ program dist_init
 #endif
 
   !! NEUTRINO sims may use this:
-  integer, parameter      :: nk=708
-  character(*), parameter :: fntf = 'nu_transfer_out_z10.dat'
-
+  integer, parameter      :: nk=706
+  character(*), parameter :: fntf = 'nu_mnu0p2_transfer_out_z10.dat'
+#ifdef VELTRANSFER
+  character(*), parameter :: vfntf = 'nu_mnu0p2_veltransfer_out_z10.dat'
+#endif
   !! Transfer function file
 !  integer, parameter      :: nk=922
 !  character(*), parameter :: fntf='camb_jddefault_transfer_z0.dat'
@@ -148,7 +150,14 @@ program dist_init
   call noisemap
   call deltafield
   call potentialfield
+
+#ifdef VELTRANSFER
+  call dm(0)
+  call veltransfer
+  call dm(1)
+#else
   call dm
+#endif
 
   if (rank == 0) call writepowerspectra
 
@@ -1435,10 +1444,212 @@ end subroutine di_fftw
   end subroutine potentialfield
 
 !!------------------------------------------------------------------!!
+
+#ifdef VELTRANSFER
+subroutine veltransfer
+    !
+    ! Replacing Fourier density field delta(k) with delta(k) *                                                                                               
+    ! T_velocity(k)/T_density(k) where T_velocity(k) is the neutrino velocity                                                                                 
+    ! transfer function. Store results in phi and pass along to dm subroutine                                                                                 
+    ! with COMMAND == 1.                                                                                                                                      
+    !                                                                                                                                                         
+    implicit none
+
+    integer :: k, j, i, l, kg, jg, ig, mg, ioerr
+    real(4) :: kz, ky, kx, kr, interpVTF,interpMTF, kphys
+    integer :: dx, dxy, ind
+    real, dimension(7,nk) :: vtf
+
+#ifdef NEUTRINOS
+    integer, parameter :: nucol = 6 !6 for neutrinos, 2 for dm                                                                                               
+#else
+    integer, parameter :: nucol = 2
+#endif
+    character*180 :: fn
+    character(len=6) :: rank_s
+
+    real time1,time2
+    call cpu_time(time1)
+
+    !                                                                                                                                                        
+    ! Read neutrino density transfer function                                                                                                                
+    !                                                                                                                                                         
+
+    if (rank==0) then
+        write(*,*) 'Reading ',fntf
+        open(11,file=fntf)
+        do k=1,nk
+            read(11,*) tf(1,k),tf(2,k),tf(3,k),tf(4,k),tf(5,k),tf(6,k),tf(7,k)
+        end do
+        close(11)
+    endif
+
+    call mpi_bcast(tf, 7*nk, mpi_real, 0, mpi_comm_world, ierr)
+
+    !
+    ! Read neutrino velocity transfer function
+    !
+
+    if (rank == 0) then
+        write(*,*) 'Reading ',vfntf
+        open(11,file=vfntf)
+        do k=1,nk
+            read(11,*) vtf(1,k),vtf(2,k),vtf(3,k),vtf(4,k),vtf(5,k),vtf(6,k),vtf(7,k)
+        end do
+        close(11)
+        !! Put vtf into simulation units
+        do j=2,7
+            do k=1, nk
+                vtf(j,k) = vtf(j,k) * Vphys2sim
+            enddo
+        enddo
+    endif
+
+    call mpi_bcast(vtf, 7*nk, mpi_real, 0, mpi_comm_world, ierr)
+
+    !
+    ! Transform slab from real space to Fourier space (slab was last modified in potentialfield
+    ! where it stored the Zel'dovich potential field delta(k)/k^2 in real space).
+    !
+
+    call di_fftw(1)
+
+    !
+    ! Multiply slab by T_vel(k)/T_den(k)*k^2 and then divide by k for finite difference.
+    !
+
+#ifndef SLAB
+    dx  = fsize(1)
+    dxy = dx * fsize(2)
+    ind = 0
+#endif
+#ifdef SLAB
+    do k = 1, nc_slab
+        kg=k+nc_slab*rank
+        if (kg .lt. hc+2) then
+            kz=kg-1
+        else
+            kz=kg-1-nc
+        endif
+        kz=2*sin(pi*kz/ncr)
+        do j = 1, nc
+            if (j .lt. hc+2) then
+                ky=j-1
+            else
+                ky=j-1-nc
+            endif
+            ky=2*sin(pi*ky/ncr)
+            do i = 1, nc+2, 2
+                kx=(i-1)/2
+                kx=2*sin(pi*kx/ncr)
+#else
+    do k = 1, nc_pen+mypadd
+        do j = 1, nc_node_dim
+            do i = 1, nc, 2
+                kg = ind / dxy
+                mg = ind - kg * dxy
+                jg = mg / dx
+                ig = mg - jg * dx
+                kg = fstart(3) + kg
+                jg = fstart(2) + jg
+                ig = 2 * (fstart(1) + ig) - 1
+                ind = ind + 1
+                if (kg < hc+2) then
+                    kz=kg-1
+                else
+                    kz=kg-1-nc
+                endif
+                if (jg < hc+2) then
+                    ky=jg-1
+                else
+                    ky=jg-1-nc
+                endif
+                kx = (ig-1)/2
+
+                kphys = 2*pi*sqrt(kx**2+ky**2+kz**2)/box
+                kx = 2*sin(pi*kx/ncr)
+                ky = 2*sin(pi*ky/ncr)
+                kz = 2*sin(pi*kz/ncr)
+
+#endif
+                kr = sqrt(kx**2+ky**2+kz**2)
+
+                !! Interpolate vt(kphys) and t(kphys)
+                interpVTF = linear_interpolate(kphys, vtf(1,:), vtf(nucol,:), nk)
+                interpMTF = linear_interpolate(kphys, tf(1, :), tf(nucol,:), nk)
+
+                !! Multiply slab by interpVTF/interpMTF*kr**2/kr
+                slab(i:i+1, j, k) = slab(i:i+1, j, k) * interpVTF/interpMTF * kr * (-1.0) !* (-2.0) * pi / ncr
+                if (kr .EQ. 0) slab(i:i+1,j,k) = 0.0
+            enddo
+        enddo
+    enddo
+
+    !
+    ! Inverse FFT potential field
+    !              
+    call di_fftw(-1)
+
+    !              
+    ! Put cube in phi
+    !
+
+    phi=0.0
+    phi(1:nc_node_dim,1:nc_node_dim,1:nc_node_dim)=cube
+    call mesh_buffer
+
+    call cpu_time(time2)
+    time2=(time2-time1)
+    if (rank == 0) write(*,"(f8.2,a)") time2,'  Called veltransfer'
+    return
+
+end subroutine veltransfer
+
+!!------------------------------------------------------------------!!
+
+real(4) function linear_interpolate(xi, x, y, n)
+    !                          
+    ! Linearlly interpolates (x, y) at (xi, yi).                                                                                                             
+    !
+
+    implicit none
+
+    real(4) :: xi
+    integer(4) :: n
+    real(4), dimension(n) :: x, y
+
+    real :: w1, w2, yi
+    integer :: i
+
+    if (xi <= x(1)) then
+        yi = y(1)
+    else if (xi >= x(n)) then
+        yi = y(n)
+    else
+        do i = 1, n-1
+            if (xi >= x(i) .and. xi <= x(i+1)) then
+                w1 = x(i+1) - xi
+                w2 = xi - x(i)
+                yi = (w1*y(i) + w2*y(i+1)) / (x(i+1)-x(i))
+                exit
+            endif
+        enddo
+    endif
+
+    linear_interpolate = yi
+
+end function linear_interpolate
+#endif
+
+!!------------------------------------------------------------------!!
     !! Dark matter data
     !! xvp(1:3) = x,y,z in grid units from 0 to nc
     !! xvp(4:6) = vx,vy,vz in km/s
+#ifdef VELTRANSFER
+  subroutine dm(COMMAND)
+#else
   subroutine dm
+#endif
     implicit none
     integer :: i,j,k,ioerr 
     integer :: i1,j1,k1,lb,ub
@@ -1451,6 +1662,10 @@ end subroutine di_fftw
     character(len=6) :: rank_s
     character(len=7) :: z_s
     integer(4), dimension(11) :: header_garbage
+
+#ifdef VELTRANSFER
+    integer :: COMMAND
+#endif
 
 #ifdef NEUTRINOS
     integer :: l
@@ -1466,19 +1681,51 @@ end subroutine di_fftw
     write(rank_s,'(i6)') rank
     rank_s=adjustl(rank_s)
 
+#ifdef VELTRANSFER
+    !!Open temporary file
+    if (COMMAND==0)then
+       write(*,*) 'Caching xvp on disk'
+       fn=scratch_path//'deltaTEMP'//rank_s(1:len_trim(rank_s))
+       open(11,file=fn,status='replace',iostat=ioerr,access='stream')
+       if (ioerr /= 0) then
+          print *,'error opening xvp cache file:',fn
+          stop
+       endif
 
+    else
+      !! Temp file
+      fn=scratch_path//'deltaTEMP'//rank_s(1:len_trim(rank_s))
+      open(31,file=fn,status='old',iostat=ioerr,access='stream')
+      if (ioerr /= 0) then
+        print *,'error opening Delta cache file:',fn
+        stop
+      endif
+
+      !! Output file
+#ifdef NEUTRINOS
+      fn=scratch_path//z_s(1:len_trim(z_s))//'xv'//rank_s(1:len_trim(rank_s))//'_nu.dat'
+#else
+      fn=scratch_path//z_s(1:len_trim(z_s))//'xv'//rank_s(1:len_trim(rank_s))//'.dat'
+#endif
+      open(11,file=fn,status='replace',iostat=ioerr,access='stream')
+      if (ioerr /= 0) then
+        print *,'error opening:',fn
+        stop
+      endif
+    endif
+#else
 #ifdef NEUTRINOS
     fn=scratch_path//z_s(1:len_trim(z_s))//'xv'//rank_s(1:len_trim(rank_s))//'_nu.dat'
 #else
     fn=scratch_path//z_s(1:len_trim(z_s))//'xv'//rank_s(1:len_trim(rank_s))//'.dat'
 #endif
-
     open(11,file=fn,status='replace',iostat=ioerr,access='stream')
-
     if (ioerr /= 0) then
       print *,'error opening:',fn
       stop
     endif
+
+#endif
 
 #ifdef NEUTRINOS
     !! Read cdfTable
@@ -1496,8 +1743,13 @@ end subroutine di_fftw
     !! Write the header in checkpoint format with zeros for all variables (except np_local)
     np_local=np_node_dim**3
     header_garbage(:) = 0
+#ifdef VELTRANSFER
+    if (COMMAND==1) then
+       write(11) np_local, header_garbage
+    endif
+#else
     write(11) np_local, header_garbage
-
+#endif
     !! Displace particles
     !! Finite-difference potential to get displacement field
     vf=vfactor(scalefactor)
@@ -1515,6 +1767,21 @@ end subroutine di_fftw
              xvp(1)=dis(1)+(i1-0.5)
              xvp(2)=dis(2)+(j1-0.5)
              xvp(3)=dis(3)+(k1-0.5)
+
+
+#ifdef VELTRANSFER
+             !!Read in xvp 1-3 if necessary
+             if (COMMAND==1) then
+                read(31) xvp
+             endif
+             xvp(4)=dis(1)
+             xvp(5)=dis(2)
+             xvp(6)=dis(3)
+#else
+             xvp(4)=dis(1)*vf
+             xvp(5)=dis(2)*vf
+             xvp(6)=dis(3)*vf
+#endif
 
 #ifdef NEUTRINOS
              if (nu_random) then !! Uses Gaussian velocity distribution
@@ -1536,8 +1803,8 @@ end subroutine di_fftw
                 rnum1 = rnum1*Vphys2sim*(180.8892437/mass_neutrino/scalefactor/3.0**0.5) !Divide by sqrt3  
                 rnum2 = rnum2*Vphys2sim*(180.8892437/mass_neutrino/scalefactor/3.0**0.5) !for each individual component
 
-                xvp(4)=dis(1)*vf + rnum1
-                xvp(5)=dis(2)*vf + rnum2
+                xvp(4)=xvp(4) + rnum1
+                xvp(5)=xvp(5) + rnum2
 
                 call random_number(rnum3)
                 call random_number(rnum4)
@@ -1548,7 +1815,7 @@ end subroutine di_fftw
                 rnum3=rnum4*cos(rnum3)
                 rnum3 = rnum3*Vphys2sim*(180.8892437/mass_neutrino/scalefactor/3.0**0.5)
 
-                xvp(6)=dis(3)*vf + rnum3
+                xvp(6)=xvp(6) + rnum3
 
               else if (nu_relfd) then !! Use Fermi-Dirac velocity distribution
 
@@ -1575,21 +1842,11 @@ end subroutine di_fftw
                 rnum2 = rnum2*2.0-1.0 !convert to range 1,-1
                 rnum3 = rnum3*2.0*pi  !convert to range 0,2pi
 
-                xvp(4)=dis(1)*vf + rnum1*(1.0-rnum2**2)**0.5*cos(rnum3)*Vphys2sim
-                xvp(5)=dis(2)*vf + rnum1*(1.0-rnum2**2)**0.5*sin(rnum3)*Vphys2sim
-                xvp(6)=dis(3)*vf + rnum1*rnum2*Vphys2sim
-
-              else !! Uses linear theory velocity
-
-                xvp(4)=dis(1)*vf
-                xvp(5)=dis(2)*vf
-                xvp(6)=dis(3)*vf
+                xvp(4)=xvp(4) + rnum1*(1.0-rnum2**2)**0.5*cos(rnum3)*Vphys2sim
+                xvp(5)=xvp(5) + rnum1*(1.0-rnum2**2)**0.5*sin(rnum3)*Vphys2sim
+                xvp(6)=xvp(6) + rnum1*rnum2*Vphys2sim
 
               endif
-#else
-             xvp(4)=dis(1)*vf
-             xvp(5)=dis(2)*vf
-             xvp(6)=dis(3)*vf
 #endif
 
              write(11) xvp
@@ -1599,7 +1856,9 @@ end subroutine di_fftw
     enddo
 
     close(11)
-
+#ifdef VELTRANSFER
+    if (command == 1) close(31)
+#endif
     call cpu_time(time2)
     time2=(time2-time1)
     if (rank == 0) write(*,"(f8.2,a)") time2,'  Called dm'
