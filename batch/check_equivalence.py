@@ -26,6 +26,9 @@ ratio_nudm_dim = 2
 # Set this true if not using extended pp
 no_extpp = True 
 
+# Set this true if not using projections
+no_proj = False 
+
 # These set the total number of threads
 cores          = 8
 nested_threads = 2
@@ -184,6 +187,13 @@ if no_extpp:
     ll_fine             = 0
     hoc_fine            = 0
 
+# Changes if projections are turned off
+if no_proj:
+    rp_buf              = 0
+    rho_pxy             = 0
+    rho_pxz             = 0
+    rho_pyz             = 0
+
 # Changes if neutrinos are being used.
 if neutrinos:
     PID                 = 1 * max_np
@@ -266,6 +276,10 @@ if srfac != 1:
 if no_extpp:
     print " *** Make sure to comment out pp_ext_force_accum, ll_fine, and hoc_fine in cubepm.fh ***"
     print 
+
+if no_proj:
+    print " *** Make sure to comment out rp_buf, rho_pxy, rho_pxz, and rho_pyz in cubepm.fh ***"
+    print
 
 if bytes_eq1 != isortpos:
     print " *** Adjust common block for isortpos, isortdist, and isortpeak *** "

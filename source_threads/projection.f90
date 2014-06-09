@@ -18,6 +18,8 @@
 
 !! Initialize projection variables
 
+#ifndef NOPROJ
+
 #ifdef NEUTRINOS
     !! Loop over particle species
     do ispec = 1, 2
@@ -145,6 +147,8 @@
     enddo !! ispec
 #endif
 
+#endif
+
     write(*,*) 'Finished projection:',rank
 
 !! Increment projection counter 
@@ -155,6 +159,7 @@
 
   end subroutine projection 
 
+#ifndef NOPROJ
 #ifdef NEUTRINOS
   subroutine build_projection(tile,rho_node,ispec)
 #else
@@ -228,4 +233,5 @@
       enddo
     enddo
 
-  end subroutine build_projection 
+  end subroutine build_projection
+#endif 
