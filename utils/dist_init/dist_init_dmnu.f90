@@ -6,7 +6,6 @@
 !! On Ranger compile with:
 !! mpif90 -Wl,-rpath, -L$TACC_MKL_LIB -I$TACC_MKL_INC -fpp -g -O2 -xW -shared-intel -DBINARY dist_init_dm.f90 -o dist_init -L$TACC_MKL_LIB -lmkl_em64t -openmp
 
-
 program dist_init 
 
   use omp_lib
