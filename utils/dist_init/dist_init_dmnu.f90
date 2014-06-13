@@ -9,12 +9,14 @@
 
 program dist_init 
 
+  use omp_lib
+
   implicit none
 
   include 'mpif.h'
   include '../../parameters'
 
-  integer,parameter  :: nt=1
+  integer,parameter  :: num_threads = 8 
 #ifdef NEUTRINOS
   logical, parameter :: generate_seeds=.false.
 #else
@@ -142,7 +144,8 @@ program dist_init
   sec1 = mpi_wtime(ierr)
   if (rank == 0) write(*,*) "STARTING INITIAL CONDITIONS: ", sec1
 
-  !$ call omp_set_num_threads(nt)
+  call omp_set_num_threads(num_threads)
+
   if (rank == 0) call writeparams
 
   call initvar
@@ -1448,15 +1451,15 @@ end subroutine di_fftw
 #ifdef VELTRANSFER
 subroutine veltransfer
     !
-    ! Replacing Fourier density field delta(k) with delta(k) *                                                                                               
-    ! T_velocity(k)/T_density(k) where T_velocity(k) is the neutrino velocity                                                                                 
-    ! transfer function. Store results in phi and pass along to dm subroutine                                                                                 
-    ! with COMMAND == 1.                                                                                                                                      
-    !                                                                                                                                                         
+    ! Replacing Fourier density field delta(k) with delta(k)*T_velocity(k)/T_density(k) 
+    ! where T_velocity(k) is the neutrino velocity transfer function. 
+    ! Store results in phi and pass along to dm subroutine with COMMAND == 1.
+    !    
+
     implicit none
 
-    integer :: k, j, i, l, kg, jg, ig, mg, ioerr
-    real(4) :: kz, ky, kx, kr, interpVTF,interpMTF, kphys
+    integer :: ii, k, j, i, l, kg, jg, ig, mg, ioerr
+    real(4) :: kz, ky, kx, kr, interpVTF,interpMTF, kphys, w1, w2
     integer :: dx, dxy, ind
     real, dimension(7,nk) :: vtf
 
@@ -1524,6 +1527,8 @@ subroutine veltransfer
     ind = 0
 #endif
 #ifdef SLAB
+    !! This loop has not been tested and we are not certain it gives correct results with SLAB (works for pencil)
+    write(*,*) "WARNING: THIS LOOP HAS NOT BEEN TESTED WITH -DSLAB ... USE WITH CAUTION"
     do k = 1, nc_slab
         kg=k+nc_slab*rank
         if (kg .lt. hc+2) then
@@ -1543,7 +1548,10 @@ subroutine veltransfer
                 kx=(i-1)/2
                 kx=2*sin(pi*kx/ncr)
 #else
+    !$omp parallel default(shared) private(k, j, i, kg, mg, jg, ig, ind, kz, ky, kx, kphys, kr, interpMTF, interpVTF, w1, w2, ii)
+    !$omp do schedule(dynamic)
     do k = 1, nc_pen+mypadd
+        ind = (k-1)*nc_node_dim*nc/2
         do j = 1, nc_node_dim
             do i = 1, nc, 2
                 kg = ind / dxy
@@ -1574,9 +1582,38 @@ subroutine veltransfer
 #endif
                 kr = sqrt(kx**2+ky**2+kz**2)
 
-                !! Interpolate vt(kphys) and t(kphys)
-                interpVTF = linear_interpolate(kphys, vtf(1,:), vtf(nucol,:), nk)
-                interpMTF = linear_interpolate(kphys, tf(1, :), tf(nucol,:), nk)
+                !! Interpolate vt(kphys) and t(kphys) 
+                !! Funciton call turned out to be expensive ... put interpolation in here
+                !interpVTF = linear_interpolate(kphys, vtf(1,:), vtf(nucol,:), nk)
+                !interpMTF = linear_interpolate(kphys, tf(1, :), tf(nucol,:), nk)
+                if (kphys <= vtf(1,1)) then
+                    interpVTF = vtf(nucol, 1)
+                else if (kphys >= vtf(1, nk)) then
+                    interpVTF = vtf(nucol, nk)
+                else
+                    do ii = 1, nk-1
+                        if (kphys <= vtf(1,ii+1)) then
+                            w1 = vtf(1,ii+1) - kphys
+                            w2 = kphys - vtf(1,ii)
+                            interpVTF = (w1*vtf(nucol,ii)+w2*vtf(nucol,ii+1))/(vtf(1,ii+1)-vtf(1,ii))
+                            exit
+                        endif
+                    enddo
+                endif
+                if (kphys <= tf(1,1)) then
+                    interpMTF = tf(nucol, 1)
+                else if (kphys >= tf(1, nk)) then
+                    interpMTF = tf(nucol, nk)
+                else
+                    do ii = 1, nk-1
+                        if (kphys <= tf(1,ii+1)) then
+                            w1 = tf(1,ii+1) - kphys
+                            w2 = kphys - tf(1,ii)
+                            interpMTF = (w1*tf(nucol,ii)+w2*tf(nucol,ii+1))/(tf(1,ii+1)-tf(1,ii))
+                            exit
+                        endif
+                    enddo
+                endif
 
                 !! Multiply slab by interpVTF/interpMTF*kr**2/kr
                 slab(i:i+1, j, k) = slab(i:i+1, j, k) * interpVTF/interpMTF * kr * (-1.0) !* (-2.0) * pi / ncr
@@ -1584,6 +1621,10 @@ subroutine veltransfer
             enddo
         enddo
     enddo
+#ifndef SLAB
+    !$omp end do 
+    !$omp end parallel 
+#endif
 
     !
     ! Inverse FFT potential field
