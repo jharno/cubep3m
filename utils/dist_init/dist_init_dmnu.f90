@@ -47,8 +47,9 @@ program dist_init
 #endif
 
 #ifdef NEUTRINOS
-#undef NU_RANDOM !! #if statement instead of if
-#define NU_RELFD !!
+#undef NU_RANDOM
+ !! #if statement instead of if
+#define NU_RELFD
   logical, parameter :: nu_random = .false.
   logical, parameter :: nu_relfd = .true.
   real(4), parameter :: Vphys2sim = 1.0/(300. * sqrt(omega_m) * box * (1. + redshift) / 2. / nc)!(180.8892437/mass_neutrino)/(box*300.0*(omega_m)**0.5/2.0/nc)
@@ -1764,7 +1765,8 @@ end function linear_interpolate
           stop
        endif
     endif
-#else !! xv file
+#else
+ !! xv file
 #ifdef NEUTRINOS
     fn=scratch_path//z_s(1:len_trim(z_s))//'xv'//rank_s(1:len_trim(rank_s))//'_nu.dat'
 #else
