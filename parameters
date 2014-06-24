@@ -35,7 +35,8 @@ integer(4),   parameter :: nf_tile        = 176
 real(4),      parameter :: box            = 1000.0
 
 ! initial redshift
-real(4),      parameter :: z_i            = 100.0
+real(4),      parameter :: z_i            = 10.0
+real(4),      parameter :: z_i_nu         = 10.0
 
 ! omega fractions 
 real(4),      parameter :: omega_l        = 0.724

@@ -28,7 +28,11 @@ program dist_init
   real, parameter :: omegal=omega_l 
   real, parameter :: omegam=1.0-omegal 
 
+#ifdef NEUTRINOS
+  real, parameter :: redshift=z_i_nu
+#else
   real, parameter :: redshift=z_i 
+#endif
   real, parameter :: scalefactor=1/(1+redshift)
 
 #ifdef WDM
@@ -47,7 +51,7 @@ program dist_init
 #define NU_RELFD !!
   logical, parameter :: nu_random = .false.
   logical, parameter :: nu_relfd = .true.
-  real(4), parameter :: Vphys2sim = 1.0/(300. * sqrt(omega_m) * box * (1. + z_i) / 2. / nc)!(180.8892437/mass_neutrino)/(box*300.0*(omega_m)**0.5/2.0/nc)
+  real(4), parameter :: Vphys2sim = 1.0/(300. * sqrt(omega_m) * box * (1. + redshift) / 2. / nc)!(180.8892437/mass_neutrino)/(box*300.0*(omega_m)**0.5/2.0/nc)
   integer, parameter :: nv=10000
   character(*), parameter :: cdfTable = 'CDFTable.txt'
   real(4), dimension(2,nv) :: cdf    !Col1 is v, col2 is cdf
@@ -1719,7 +1723,7 @@ end function linear_interpolate
     real time1,time2
     call cpu_time(time1)
 
-    write(z_s,'(f7.3)') z_i
+    write(z_s,'(f7.3)') redshift
     z_s=adjustl(z_s)
  
     write(rank_s,'(i6)') rank
