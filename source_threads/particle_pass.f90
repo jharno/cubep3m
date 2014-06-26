@@ -1,11 +1,14 @@
 !! pass particles to adjacent nodes
   subroutine particle_pass
+    use omp_lib
     implicit none
 
     include 'mpif.h'
     include 'cubepm.fh'
 
     real(4), parameter :: rnf_buf = nf_buf
+    integer(4) :: np_max
+
 #ifdef DEBUG_PID
     real(4) :: np_total
     integer(4) :: np_local_i
@@ -53,6 +56,12 @@
     enddo
     if (rank == 0) print *,'total out=',k
 #endif
+
+   ! Print max number of particles in any node, before and after particle pass:
+
+    !call mpi_reduce(np_local,np_max,1,mpi_integer, &
+    !                       mpi_max,0,mpi_comm_world,ierr)
+    !if(rank==0) write(*,*) '*** max np_local (no ghosts)   = ' , np_max, ' ***'
 
 ! pass +x
 
@@ -700,6 +709,14 @@
       call mpi_barrier(mpi_comm_world,ierr)
     enddo
 #endif
+
+    call mpi_reduce(np_local,np_max,1,mpi_integer, &
+                           mpi_max,0,mpi_comm_world,ierr)
+    if(rank==0) write(*,*) '*************** Density_buffer Analysis *************'
+    if(rank==0) write(*,*) '*** max np allowed             = ' , max_np, ' ***'
+    if(rank==0) write(*,*) '*** max np_local (with ghosts) = ', np_max, ' ***'
+    !if(rank==0) write(*,*) '*** no density_buffer          = ', real(max_np)/density_buffer, ' ***'
+    if(rank==0) write(*,*) '*** min density_buffer allowed = ', real(np_max)*density_buffer/real(max_np), ' ***'
 
     call system_clock(count=count_f,count_rate=count_r)
 #ifdef MPI_TIME
