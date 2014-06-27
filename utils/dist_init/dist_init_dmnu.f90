@@ -48,11 +48,9 @@ program dist_init
 
 #ifdef NEUTRINOS
 #undef NU_RANDOM
- !! #if statement instead of if
 #define NU_RELFD
   logical, parameter :: nu_random = .false.
   logical, parameter :: nu_relfd = .true.
-  real(4), parameter :: Vphys2sim = 1.0/(300. * sqrt(omega_m) * box * (1. + redshift) / 2. / nc)!(180.8892437/mass_neutrino)/(box*300.0*(omega_m)**0.5/2.0/nc)
   integer, parameter :: nv=10000
   character(*), parameter :: cdfTable = 'CDFTable.txt'
   real(4), dimension(2,nv) :: cdf    !Col1 is v, col2 is cdf
@@ -63,6 +61,7 @@ program dist_init
   character(*), parameter :: fntf = 'nu_mnu0p2_transfer_out_z10.dat'
 #ifdef VELTRANSFER
   character(*), parameter :: vfntf = 'nu_mnu0p2_veltransfer_out_z10.dat'
+  real(4), parameter :: Vphys2sim = 1.0/(300. * sqrt(omega_m) * box * (1. + redshift) / 2. / nc)!(180.8892437/mass_neutrino)/(box*300.0*(omega_m)**0.5/2.0/nc)
 #endif
   !! Transfer function file
 !  integer, parameter      :: nk=922
@@ -1883,6 +1882,7 @@ end function linear_interpolate
                 rnum3 = rnum3*Vphys2sim*(180.8892437/mass_neutrino/scalefactor/3.0**0.5)
 
                 xvp(6,i,j)=xvp(6,i,j) + rnum3
+#else
 #ifdef NU_RELFD
                 !! Use Fermi-Dirac velocity distribution
                 call random_number(rnum1) !|vel|
@@ -1995,7 +1995,7 @@ end function linear_interpolate
        enddo
        write(unit=11,pos=pos_out) xvp(:,:,:)
     enddo
-    !$omp end do 
+!$omp end do 
 #endif
 
 !$omp end parallel
