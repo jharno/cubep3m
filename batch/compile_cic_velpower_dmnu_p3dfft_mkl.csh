@@ -1,9 +1,9 @@
 cd ../utils/cic_velpower
 
-P3DFFT_LIB=/vol-th/home/testuser1/p3dfft.2.5.1_JD/lib
-P3DFFT_INC=/vol-th/home/testuser1/p3dfft.2.5.1_JD/include
+P3DFFT_LIB=/vol-th/home/bnu_ztj_haoran/lib/p3dfft_2.5.1/lib
+P3DFFT_INC=/vol-th/home/bnu_ztj_haoran/lib/p3dfft_2.5.1/include
 MKL_FFTW_INC=/vol-th/intel/composer_xe_2013_sp1.1.106/mkl/include/fftw
-MKL_FFTW_LIB=/vol-th/intel/composer_xe_2013_sp1.1.106/mkl/lib/intel64
+MKL_FFTW_LIB=/vol-th/intel/composer_xe_2013_sp1.1.106/mkl/lib/intel64/
 
 rm -f ngp_velpower_dmnu
 

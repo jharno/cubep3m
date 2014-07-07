@@ -9,8 +9,8 @@ import numpy
 #
 
 nodes_dim      = 1
-tiles_node_dim = 8
-nf_tile        = 192
+tiles_node_dim = 4
+nf_tile        = 112
 density_buffer = 2.0
 
 # Factor to reduce max_buf by in cubepm.par 
@@ -30,8 +30,8 @@ no_extpp = True
 no_proj = False 
 
 # These set the total number of threads
-cores          = 8
-nested_threads = 2
+cores          = 4
+nested_threads = 6
 
 #
 # These ones are usually not changed
