@@ -170,7 +170,11 @@
                         k_n == cic_l(3) .or. k_n == cic_h(3) ) then
                             call fine_cic_mass_boundry(pp_n, tile, thread)
                     else
+#ifdef NEUTRINOS
+                            call fine_cic_mass(pp_n, tile, thread, 0)
+#else
                             call fine_cic_mass(pp_n, tile, thread)
+#endif
                     endif
 #endif
                 enddo !! i_n

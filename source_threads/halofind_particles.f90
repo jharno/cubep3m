@@ -279,8 +279,12 @@ subroutine halofind
 #endif
 #endif
 
-#if defined(PID_FLAG) && !defined(NEUTRINOS)
+#ifndef NEUTRINOS
+#ifdef PID_FLAG
             if (halo_write) write(12) hpos(:), mass_vir, mass_odc, r_vir, r_odc, x_mean, v_mean, l_CM, v2_wrt_halo, var_x, pid_halo, xv_halo
+#else
+            if (halo_write) write(12) hpos(:), mass_vir, mass_odc, r_vir, r_odc, x_mean, v_mean, l_CM, v2_wrt_halo, var_x
+#endif
 #else
             if (halo_write) write(12) hpos(:), mass_vir, mass_odc, r_vir, r_odc, x_mean, v_mean, l_CM, v2_wrt_halo, var_x, I_ij, x_mean_nu, v_mean_nu, n_nu 
 #endif
