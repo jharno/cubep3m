@@ -6,6 +6,9 @@
     include 'cubepm.fh'
 
     real(4), parameter :: rnf_buf = nf_buf
+    integer(4) :: np_max
+    integer(4) :: np_buf_max,np_buf_max_dir
+
 #ifdef DEBUG_PID
     real(4) :: np_total
     integer(4) :: np_local_i
@@ -14,6 +17,8 @@
     integer(4) :: nppx,nppy,nppz,npmx,npmy,npmz
     integer(4), dimension(mpi_status_size) :: status,sstatus,rstatus
     integer(4) :: srequest,rrequest,sierr,rierr
+
+    np_buf_max_dir = 0
 
 #ifdef MPI_TIME
     call mpi_barrier(mpi_comm_world,ierr)
@@ -54,6 +59,11 @@
     if (rank == 0) print *,'total out=',k
 #endif
 
+    ! Uncomment this if you want to print max number of particles in any node, before particle pass (i.e. with empty buffers):
+    !call mpi_reduce(np_local,np_max,1,mpi_integer, &
+    !                       mpi_max,0,mpi_comm_world,ierr)
+    !if(rank==0) write(*,*) '*** max np_local (no ghosts)   = ' , np_max, ' ***'
+
 ! pass +x
 
     tag=11
@@ -87,6 +97,12 @@
     endif
 
     nppx = np_buf
+
+    call mpi_reduce(nppx,np_buf_max_dir,1,mpi_integer, &
+                           mpi_max,0,mpi_comm_world,ierr)
+    if(rank==0) then
+       if(np_buf_max_dir > np_buf_max) np_buf_max = np_buf_max_dir
+    endif
 
 #ifdef DEBUG_PID
      write(*,*) 'Before nppx exchange'
@@ -189,6 +205,12 @@
     endif
 
     npmx = np_buf
+
+    call mpi_reduce(npmx,np_buf_max_dir,1,mpi_integer, &
+                           mpi_max,0,mpi_comm_world,ierr)
+    if(rank==0) then
+       if(np_buf_max_dir > np_buf_max) np_buf_max = np_buf_max_dir
+    endif
 
 #ifdef DEBUG
     do i=0,nodes-1
@@ -316,6 +338,12 @@
 
     npmy = np_buf
 
+    call mpi_reduce(npmy,np_buf_max_dir,1,mpi_integer, &
+                           mpi_max,0,mpi_comm_world,ierr)
+    if(rank==0) then
+       if(np_buf_max_dir > np_buf_max) np_buf_max = np_buf_max_dir
+    endif
+
 #ifdef DEBUG
     do i=0,nodes-1
       if (i==rank) write(*,*) 'rank',rank,'np_out=',npmy,'-y'
@@ -424,6 +452,12 @@
     endif
 
     nppy = np_buf
+
+    call mpi_reduce(nppy,np_buf_max_dir,1,mpi_integer, &
+                           mpi_max,0,mpi_comm_world,ierr)
+    if(rank==0) then
+       if(np_buf_max_dir > np_buf_max) np_buf_max = np_buf_max_dir
+    endif
 
 #ifdef DEBUG
     do i=0,nodes-1
@@ -543,6 +577,12 @@
 
     nppz = np_buf
 
+    call mpi_reduce(nppz,np_buf_max_dir,1,mpi_integer, &
+                           mpi_max,0,mpi_comm_world,ierr)
+    if(rank==0) then
+       if(np_buf_max_dir > np_buf_max) np_buf_max = np_buf_max_dir
+    endif
+
 #ifdef DEBUG
     do i=0,nodes-1
       if (i==rank) write(*,*) 'rank',rank,'np_out=',nppz,'+z'
@@ -630,6 +670,12 @@
     endif
 
     npmz = np_buf
+
+    call mpi_reduce(npmz,np_buf_max_dir,1,mpi_integer, &
+                           mpi_max,0,mpi_comm_world,ierr)
+    if(rank==0) then
+       if(np_buf_max_dir > np_buf_max) np_buf_max = np_buf_max_dir
+    endif
 
 #ifdef DEBUG
     do i=0,nodes-1
@@ -749,6 +795,19 @@
       call mpi_barrier(mpi_comm_world,ierr)
     enddo
 #endif
+
+    call mpi_reduce(np_local,np_max,1,mpi_integer, &
+                           mpi_max,0,mpi_comm_world,ierr)
+    if(rank==0) write(*,*) '*************** Density_buffer Analysis *************'
+    if(rank==0) write(*,*) '*** max np allowed             = ' , max_np, '    ***'
+    if(rank==0) write(*,*) '*** max np_local (with ghosts) = ' , np_max, '    ***'
+    !if(rank==0) write(*,*) '*** no density_buffer          = ', real(max_np)/density_buffer, ' ***'
+    if(rank==0) write(*,*) '*** min density_buffer allowed = ', real(np_max)*density_buffer/real(max_np), ' ***'
+
+    if(rank==0) write(*,*) '*************** SendRecv Analysis *******************'
+    if(rank==0) write(*,*) '*** max np_buf                 = ' , np_buf_max, '    ***'
+    if(rank==0) write(*,*) '*** max allowed                = ' , max_buf/6 , '    ***'
+    if(rank==0) write(*,*) '*****************************************************'
 
     call system_clock(count=count_f,count_rate=count_r)
 #ifdef MPI_TIME
