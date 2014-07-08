@@ -6,7 +6,6 @@
 !! On Ranger compile with:
 !! mpif90 -Wl,-rpath, -L$TACC_MKL_LIB -I$TACC_MKL_INC -fpp -g -O2 -xW -shared-intel -DBINARY dist_init_dm.f90 -o dist_init -L$TACC_MKL_LIB -lmkl_em64t -openmp
 
-
 program dist_init 
 
   use omp_lib
@@ -29,7 +28,11 @@ program dist_init
   real, parameter :: omegal=omega_l 
   real, parameter :: omegam=1.0-omegal 
 
+#ifdef NEUTRINOS
+  real, parameter :: redshift=z_i_nu
+#else
   real, parameter :: redshift=z_i 
+#endif
   real, parameter :: scalefactor=1/(1+redshift)
 
 #ifdef WDM
@@ -44,9 +47,10 @@ program dist_init
 #endif
 
 #ifdef NEUTRINOS
+#undef NU_RANDOM
+#define NU_RELFD
   logical, parameter :: nu_random = .false.
   logical, parameter :: nu_relfd = .true.
-  real(4), parameter :: Vphys2sim = 1.0/(300. * sqrt(omega_m) * box * (1. + z_i) / 2. / nc)!(180.8892437/mass_neutrino)/(box*300.0*(omega_m)**0.5/2.0/nc)
   integer, parameter :: nv=10000
   character(*), parameter :: cdfTable = 'CDFTable.txt'
   real(4), dimension(2,nv) :: cdf    !Col1 is v, col2 is cdf
@@ -54,9 +58,19 @@ program dist_init
 
   !! NEUTRINO sims may use this:
   integer, parameter      :: nk=706
+!fntf depends on redshift which could vary for neutrinos and dm
+#ifdef NEUTRINOS
   character(*), parameter :: fntf = 'nu_mnu0p2_transfer_out_z10.dat'
+#else
+  character(*), parameter :: fntf = 'nu_mnu0p2_transfer_out_z10.dat'
+#endif
 #ifdef VELTRANSFER
+#ifdef NEUTRINOS
   character(*), parameter :: vfntf = 'nu_mnu0p2_veltransfer_out_z10.dat'
+#else
+  character(*), parameter :: vfntf = 'nu_mnu0p2_veltransfer_out_z10.dat'
+#endif
+  real(4), parameter :: Vphys2sim = 1.0/(300. * sqrt(omega_m) * box * (1. + redshift) / 2. / nc)!(180.8892437/mass_neutrino)/(box*300.0*(omega_m)**0.5/2.0/nc)
 #endif
   !! Transfer function file
 !  integer, parameter      :: nk=922
@@ -127,6 +141,9 @@ program dist_init
   real, dimension(0:nc_node_dim+1,0:nc_node_dim+1,0:nc_node_dim+1) :: phi
   real, dimension(0:nc_node_dim+1,0:nc_node_dim+1) :: phi_buf
 
+  !! Particles arrays for subroutine dm
+  real, dimension(6,np_node_dim,np_node_dim) :: xvp
+  
   !! Timing variables
   real(8) :: sec1, sec2
 
@@ -1692,13 +1709,13 @@ end function linear_interpolate
   subroutine dm
 #endif
     implicit none
-    integer :: i,j,k,ioerr 
+    integer :: i,j,k,ioerr,pos_in,pos_out 
     integer :: i1,j1,k1,lb,ub
-    real    :: d,dmin,dmax,sum_dm,sum_dm_local,dmint,dmaxt,vf,xvp(6)
+    real    :: d,dmin,dmax,sum_dm,sum_dm_local,dmint,dmaxt,vf
     real*8  :: dsum,dvar,dsumt,dvart
     real, dimension(3) :: dis,x
     real*8, dimension(3) :: xav
-    character*180 :: fn
+    character*250 :: fn
 !! for more than 1+1e6 processes this will have to be increased
     character(len=6) :: rank_s
     character(len=7) :: z_s
@@ -1707,7 +1724,6 @@ end function linear_interpolate
 #ifdef VELTRANSFER
     integer :: COMMAND
 #endif
-
 #ifdef NEUTRINOS
     integer :: l
     real(4) :: rnum1,rnum2,rnum3,rnum4
@@ -1716,56 +1732,59 @@ end function linear_interpolate
     real time1,time2
     call cpu_time(time1)
 
-    write(z_s,'(f7.3)') z_i
+    write(z_s,'(f7.3)') redshift
     z_s=adjustl(z_s)
  
     write(rank_s,'(i6)') rank
     rank_s=adjustl(rank_s)
 
+
+!! Open input file
 #ifdef VELTRANSFER
-    !!Open temporary file
-    if (COMMAND==0)then
+    if (COMMAND == 1) then
+       fn=scratch_path//'deltaTEMP'//rank_s(1:len_trim(rank_s))
+       open(unit=31,file=fn,status='old',iostat=ioerr,access='stream')
+       if (ioerr /= 0) then
+          print *,'error opening Delta cache file:',fn
+          stop
+       endif
+    endif
+#endif
+
+!! Open output file
+#ifdef VELTRANSFER
+    if (COMMAND == 0) then !! Temp file
        write(*,*) 'Caching xvp on disk'
        fn=scratch_path//'deltaTEMP'//rank_s(1:len_trim(rank_s))
-       open(11,file=fn,status='replace',iostat=ioerr,access='stream')
+       open(unit=11,file=fn,status='replace',iostat=ioerr,access='stream')
        if (ioerr /= 0) then
           print *,'error opening xvp cache file:',fn
           stop
        endif
-
-    else
-      !! Temp file
-      fn=scratch_path//'deltaTEMP'//rank_s(1:len_trim(rank_s))
-      open(31,file=fn,status='old',iostat=ioerr,access='stream')
-      if (ioerr /= 0) then
-        print *,'error opening Delta cache file:',fn
-        stop
-      endif
-
-      !! Output file
+    else !! xv file
 #ifdef NEUTRINOS
-      fn=scratch_path//z_s(1:len_trim(z_s))//'xv'//rank_s(1:len_trim(rank_s))//'_nu.dat'
+       fn=scratch_path//z_s(1:len_trim(z_s))//'xv'//rank_s(1:len_trim(rank_s))//'_nu.dat'
 #else
-      fn=scratch_path//z_s(1:len_trim(z_s))//'xv'//rank_s(1:len_trim(rank_s))//'.dat'
+       fn=scratch_path//z_s(1:len_trim(z_s))//'xv'//rank_s(1:len_trim(rank_s))//'.dat'
 #endif
-      open(11,file=fn,status='replace',iostat=ioerr,access='stream')
-      if (ioerr /= 0) then
-        print *,'error opening:',fn
-        stop
-      endif
+       open(unit=11,file=fn,status='replace',iostat=ioerr,access='stream')
+       if (ioerr /= 0) then
+          print *,'error opening:',fn
+          stop
+       endif
     endif
 #else
+ !! xv file
 #ifdef NEUTRINOS
     fn=scratch_path//z_s(1:len_trim(z_s))//'xv'//rank_s(1:len_trim(rank_s))//'_nu.dat'
 #else
     fn=scratch_path//z_s(1:len_trim(z_s))//'xv'//rank_s(1:len_trim(rank_s))//'.dat'
 #endif
-    open(11,file=fn,status='replace',iostat=ioerr,access='stream')
+    open(unit=11,file=fn,status='replace',iostat=ioerr,access='stream')
     if (ioerr /= 0) then
-      print *,'error opening:',fn
-      stop
+       print *,'error opening:',fn
+       stop
     endif
-
 #endif
 
 #ifdef NEUTRINOS
@@ -1784,68 +1803,83 @@ end function linear_interpolate
     !! Write the header in checkpoint format with zeros for all variables (except np_local)
     np_local=np_node_dim**3
     header_garbage(:) = 0
+
 #ifdef VELTRANSFER
     if (COMMAND==1) then
+#endif
        write(11) np_local, header_garbage
+#ifdef VELTRANSFER
     endif
-#else
-    write(11) np_local, header_garbage
 #endif
     !! Displace particles
     !! Finite-difference potential to get displacement field
     vf=vfactor(scalefactor)
-    do k=1,np_node_dim
-       k1=(nc/np)*(k-1)+1
-       do j=1,np_node_dim
-          j1=(nc/np)*(j-1)+1
-          do i=1,np_node_dim
 
-             i1=(nc/np)*(i-1)+1
-             dis(1)=(phi(i1-1,j1,k1)-phi(i1+1,j1,k1))/2./(4.*pi)
-             dis(2)=(phi(i1,j1-1,k1)-phi(i1,j1+1,k1))/2./(4.*pi)
-             dis(3)=(phi(i1,j1,k1-1)-phi(i1,j1,k1+1))/2./(4.*pi)
-
-             xvp(1)=dis(1)+(i1-0.5)
-             xvp(2)=dis(2)+(j1-0.5)
-             xvp(3)=dis(3)+(k1-0.5)
-
-
-#ifdef VELTRANSFER
-             !!Read in xvp 1-3 if necessary
-             if (COMMAND==1) then
-                read(31) xvp
-             endif
-             xvp(4)=dis(1)
-             xvp(5)=dis(2)
-             xvp(6)=dis(3)
+#ifndef NEUTRINOS
+!$omp parallel default(shared) private(xvp,k,k1,j,j1,i,i1,pos_in,pos_out)
 #else
-             xvp(4)=dis(1)*vf
-             xvp(5)=dis(2)*vf
-             xvp(6)=dis(3)*vf
+!$omp parallel default(shared) private(xvp,k,k1,j,j1,i,i1,pos_in,pos_out,l,rnum1,rnum2,rnum3,rnum4)
 #endif
 
-#ifdef NEUTRINOS
-             if (nu_random) then !! Uses Gaussian velocity distribution
+#ifdef VELTRANSFER
+    if (COMMAND == 0) then 
+       !! First time we call dm
+       !! We only need the positions
+!$omp do schedule(dynamic)
+       do k=1,np_node_dim
+          k1=(nc/np)*(k-1)+1
+          pos_out = 1 + sizeof(xvp(1:3,:,:))*(k-1)
+          do j=1,np_node_dim
+             j1=(nc/np)*(j-1)+1
+             do i=1,np_node_dim
+                i1=(nc/np)*(i-1)+1
 
-                !uniform random #
+                xvp(1,i,j)=(phi(i1-1,j1,k1)-phi(i1+1,j1,k1))/2./(4.*pi)+(i1-0.5)
+                xvp(2,i,j)=(phi(i1,j1-1,k1)-phi(i1,j1+1,k1))/2./(4.*pi)+(j1-0.5)
+                xvp(3,i,j)=(phi(i1,j1,k1-1)-phi(i1,j1,k1+1))/2./(4.*pi)+(k1-0.5)
+
+             enddo
+          enddo
+          write(unit=11,pos=pos_out) xvp(1:3,:,:) !! save in temp file 
+       enddo
+!$omp end do
+    else
+       !! Second time we call dm
+       !! Now we want velocity
+!$omp do schedule(dynamic)
+       do k=1,np_node_dim
+          k1=(nc/np)*(k-1)+1
+          pos_out = 1 + sizeof(np_local) + sizeof(header_garbage) + sizeof(xvp)*(k-1)
+          pos_in = 1 + sizeof(xvp(1:3,:,:))*(k-1)
+          read(unit=31,pos=pos_in) xvp(1:3,:,:) !! catch from temp file
+          do j=1,np_node_dim
+             j1=(nc/np)*(j-1)+1
+             do i=1,np_node_dim
+                i1=(nc/np)*(i-1)+1
+                
+                xvp(4,i,j)=(phi(i1-1,j1,k1)-phi(i1+1,j1,k1))/2./(4.*pi)
+                xvp(5,i,j)=(phi(i1,j1-1,k1)-phi(i1,j1+1,k1))/2./(4.*pi)
+                xvp(6,i,j)=(phi(i1,j1,k1-1)-phi(i1,j1,k1+1))/2./(4.*pi)
+
+#ifdef NEUTRINOS
+#ifdef NU_RANDOM
+                !! Uses Gaussian velocity distribution
+                !uniform random
                 call random_number(rnum1)
                 call random_number(rnum2)
-
-                !convert to gaussian 
+                !convert to gaussian
                 rnum3=2*pi*rnum1
                 rnum4=sqrt(-2*log(rnum2))
-
                 rnum1=rnum4*cos(rnum3)
                 rnum2=rnum4*sin(rnum3)
-
                 !Convert to real gaussian using dispersion
                 !scale factor cancels out in velocity dispersion and conversion factor
                 !sigma_nu = 181km/s / (mnu * a)
-                rnum1 = rnum1*Vphys2sim*(180.8892437/mass_neutrino/scalefactor/3.0**0.5) !Divide by sqrt3  
+                rnum1 = rnum1*Vphys2sim*(180.8892437/mass_neutrino/scalefactor/3.0**0.5) !Divide by sqrt3
                 rnum2 = rnum2*Vphys2sim*(180.8892437/mass_neutrino/scalefactor/3.0**0.5) !for each individual component
 
-                xvp(4)=xvp(4) + rnum1
-                xvp(5)=xvp(5) + rnum2
+                xvp(4,i,j)=xvp(4,i,j) + rnum1
+                xvp(5,i,j)=xvp(5,i,j) + rnum2
 
                 call random_number(rnum3)
                 call random_number(rnum4)
@@ -1856,46 +1890,126 @@ end function linear_interpolate
                 rnum3=rnum4*cos(rnum3)
                 rnum3 = rnum3*Vphys2sim*(180.8892437/mass_neutrino/scalefactor/3.0**0.5)
 
-                xvp(6)=xvp(6) + rnum3
-
-              else if (nu_relfd) then !! Use Fermi-Dirac velocity distribution
-
+                xvp(6,i,j)=xvp(6,i,j) + rnum3
+#else
+#ifdef NU_RELFD
+                !! Use Fermi-Dirac velocity distribution
                 call random_number(rnum1) !|vel|
                 call random_number(rnum2) !costheta
                 call random_number(rnum3) !phi
-
                 !Convert to fermi-dirac
                 do l=1,nv
-                    if (cdf(2,l).GT.rnum1) then
-                        rnum4 = cdf(2,l)-rnum1
-                        if ( (l.NE.1) .AND. (rnum1-cdf(2,l-1) .LT. rnum4) ) then
-                            rnum1 = cdf(1,l-1)
-                        else
-                            rnum1 = cdf(1,l)
-                        endif
-                        exit
-                    endif
+                   if (cdf(2,l).GT.rnum1) then
+                      rnum4 = cdf(2,l)-rnum1
+                      if ( (l.NE.1) .AND. (rnum1-cdf(2,l-1) .LT. rnum4) ) then
+                         rnum1 = cdf(1,l-1)
+                      else
+                         rnum1 = cdf(1,l)
+                      endif
+                      exit
+                   endif
                 enddo
-
                 !convert to fermi-dirac with units rnum1<-rnum1*c*(kT/m)
                 rnum1 = rnum1 *(50.2476/mass_neutrino/scalefactor) !*ckT/m = 50.25
 
                 rnum2 = rnum2*2.0-1.0 !convert to range 1,-1
                 rnum3 = rnum3*2.0*pi  !convert to range 0,2pi
 
-                xvp(4)=xvp(4) + rnum1*(1.0-rnum2**2)**0.5*cos(rnum3)*Vphys2sim
-                xvp(5)=xvp(5) + rnum1*(1.0-rnum2**2)**0.5*sin(rnum3)*Vphys2sim
-                xvp(6)=xvp(6) + rnum1*rnum2*Vphys2sim
-
-              endif
+                xvp(4,i,j)=xvp(4,i,j) + rnum1*(1.0-rnum2**2)**0.5*cos(rnum3)*Vphys2sim
+                xvp(5,i,j)=xvp(5,i,j) + rnum1*(1.0-rnum2**2)**0.5*sin(rnum3)*Vphys2sim
+                xvp(6,i,j)=xvp(6,i,j) + rnum1*rnum2*Vphys2sim
 #endif
+#endif
+#endif
+             enddo
+          enddo
+          write(unit=11,pos=pos_out) xvp(:,:,:)
+       enddo
+!$omp end do
+    endif
 
-             write(11) xvp
+#else
+!$omp do schedule(dynamic)
+    do k=1,np_node_dim
+       k1=(nc/np)*(k-1)+1
+       pos_out = 1 + sizeof(np_local) + sizeof(header_garbage) + sizeof(xvp)*(k-1)
+       do j=1,np_node_dim
+          j1=(nc/np)*(j-1)+1
+          do i=1,np_node_dim
+             i1=(nc/np)*(i-1)+1
 
+             xvp(4,i,j)=(phi(i1-1,j1,k1)-phi(i1+1,j1,k1))/2./(4.*pi)
+             xvp(5,i,j)=(phi(i1,j1-1,k1)-phi(i1,j1+1,k1))/2./(4.*pi)
+             xvp(6,i,j)=(phi(i1,j1,k1-1)-phi(i1,j1,k1+1))/2./(4.*pi)
+             xvp(1,i,j)=xvp(4,i,j)+(i1-0.5)
+             xvp(2,i,j)=xvp(5,i,j)+(j1-0.5)
+             xvp(3,i,j)=xvp(6,i,j)+(k1-0.5)
+             xvp(4,i,j)=xvp(4,i,j)*vf
+             xvp(5,i,j)=xvp(5,i,j)*vf
+             xvp(6,i,j)=xvp(6,i,j)*vf
+#ifdef NEUTRINOS
+#ifdef NU_RANDOM
+             !! Uses Gaussian velocity distribution
+             !uniform random
+             call random_number(rnum1)
+             call random_number(rnum2)
+             !convert to gaussian
+             rnum3=2*pi*rnum1
+             rnum4=sqrt(-2*log(rnum2))
+             rnum1=rnum4*cos(rnum3)
+             rnum2=rnum4*sin(rnum3)
+             !Convert to real gaussian using dispersion
+             !scale factor cancels out in velocity dispersion and conversion factor
+             !sigma_nu = 181km/s / (mnu * a)
+             rnum1 = rnum1*Vphys2sim*(180.8892437/mass_neutrino/scalefactor/3.0**0.5) !Divide by sqrt3
+             rnum2 = rnum2*Vphys2sim*(180.8892437/mass_neutrino/scalefactor/3.0**0.5) !for each individual component
+             xvp(4,i,j)=xvp(4,i,j) + rnum1
+             xvp(5,i,j)=xvp(5,i,j) + rnum2
+             call random_number(rnum3)
+             call random_number(rnum4)
+             rnum3=2*pi*rnum3
+             rnum4=sqrt(-2*log(rnum4))
+             rnum3=rnum4*cos(rnum3)
+             rnum3 = rnum3*Vphys2sim*(180.8892437/mass_neutrino/scalefactor/3.0**0.5)
+             xvp(6,i,j)=xvp(6,i,j) + rnum3
+#else
+#ifdef NU_RELFD
+             !! Use Fermi-Dirac velocity distribution
+             call random_number(rnum1) !|vel|
+             call random_number(rnum2) !costheta
+             call random_number(rnum3) !phi
+             !Convert to fermi-dirac
+             do l=1,nv
+                if (cdf(2,l).GT.rnum1) then
+                   rnum4 = cdf(2,l)-rnum1
+                   if ( (l.NE.1) .AND. (rnum1-cdf(2,l-1) .LT. rnum4) ) then
+                      rnum1 = cdf(1,l-1)
+                   else
+                      rnum1 = cdf(1,l)
+                   endif
+                   exit
+                endif
+             enddo
+             !convert to fermi-dirac with units rnum1<-rnum1*c*(kT/m)
+             rnum1 = rnum1 *(50.2476/mass_neutrino/scalefactor) !*ckT/m = 50.25
+             rnum2 = rnum2*2.0-1.0 !convert to range 1,-1
+             rnum3 = rnum3*2.0*pi  !convert to range 0,2pi
+             xvp(4,i,j)=xvp(4,i,j) + rnum1*(1.0-rnum2**2)**0.5*cos(rnum3)*Vphys2sim
+             xvp(5,i,j)=xvp(5,i,j) + rnum1*(1.0-rnum2**2)**0.5*sin(rnum3)*Vphys2sim
+             xvp(6,i,j)=xvp(6,i,j) + rnum1*rnum2*Vphys2sim
+#endif
+#endif
+#endif
           enddo
        enddo
+       write(unit=11,pos=pos_out) xvp(:,:,:)
     enddo
+!$omp end do 
+#endif
 
+!$omp end parallel
+
+    !! Close I/O files
     close(11)
 #ifdef VELTRANSFER
     if (command == 1) close(31)

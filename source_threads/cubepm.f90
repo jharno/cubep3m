@@ -25,8 +25,10 @@ program cubep3m
   real(4) :: t_elapsed
   external t_elapsed
 
-  real(8) :: sec1, sec2
+  real(8) :: sec1, sec2, sec01, sec02, seconds2wait
   real(8) :: sec1a, sec2a
+  logical(kind=4) :: i_continue
+
 
 #ifdef CHECKPOINT_KILL
   logical :: kill_step, kill_step_done
@@ -34,7 +36,7 @@ program cubep3m
   kill_step_done = .false.
 #endif
 
-  call datestamp 
+  call datestamp
 
   call mpi_initialize
 
@@ -67,6 +69,20 @@ if (rank == 0) write(*,*) 'finished kernel init',t_elapsed(wc_counter)
 #ifdef KERN_DUMP
   call kernel_checkpoint(.true.)
 #endif
+
+if (rank==0) then
+  seconds2wait=0
+  print*, 'before particle_initialize, wait for',seconds2wait,' seconds'
+  sec01=mpi_wtime(ierr)
+  i_continue=.false.
+  do while (i_continue == .false.)
+    sec02 = mpi_wtime(ierr) - sec01
+    if (sec02 > seconds2wait) i_continue=.true.
+  enddo
+endif
+
+call mpi_barrier(mpi_comm_world,ierr)
+
 
   call particle_initialize
 

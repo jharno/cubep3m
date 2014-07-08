@@ -1,27 +1,27 @@
 ! path to initial conditions (use local scratch space)
-character(*), parameter :: ic_path        = '/scratch/p/pen/emberson/cubep3m/neutrinos/cubep3m_1_dm/' 
+character(*), parameter :: ic_path        = '/vol-th/home/bnu_ztj_haoran/haoran/tides/LOS3/'
 
 ! path to local scratch (for writing temp files)
-character(*), parameter :: scratch_path = '/scratch/p/pen/emberson/cubep3m/neutrinos/cubep3m_1_dm/'
+character(*), parameter :: scratch_path   = ic_path
 
 ! path to simulation output (use local scratch space)
-character(*), parameter :: output_path    = '/scratch/p/pen/emberson/cubep3m/neutrinos/cubep3m_1_dm/'
+character(*), parameter :: output_path    = ic_path
 
 ! path to cubepm root directory 
-character(*), parameter :: cubepm_root    = '/scratch/p/pen/emberson/cubep3m/neutrinos/cubep3m_1_dm/workdir/'
+character(*), parameter :: cubepm_root    = '/vol-th/home/bnu_ztj_haoran/haoran/cubep3m/'
 
 ! nodes / dimension, total nodes = nodes_dim**3
-integer(4),   parameter :: nodes_dim      = 2 
+integer(4),   parameter :: nodes_dim      = 1
 
 ! fine mesh tiles / node / dimension
-integer(4),   parameter :: tiles_node_dim = 2 
+integer(4),   parameter :: tiles_node_dim = 4
 
 ! cores / node
-integer(4),   parameter :: cores = 8
-integer(4),   parameter :: nested_threads = 2
+integer(4),   parameter :: cores = 4
+integer(4),   parameter :: nested_threads = 6
 
 ! density buffer fraction (1.0 == no buffer, 2.0 == 2x avg density, etc)
-real(4), parameter :: density_buffer = 3.0 
+real(4), parameter :: density_buffer = 2.0
 
 ! size of fine mesh tile in cells / dimension
 ! this must be set as:
@@ -29,13 +29,14 @@ real(4), parameter :: density_buffer = 3.0
 !   -- where I is an integer 
 ! run batch/mem_usage to calculate
 
-integer(4),   parameter :: nf_tile        = 176
+integer(4),   parameter :: nf_tile        = 112
 
 ! boxsize of simulation in Mpc/h
-real(4),      parameter :: box            = 1000.0
+real(4),      parameter :: box            = 1000
 
 ! initial redshift
-real(4),      parameter :: z_i            = 100.0
+real(4),      parameter :: z_i            = 10.0
+real(4),      parameter :: z_i_nu         = 10.0
 
 ! omega fractions 
 real(4),      parameter :: omega_l        = 0.724
@@ -48,7 +49,7 @@ real(4),      parameter :: power_index    = 2.0 ! 1.0,1.5 and 2.0 for power law 
 ! neutrino parameters
 real(4),      parameter :: H0             = 70
 integer(4),   parameter :: ratio_nudm_dim = 2
-real(4),      parameter :: mass_neutrino = 0.1
+real(4),      parameter :: mass_neutrino = 0.2
 real(4),      parameter :: omega_nu = mass_neutrino/93.15/(H0/100.)/(H0/100.)
 
 ! non-gaussian initial conditions parameters

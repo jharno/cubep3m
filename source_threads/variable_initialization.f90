@@ -100,7 +100,7 @@
           write(*,*) 'Projections performed at:'
           write(*,*) 'z        a'
           do i=1,num_projections
-            write(*,'(f8.4,2x,f6.4)') z_projection(i),a_projection(i)
+            write(*,'(f8.4,2x,f8.4)') z_projection(i),a_projection(i)
           enddo
         else
           a_projection(1)=100.0
@@ -155,11 +155,11 @@
       else
         write(*,*) 'Starting simulation at:'
         write(*,*) 'z      a'
-        write(*,'(f8.4,2x,f6.4)') z_i,a_i
+        write(*,'(f8.4,2x,f8.4)') z_i,a_i
         if (num_checkpoints > 0) then
           write(*,*) 'Checkpointing performed at:'
           do i=1,num_checkpoints
-            write(*,'(f8.4,2x,f6.4)') z_checkpoint(i),a_checkpoint(i)
+            write(*,'(f8.4,2x,f8.4)') z_checkpoint(i),a_checkpoint(i)
           enddo
         else
           write(*,*) 'no checkpoints to be stored'
@@ -202,7 +202,7 @@
           write(*,*) 'Halo catalogs generated at:'
           write(*,*) 'z        a'
           do i=1,num_halofinds
-            write(*,'(f7.4,2x,f6.4)') z_halofind(i),a_halofind(i)
+            write(*,'(f8.4,2x,f8.4)') z_halofind(i),a_halofind(i)
           enddo
         else
           a_halofind(1)=100.0

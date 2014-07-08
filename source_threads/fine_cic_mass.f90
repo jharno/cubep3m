@@ -1,6 +1,6 @@
 !! add mass to fine mesh density within tile
 #ifdef NEUTRINOS
-subroutine fine_cic_mass(pp,tile,thread,ONLYPID)
+subroutine fine_cic_mass(pp,tile,thread,ispec)
 #else
 subroutine fine_cic_mass(pp,tile,thread)
 #endif
@@ -13,10 +13,8 @@ subroutine fine_cic_mass(pp,tile,thread)
     integer(4), dimension(3) :: i1, i2
     real(4), dimension(3) :: x, offset, dx1, dx2
 #ifdef NEUTRINOS
-    integer(1), optional :: ONLYPID
+    integer(1) :: ispec
     real(4) :: fpp
-    logical :: DO_ONLYPID = .false.
-    if (present(ONLYPID)) DO_ONLYPID = .true.
 #endif
 
     offset(:)= - tile(:) * nf_physical_tile_dim + nf_buf !- 0.5 
@@ -55,7 +53,7 @@ subroutine fine_cic_mass(pp,tile,thread)
 
 #else
 
-  if (.not. DO_ONLYPID) then
+  if (ispec <= 0) then !! Both dark matter and neutrinos
 
     do
       if (pp == 0) exit
@@ -89,9 +87,9 @@ subroutine fine_cic_mass(pp,tile,thread)
 
   else !! When doing halofind and projections want to include only one type of particle 
 
-    if (ONLYPID == 1) then
+    if (ispec == 1) then !! Dark matter
         fpp = 1.
-    else
+    else !! Neutrinos
         fpp = 1./real(ratio_nudm_dim)**3
     endif
 
@@ -103,7 +101,7 @@ subroutine fine_cic_mass(pp,tile,thread)
       dx1(:) = i1(:) - x(:)
       dx2(:) = 1 - dx1(:)
 
-      if (PID(pp) == ONLYPID) then !! This is the particle we want 
+      if (PID(pp) == ispec) then !! This is the particle we want 
 
           dx1(1) = mass_p * dx1(1) * fpp
           dx2(1) = mass_p * dx2(1) * fpp
