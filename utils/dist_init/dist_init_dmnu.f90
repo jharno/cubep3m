@@ -15,7 +15,7 @@ program dist_init
   include 'mpif.h'
   include '../../parameters'
 
-  integer,parameter  :: num_threads = 8 
+  integer, parameter  :: num_threads = cores*nested_threads 
 #ifdef NEUTRINOS
   logical, parameter :: generate_seeds=.false.
 #else
