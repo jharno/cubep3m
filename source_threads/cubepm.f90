@@ -29,10 +29,8 @@ program cubep3m
   real(8) :: sec1a, sec2a
   logical(kind=4) :: i_continue
 
-
 #ifdef CHECKPOINT_KILL
   logical :: kill_step, kill_step_done
-  real, parameter :: kill_time = 47.5 * 3600. !! Checkpoint after this time (in seconds)
   kill_step_done = .false.
 #endif
 
@@ -42,6 +40,10 @@ program cubep3m
 
   sec1 = mpi_wtime(ierr)
   if (rank == 0) write(*,*) "STARTING CUBEP3M: ", sec1
+
+#ifdef CHECKPOINT_KILL
+  call read_remaining_time
+#endif
 
   call t_start(wc_counter)
 
@@ -70,6 +72,7 @@ if (rank == 0) write(*,*) 'finished kernel init',t_elapsed(wc_counter)
   call kernel_checkpoint(.true.)
 #endif
 
+#ifdef MEMORY_WAIT
 if (rank==0) then
   seconds2wait=0
   print*, 'before particle_initialize, wait for',seconds2wait,' seconds'
@@ -80,9 +83,8 @@ if (rank==0) then
     if (sec02 > seconds2wait) i_continue=.true.
   enddo
 endif
-
 call mpi_barrier(mpi_comm_world,ierr)
-
+#endif
 
   call particle_initialize
 
