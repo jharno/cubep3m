@@ -148,8 +148,8 @@ program cic_velpower
   real, dimension(0:nc_node_dim+1, 0:nc_node_dim+1) :: massden_recv_buff
 #else
   !! Parameters for linked list
-  integer(4), parameter :: nfine_buf = 8
-  integer(4), parameter :: mesh_scale = 2
+  integer(4), parameter :: nfine_buf = 32
+  integer(4), parameter :: mesh_scale = 4
   integer(4), parameter :: nc_buf = nfine_buf / mesh_scale
   integer(4), parameter :: nm_node_dim = nc_node_dim / mesh_scale
   integer(4), parameter :: hoc_nc_l = 1 - nc_buf
@@ -3112,6 +3112,8 @@ subroutine velocity_density(command, glook, nfind)
                 !! Count number of cells that did not converge 
                 if (converged .eqv. .false.) then
                     num_notconverged = num_notconverged + 1
+                    !! Don't want to set momden(i, j, k) to the previous value of rpos
+                    momden(i, j, k) = 0.
                 endif
 
             enddo ! i
