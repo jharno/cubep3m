@@ -97,7 +97,7 @@ subroutine halofind
     write(r_s, "(i5)") rank
     r_s = adjustl(r_s)
 
-    ofile = output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//"halo"//r_s(1:len_trim(r_s))//".dat"
+    ofile = output_path//'/node'//r_s(1:len_trim(r_s))//'/'//z_s(1:len_trim(z_s))//"halo"//r_s(1:len_trim(r_s))//".dat"
 
     open(unit=12, file=ofile, status="replace", iostat=fstat, access="stream")
 

@@ -356,7 +356,7 @@ subroutine read_velocity_field(command)
 
         if (command == 1) then
 
-            fn = output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_write(1:len_trim(z_write))//&
+            fn = output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_write(1:len_trim(z_write))//&
                  "vel"//dim_string//&
                  rank_string(1:len_trim(rank_string))//".bin"
 
@@ -374,7 +374,7 @@ subroutine read_velocity_field(command)
 
         else if (command == 2) then
 
-            fn = output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_write(1:len_trim(z_write))//&
+            fn = output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_write(1:len_trim(z_write))//&
                  "vel"//dim_string//&
                  rank_string(1:len_trim(rank_string))//".bin"
 
