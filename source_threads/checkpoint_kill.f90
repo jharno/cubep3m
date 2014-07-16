@@ -46,16 +46,16 @@
     write(z_s,'(f7.3)') z_write
     z_s=adjustl(z_s)
 
-    ofile=output_path//z_s(1:len_trim(z_s))//'xvres'// &
+    ofile=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'xvres'// &
          rank_s(1:len_trim(rank_s))//'.dat'
 #ifndef NEUTRINOS
 #ifdef PID_FLAG
-    ofile2=output_path//z_s(1:len_trim(z_s))//'PIDres'// &
+    ofile2=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'PIDres'// &
          rank_s(1:len_trim(rank_s))//'.dat'
 #endif
 #endif
 #ifdef NEUTRINOS
-    ofile_nu=output_path//z_s(1:len_trim(z_s))//'xvres'// &
+    ofile_nu=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'xvres'// &
          rank_s(1:len_trim(rank_s))//'_nu.dat'
 #endif
 

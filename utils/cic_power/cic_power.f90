@@ -276,9 +276,9 @@ contains
     rank_string=adjustl(rank_string)
 
     if(z_write .eq. z_i) then
-       check_name=ic_path//'xv'//rank_string(1:len_trim(rank_string))//'.ic'
+       check_name=ic_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//'xv'//rank_string(1:len_trim(rank_string))//'.ic'
     else
-       check_name=output_path//z_string(1:len_trim(z_string))//'xv'// &
+       check_name=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_string(1:len_trim(z_string))//'xv'// &
                rank_string(1:len_trim(rank_string))//'.dat'
     endif
 !! open checkpoint    
@@ -677,10 +677,10 @@ contains
     rank_string=adjustl(rank_string)
 
 #ifdef KAISER
-    check_name=output_path//z_string(1:len_trim(z_string))//'den'// &
+    check_name=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_string(1:len_trim(z_string))//'den'// &
                rank_string(1:len_trim(rank_string))//'-rsd.dat'
 #else 
-    check_name=output_path//z_string(1:len_trim(z_string))//'den'// &
+    check_name=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_string(1:len_trim(z_string))//'den'// &
                rank_string(1:len_trim(rank_string))//'.dat'
 #endif
 
@@ -801,10 +801,10 @@ contains
     rank_string=adjustl(rank_string)
 
 #ifdef KAISER
-    check_name=output_path//z_string(1:len_trim(z_string))//'den-poisson'// &
+    check_name=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_string(1:len_trim(z_string))//'den-poisson'// &
                rank_string(1:len_trim(rank_string))//'-rsd.dat'
 #else 
-    check_name=output_path//z_string(1:len_trim(z_string))//'den-poisson'// &
+    check_name=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_string(1:len_trim(z_string))//'den-poisson'// &
                rank_string(1:len_trim(rank_string))//'.dat'
 #endif
 

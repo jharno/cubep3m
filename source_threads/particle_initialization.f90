@@ -111,7 +111,7 @@
       write(rank_s,'(i4)') rank
       rank_s=adjustl(rank_s)
 
-      ofile=output_path//z_s(1:len_trim(z_s))//'xv'// &
+      ofile=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'xv'// &
             rank_s(1:len_trim(rank_s))//'.dat'
 
       open(unit=21, file=ofile, status="old", iostat=fstat, access="stream")
@@ -149,7 +149,7 @@
       close(21)
 
 #ifdef NEUTRINOS
-        ofile=output_path//z_s(1:len_trim(z_s))//'xv'// &
+        ofile=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'xv'// &
             rank_s(1:len_trim(rank_s))//'_nu.dat'
 
         open(unit=21, file=ofile, status="old", iostat=fstat, access="stream")
@@ -188,7 +188,7 @@
 #ifndef NEUTRINOS
 #ifdef PID_FLAG
 
-      ofile=output_path//z_s(1:len_trim(z_s))//'PID'// &
+      ofile=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'PID'// &
             rank_s(1:len_trim(rank_s))//'.dat'
 
       open(unit=21, file=ofile, status="old", iostat=fstat, access="stream")
@@ -238,7 +238,7 @@
       write(rank_s,'(i4)') rank
       rank_s=adjustl(rank_s)
 
-      ofile=output_path//reskill_prefix//'xvres'// &
+      ofile=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//reskill_prefix//'xvres'// &
             rank_s(1:len_trim(rank_s))//'.dat'
 
       open(unit=21, file=ofile, status="old", iostat=fstat, access="stream")
@@ -278,7 +278,7 @@
       close(21)
 
 #ifdef NEUTRINOS
-        ofile=output_path//reskill_prefix//'xvres'// &
+        ofile=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//reskill_prefix//'xvres'// &
             rank_s(1:len_trim(rank_s))//'_nu.dat'
 
         open(unit=21, file=ofile, status="old", iostat=fstat, access="stream")
@@ -317,7 +317,7 @@
 #ifndef NEUTRINOS
 #ifdef PID_FLAG
 
-      ofile=output_path//reskill_prefix//'PIDres'// &
+      ofile=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//reskill_prefix//'PIDres'// &
             rank_s(1:len_trim(rank_s))//'.dat'
 
       open(unit=21, file=ofile, status="old", iostat=fstat, access="stream")
@@ -374,7 +374,7 @@
       write(rank_s,'(i4)') rank
       rank_s=adjustl(rank_s)
 
-      ofile=ic_path//z_s(1:len_trim(z_s))//'xv'//rank_s(1:len_trim(rank_s))//'.dat'
+      ofile=ic_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'xv'//rank_s(1:len_trim(rank_s))//'.dat'
       print *,'opening particle list:',ofile(1:len_trim(ofile))
 
       open(unit=20, file=ofile, status="old", iostat=fstat, access="stream")
@@ -398,7 +398,7 @@
         ! Open neutrino ICs
         !
 
-        ofile=ic_path//z_s(1:len_trim(z_s))//'xv'//rank_s(1:len_trim(rank_s))//'_nu.dat'
+        ofile=ic_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'xv'//rank_s(1:len_trim(rank_s))//'_nu.dat'
         print *,'opening particle list:',ofile(1:len_trim(ofile))
 
         open(unit=20, file=ofile, status="old", iostat=fstat, access="stream")
@@ -444,7 +444,7 @@
 
         fstat = 0
 
-        open(unit=21, file=ic_path//'PID'//rank_s(1:len_trim(rank_s))//'.ic', iostat=fstat, access="stream")
+        open(unit=21, file=ic_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//'PID'//rank_s(1:len_trim(rank_s))//'.ic', iostat=fstat, access="stream")
         if (fstat /= 0) then
             write(*,*) 'error writing initial PID'
             write(*,*) 'rank',rank,'file:',ic_path//'PID'//rank_s(1:len_trim(rank_s))//'.ic'

@@ -911,7 +911,7 @@ end subroutine di_fftw
        call mpi_scatter(iseed_all,seedsize,mpi_integer,iseed,seedsize,mpi_integer,0,mpi_comm_world,ierr)
 #endif
     else
-       fn=output_path//'seed'//rank_s(1:len_trim(rank_s))//'.init'
+       fn=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//'seed'//rank_s(1:len_trim(rank_s))//'.init'
        print *, 'rank',rank,'Reading ',fn(1:len_trim(fn))
        open(11,file=fn)
        do k=1,seedsize
@@ -924,7 +924,7 @@ end subroutine di_fftw
     call random_seed(put=iseed(1:seedsize))
     call random_number(cube)
 
-    fn=output_path//'seed'//rank_s(1:len_trim(rank_s))//'.init'
+    fn=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//'seed'//rank_s(1:len_trim(rank_s))//'.init'
     print *, 'rank',rank,'Writing ',fn(1:len_trim(fn))
     open(11,file=fn)
     do k=1,seedsize
@@ -1138,10 +1138,10 @@ end subroutine di_fftw
     rank_string = adjustl(rank_string)
 
 #ifdef NEUTRINOS
-    check_name = output_path//'initdeltafield'// &
+    check_name = output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//'initdeltafield'// &
         rank_string(1:len_trim(rank_string))//'_nu.bin'
 #else    
-    check_name = output_path//'initdeltafield'// &
+    check_name = output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//'initdeltafield'// &
         rank_string(1:len_trim(rank_string))//'.bin'
 #endif
 
@@ -1195,7 +1195,7 @@ end subroutine di_fftw
       write(*,*) 'Caching Delta on disk'
       write(rank_s,'(i6)') rank
       rank_s=adjustl(rank_s)
-      fn=scratch_path//'delta'//rank_s(1:len_trim(rank_s))
+      fn=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//'delta'//rank_s(1:len_trim(rank_s))
 
       open(11,file=fn,status='replace',iostat=ioerr, access='stream')
 
@@ -1742,7 +1742,7 @@ end function linear_interpolate
 !! Open input file
 #ifdef VELTRANSFER
     if (COMMAND == 1) then
-       fn=scratch_path//'deltaTEMP'//rank_s(1:len_trim(rank_s))
+       fn=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//'deltaTEMP'//rank_s(1:len_trim(rank_s))
        open(unit=31,file=fn,status='old',iostat=ioerr,access='stream')
        if (ioerr /= 0) then
           print *,'error opening Delta cache file:',fn
@@ -1763,9 +1763,9 @@ end function linear_interpolate
        endif
     else !! xv file
 #ifdef NEUTRINOS
-       fn=scratch_path//z_s(1:len_trim(z_s))//'xv'//rank_s(1:len_trim(rank_s))//'_nu.dat'
+       fn=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'xv'//rank_s(1:len_trim(rank_s))//'_nu.dat'
 #else
-       fn=scratch_path//z_s(1:len_trim(z_s))//'xv'//rank_s(1:len_trim(rank_s))//'.dat'
+       fn=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'xv'//rank_s(1:len_trim(rank_s))//'.dat'
 #endif
        open(unit=11,file=fn,status='replace',iostat=ioerr,access='stream')
        if (ioerr /= 0) then
@@ -1776,9 +1776,9 @@ end function linear_interpolate
 #else
  !! xv file
 #ifdef NEUTRINOS
-    fn=scratch_path//z_s(1:len_trim(z_s))//'xv'//rank_s(1:len_trim(rank_s))//'_nu.dat'
+    fn=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'xv'//rank_s(1:len_trim(rank_s))//'_nu.dat'
 #else
-    fn=scratch_path//z_s(1:len_trim(z_s))//'xv'//rank_s(1:len_trim(rank_s))//'.dat'
+    fn=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'xv'//rank_s(1:len_trim(rank_s))//'.dat'
 #endif
     open(unit=11,file=fn,status='replace',iostat=ioerr,access='stream')
     if (ioerr /= 0) then

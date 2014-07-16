@@ -414,18 +414,18 @@ contains
 
     if (command == 0) then
         if(z_write .eq. z_i) then
-           check_name=ic_path//z_string(1:len_trim(z_string))//'xv'// &
+           check_name=ic_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_string(1:len_trim(z_string))//'xv'// &
                    rank_string(1:len_trim(rank_string))//'_nu.dat'
         else
-           check_name=output_path//z_string(1:len_trim(z_string))//'xv'// &
+           check_name=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_string(1:len_trim(z_string))//'xv'// &
                    rank_string(1:len_trim(rank_string))//'_nu.dat'
         endif
     else
         if(z_write .eq. z_i) then
-           check_name=ic_path//z_string(1:len_trim(z_string))//'xv'// &
+           check_name=ic_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_string(1:len_trim(z_string))//'xv'// &
                    rank_string(1:len_trim(rank_string))//'.dat'
         else
-           check_name=output_path//z_string(1:len_trim(z_string))//'xv'// &
+           check_name=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_string(1:len_trim(z_string))//'xv'// &
                    rank_string(1:len_trim(rank_string))//'.dat'
         endif
     endif
@@ -1064,18 +1064,18 @@ subroutine darkmatter(command)
 
 #ifdef KAISER
         if (command == 1) then !! Dark matter
-        check_name=output_path//z_string(1:len_trim(z_string))//'den'// &
+        check_name=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_string(1:len_trim(z_string))//'den'// &
                    rank_string(1:len_trim(rank_string))//'-rsd.dat'
         else !! Neutrinos
-        check_name=output_path//z_string(1:len_trim(z_string))//'den'// &
+        check_name=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_string(1:len_trim(z_string))//'den'// &
                    rank_string(1:len_trim(rank_string))//'-rsd_nu.dat'
         endif
 #else 
         if (command == 1) then !! Dark matter
-        check_name=output_path//z_string(1:len_trim(z_string))//'den'// &
+        check_name=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_string(1:len_trim(z_string))//'den'// &
                    rank_string(1:len_trim(rank_string))//'.dat'
         else !! Neutrinos
-        check_name=output_path//z_string(1:len_trim(z_string))//'den'// &
+        check_name=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_string(1:len_trim(z_string))//'den'// &
                    rank_string(1:len_trim(rank_string))//'_nu.dat'
         endif
 #endif
@@ -1213,18 +1213,18 @@ subroutine darkmatter(command)
 
 #ifdef KAISER
     if (command == 1) then !! Dark matter
-    check_name=output_path//z_string(1:len_trim(z_string))//'den-poisson'// &
+    check_name=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_string(1:len_trim(z_string))//'den-poisson'// &
                rank_string(1:len_trim(rank_string))//'-rsd.dat'
     else !! Neutrinos
-    check_name=output_path//z_string(1:len_trim(z_string))//'den-poisson'// &
+    check_name=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_string(1:len_trim(z_string))//'den-poisson'// &
                rank_string(1:len_trim(rank_string))//'-rsd_nu.dat'
     endif
 #else 
     if (command == 1) then !! Dark matter
-    check_name=output_path//z_string(1:len_trim(z_string))//'den-poisson'// &
+    check_name=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_string(1:len_trim(z_string))//'den-poisson'// &
                rank_string(1:len_trim(rank_string))//'.dat'
     else !! Neutrinos
-    check_name=output_path//z_string(1:len_trim(z_string))//'den-poisson'// &
+    check_name=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_string(1:len_trim(z_string))//'den-poisson'// &
                rank_string(1:len_trim(rank_string))//'_nu.dat'
     endif
 #endif
