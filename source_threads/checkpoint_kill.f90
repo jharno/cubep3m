@@ -227,3 +227,55 @@
     !checkpoint_step=.false.
 
   end subroutine checkpoint_kill
+
+subroutine read_remaining_time
+    !
+    ! Subroutine that reads the first line of killtime_path which is to contain
+    ! the amount of time (in seconds) remaining in the job. Will checkpoint with
+    ! kill_remaining (parameter in cubepm.par) seconds remaining. 
+    !
+
+    implicit none
+
+    integer(4) :: time_lefti
+    real(4) :: time_left
+    real(4) :: time_left_default = 48.*3600. !! Maximum walltime of GPC is taken if problems exist
+
+    include 'mpif.h'
+#ifdef PPINT
+    include 'cubep3m.fh'
+#else
+    include 'cubepm.fh'
+#endif
+
+    if (rank == 0) then !! Only master rank will read this file
+
+        open(31, file=killtime_path, status="old", iostat=ierr)
+        if (ierr /= 0) then !! If file does not exist then assume default time remaining 
+            time_left = time_left_default
+            write(*,*) "WARNING: Could not open file ", killtime_path
+            write(*,*) "Assuming the time left (in hours) is ", time_left/3600.
+        else !! Read the file
+            read(unit=31,fmt='(I20)') time_lefti
+            close(31)
+            time_left = 1.*time_lefti
+        endif 
+
+        !! Kill the job in this amount of time from now.
+        kill_time = time_left - kill_remaining
+        write(*,*) "Killing job ", kill_time/3600., " hours from now"
+
+        !! Consistency check
+        if (kill_time <= 0.) then
+            kill_time = time_left_default
+            write(*,*) "WARNING: kill_time did not make sense. Taking kill_time (in hours): ", kill_time/3600. 
+            write(*,*) "You should check these: ", time_left, time_left_default, kill_remaining
+        endif
+    
+    endif
+
+    !! Broadcast to everyone
+    call mpi_bcast(kill_time, 1, mpi_real, 0, mpi_comm_world, ierr)
+
+end subroutine
+

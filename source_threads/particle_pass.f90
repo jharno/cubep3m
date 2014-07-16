@@ -8,6 +8,7 @@
     real(4), parameter :: rnf_buf = nf_buf
     integer(4) :: np_max
     integer(4) :: np_buf_max,np_buf_max_dir
+    integer(4) :: np_local0
 
 #ifdef DEBUG_PID
     real(4) :: np_total
@@ -26,6 +27,8 @@
 
     call system_clock(count=count_i)
 
+    !! Keep track of np_local at the start in case we need to checkpoint_kill
+    np_local0 = np_local
 
 #ifdef DEBUG_PID
     np_local_i=np_local
@@ -93,6 +96,12 @@
 
     if (np_buf*6 > max_buf) then
        write(*,*) 'rank:',rank,'not enough buffer space in pass',np_buf*6,max_buf
+       write(*,*) "Calling checkpoint_kill and then aborting (+x pass) ... "
+       !! Reset np_local to its starting point so that we write out the original
+       !! particle distribution. Otherwise we may write duplicates. 
+       np_local = np_local0
+       call checkpoint_kill
+       call mpi_barrier(mpi_comm_world,ierr)
        call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
 
@@ -131,6 +140,12 @@
 
     if (np_local+nppx > max_np) then
       write(*,*) 'rank:',rank,'exceeded max_np in pass',nppx+np_local,max_np
+      write(*,*) "Calling checkpoint_kill and then aborting (+x pass) ... "
+      !! Reset np_local to its starting point so that we write out the original
+      !! particle distribution. Otherwise we may write duplicates. 
+      np_local = np_local0
+      call checkpoint_kill
+      call mpi_barrier(mpi_comm_world,ierr)
       call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
 
@@ -201,6 +216,12 @@
 
     if (np_buf*6 > max_buf) then
       write(*,*) 'rank:',rank,'not enough buffer space in pass',np_buf*6,max_buf
+      write(*,*) "Calling checkpoint_kill and then aborting (-x pass) ... "
+      !! Reset np_local to its starting point so that we write out the original
+      !! particle distribution. Otherwise we may write duplicates. 
+      np_local = np_local0
+      call checkpoint_kill
+      call mpi_barrier(mpi_comm_world,ierr)
       call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
 
@@ -232,6 +253,12 @@
 
     if (np_local+npmx > max_np) then
       write(*,*) 'rank:',rank,'exceeded max_np in pass',npmx+np_local,max_np
+      write(*,*) "Calling checkpoint_kill and then aborting (-x pass) ... "
+      !! Reset np_local to its starting point so that we write out the original
+      !! particle distribution. Otherwise we may write duplicates. 
+      np_local = np_local0
+      call checkpoint_kill
+      call mpi_barrier(mpi_comm_world,ierr)
       call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
 
@@ -333,6 +360,12 @@
 
     if (np_buf*6 > max_buf) then
       write(*,*) 'rank:',rank,'not enough buffer space in pass',np_buf*6,max_buf
+      write(*,*) "Calling checkpoint_kill and then aborting (-y pass) ... "
+      !! Reset np_local to its starting point so that we write out the original
+      !! particle distribution. Otherwise we may write duplicates. 
+      np_local = np_local0
+      call checkpoint_kill
+      call mpi_barrier(mpi_comm_world,ierr)
       call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
 
@@ -364,6 +397,12 @@
 
     if (np_local+npmy > max_np) then
       write(*,*) 'rank:',rank,'exceeded max_np in pass',npmy+np_local,max_np
+      write(*,*) "Calling checkpoint_kill and then aborting (-y pass) ... "
+      !! Reset np_local to its starting point so that we write out the original
+      !! particle distribution. Otherwise we may write duplicates. 
+      np_local = np_local0
+      call checkpoint_kill
+      call mpi_barrier(mpi_comm_world,ierr)
       call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
 
@@ -448,6 +487,12 @@
     enddo
     if (np_buf*6 > max_buf) then
       write(*,*) 'rank:',rank,'not enough buffer space in pass',np_buf*6,max_buf
+      write(*,*) "Calling checkpoint_kill and then aborting (+y pass) ... "
+      !! Reset np_local to its starting point so that we write out the original
+      !! particle distribution. Otherwise we may write duplicates. 
+      np_local = np_local0
+      call checkpoint_kill
+      call mpi_barrier(mpi_comm_world,ierr)
       call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
 
@@ -479,6 +524,12 @@
 
     if (np_local+nppy > max_np) then
       write(*,*) 'rank:',rank,'exceeded max_np in pass',nppy+np_local,max_np
+      write(*,*) "Calling checkpoint_kill and then aborting (+y pass) ... "
+      !! Reset np_local to its starting point so that we write out the original
+      !! particle distribution. Otherwise we may write duplicates. 
+      np_local = np_local0
+      call checkpoint_kill
+      call mpi_barrier(mpi_comm_world,ierr)
       call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
 
@@ -572,6 +623,12 @@
 
     if (np_buf*6 > max_buf) then
       write(*,*) 'rank:',rank,'not enough buffer space in pass',np_buf*6,max_buf
+      write(*,*) "Calling checkpoint_kill and then aborting (+z pass) ... "
+      !! Reset np_local to its starting point so that we write out the original
+      !! particle distribution. Otherwise we may write duplicates. 
+      np_local = np_local0
+      call checkpoint_kill
+      call mpi_barrier(mpi_comm_world,ierr)
       call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
 
@@ -603,6 +660,12 @@
 
     if (np_local+nppz > max_np) then
       write(*,*) 'rank:',rank,'exceeded max_np in pass',nppz+np_local,max_np
+      write(*,*) "Calling checkpoint_kill and then aborting (+z pass) ... "
+      !! Reset np_local to its starting point so that we write out the original
+      !! particle distribution. Otherwise we may write duplicates. 
+      np_local = np_local0
+      call checkpoint_kill
+      call mpi_barrier(mpi_comm_world,ierr)
       call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
 
@@ -666,6 +729,12 @@
 
     if (np_buf*6 > max_buf) then
       write(*,*) 'rank:',rank,'not enough buffer space in pass',np_buf*6,max_buf
+      write(*,*) "Calling checkpoint_kill and then aborting (-z pass) ... "
+      !! Reset np_local to its starting point so that we write out the original
+      !! particle distribution. Otherwise we may write duplicates. 
+      np_local = np_local0
+      call checkpoint_kill
+      call mpi_barrier(mpi_comm_world,ierr)
       call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
 
@@ -697,6 +766,12 @@
 
     if (np_local+npmz > max_np) then
       write(*,*) 'rank:',rank,'exceeded max_np in pass',npmz+np_local,max_np
+      write(*,*) "Calling checkpoint_kill and then aborting (-z pass) ... "
+      !! Reset np_local to its starting point so that we write out the original
+      !! particle distribution. Otherwise we may write duplicates. 
+      np_local = np_local0
+      call checkpoint_kill
+      call mpi_barrier(mpi_comm_world,ierr)
       call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
 

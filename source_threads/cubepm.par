@@ -8,6 +8,7 @@ character(*), parameter :: checkpoints=cubepm_root//'input/checkpoints'
 character(*), parameter :: projections=cubepm_root//'input/projections'!_Lensing'
 character(*), parameter :: halofinds=  cubepm_root//'input/halofinds'!_Lensing'
 character(*), parameter :: kernel_path=cubepm_root//'kernels/'
+character(*), parameter :: killtime_path=cubepm_root//'batch/killtime.txt' 
 
 !! cosmological parameters
 
@@ -43,6 +44,9 @@ integer(4), parameter   :: restart_checkpoint = 1 ! line number in input/checkpo
 
 logical, parameter :: restart_kill = .false. !! Only matters if CHECKPOINT_KILL flag used
 character(*), parameter :: reskill_prefix = '0.000'
+
+!! Will checkpoint with this amount of time (in seconds) remaining if CHECKPOINT_KILL flag is used.
+real(4), parameter :: kill_remaining = 30.*60.
 
 ! other internal initial conditions for testing, if all ic flags are
 ! set .false. cubepm assumes it is starting with initial conditions
