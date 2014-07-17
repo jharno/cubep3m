@@ -858,7 +858,7 @@ end subroutine di_fftw
        call mpi_scatter(iseed_all,seedsize,mpi_integer,iseed,seedsize,mpi_integer,0,mpi_comm_world,ierr)
 #endif
     else
-       fn=output_path//'seed'//rank_s(1:len_trim(rank_s))//'.init'
+       fn=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//'seed'//rank_s(1:len_trim(rank_s))//'.init'
        print *, 'rank',rank,'Reading ',fn(1:len_trim(fn))
        open(11,file=fn)
        do k=1,seedsize
@@ -871,7 +871,7 @@ end subroutine di_fftw
     call random_seed(put=iseed(1:seedsize))
     call random_number(cube)
 
-    fn=output_path//'seed'//rank_s(1:len_trim(rank_s))//'.init'
+    fn=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//'seed'//rank_s(1:len_trim(rank_s))//'.init'
     print *, 'rank',rank,'Writing ',fn(1:len_trim(fn))
     open(11,file=fn)
     do k=1,seedsize
@@ -1142,7 +1142,7 @@ end subroutine di_fftw
       write(*,*) 'Caching Delta on disk'
       write(rank_s,'(i6)') rank
       rank_s=adjustl(rank_s)
-      fn=scratch_path//'delta'//rank_s(1:len_trim(rank_s))
+      fn=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//'delta'//rank_s(1:len_trim(rank_s))
 
       open(11,file=fn,status='replace',iostat=ioerr, access='stream')
 
@@ -1645,7 +1645,7 @@ subroutine dm
       write(*,*) 'Caching xvp on disk'
       write(rank_s,'(i6)') rank
       rank_s=adjustl(rank_s)
-      fn=scratch_path//'deltaTEMP'//rank_s(1:len_trim(rank_s))
+      fn=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//'deltaTEMP'//rank_s(1:len_trim(rank_s))
       open(11,file=fn,status='replace',iostat=ioerr,access='stream')
       if (ioerr /= 0) then
         print *,'error opening xvp cache file:',fn
@@ -1656,7 +1656,7 @@ subroutine dm
 
       !! Temp file
       rank_s=adjustl(rank_s)
-      fn=scratch_path//'deltaTEMP'//rank_s(1:len_trim(rank_s))
+      fn=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//'deltaTEMP'//rank_s(1:len_trim(rank_s))
       open(31,file=fn,status='old',iostat=ioerr,access='stream')
       if (ioerr /= 0) then
         print *,'error opening Delta cache file:',fn
@@ -1664,7 +1664,7 @@ subroutine dm
       endif
 
       !! Output file
-      fn=scratch_path//'xv'//rank_s(1:len_trim(rank_s))//'_nu.ic'
+      fn=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//'xv'//rank_s(1:len_trim(rank_s))//'_nu.ic'
       open(11,file=fn,status='replace',iostat=ioerr,access='stream')
       if (ioerr /= 0) then
         print *,'error opening:',fn
@@ -1673,7 +1673,7 @@ subroutine dm
 
     endif
 #else
-    fn=scratch_path//'xv'//rank_s(1:len_trim(rank_s))//'.ic'
+    fn=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//'xv'//rank_s(1:len_trim(rank_s))//'.ic'
     open(11,file=fn,status='replace',iostat=ioerr,access='stream')
 
     if (ioerr /= 0) then
