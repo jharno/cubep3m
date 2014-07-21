@@ -8,7 +8,7 @@
 #endif
     implicit none
 
-    include 'cubepm.fh'
+#    include <cubepm.fh>
     integer(4) :: thread
     integer(4) :: pp, i,j,k,ii,im,i2
     integer(4), dimension(3) :: cic_l, cic_h, tile

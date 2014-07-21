@@ -2,11 +2,7 @@
   subroutine coarse_mesh
    implicit none
    include 'mpif.h'
-#ifdef PPINT
-   include 'cubep3m.fh'
-#else
-   include 'cubepm.fh'
-#endif
+#   include <cubepm.fh>
 
 #ifdef MHD
    integer :: nerr,nerrl

@@ -1,7 +1,7 @@
 subroutine gas_density_buffer
 use mpi_tvd_mhd
 implicit none
-include 'cubepm.fh'
+#include <cubepm.fh>
 include 'mpif.h'
 integer,parameter :: gnf=nf_physical_node_dim
 

@@ -4,7 +4,7 @@
     implicit none
 
     include 'mpif.h'
-    include 'cubepm.fh'
+#    include <cubepm.fh>
 
     integer(4) :: i, j, k, cur_tile, thread
     integer(4), dimension(3) :: tile

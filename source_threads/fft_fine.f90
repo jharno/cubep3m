@@ -8,7 +8,7 @@ subroutine cubepm_fftw2(c, thread)
    use omp_lib
    use, intrinsic :: iso_c_binding
    implicit none
-   include 'cubepm.fh'
+#   include <cubepm.fh>
 #ifdef MKL
    include 'fftw3.f'
    include 'fftw3_mkl.f'

@@ -5,11 +5,8 @@
     use MKL_DFTI
 #endif
     implicit none
-#ifdef PPINT
-    include 'cubep3m.fh'
-#else
-    include 'cubepm.fh'
-#endif
+
+#    include <cubepm.fh>
 
     integer(4) :: pp
     integer(4), dimension(3) :: i1,i2

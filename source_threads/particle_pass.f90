@@ -3,7 +3,7 @@
     implicit none
 
     include 'mpif.h'
-    include 'cubepm.fh'
+#    include <cubepm.fh>
 
     real(4), parameter :: rnf_buf = nf_buf
     integer(4) :: np_max

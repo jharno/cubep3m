@@ -8,11 +8,7 @@
     implicit none
 
     include 'mpif.h'
-#ifdef PPINT
-    include 'cubep3m.fh'
-#else
-    include 'cubepm.fh'
-#endif
+#    include <cubepm.fh>
 
     character (len=max_path) :: ofile,ofile2
     character (len=4) :: rank_s
@@ -242,11 +238,7 @@ subroutine read_remaining_time
     real(4) :: time_left_default = 48.*3600. !! Maximum walltime of GPC is taken if problems exist
 
     include 'mpif.h'
-#ifdef PPINT
-    include 'cubep3m.fh'
-#else
-    include 'cubepm.fh'
-#endif
+#    include <cubepm.fh>
 
     if (rank == 0) then !! Only master rank will read this file
 

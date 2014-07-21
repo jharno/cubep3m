@@ -2,11 +2,7 @@
   subroutine coarse_force
     implicit none
 
-#ifdef PPINT
-    include 'cubep3m.fh'
-#else
-    include 'cubepm.fh'
-#endif
+#    include <cubepm.fh>
 
     integer(4) :: i,j,k,ii,im
 #ifdef DEBUG_CRHO

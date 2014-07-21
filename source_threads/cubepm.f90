@@ -12,11 +12,7 @@ program cubep3m
 
   implicit none
   include 'mpif.h'
-#ifdef PPINT
-  include 'cubep3m.fh'
-#else
-  include 'cubepm.fh'
-#endif
+#  include <cubepm.fh>
 
 #ifdef MHD
   integer(4) :: nc_to_mhd(3)

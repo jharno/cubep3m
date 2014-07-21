@@ -8,7 +8,7 @@
     implicit none
  
     include 'mpif.h'
-    include 'cubepm.fh'
+#    include <cubepm.fh>
 
     real(4) :: ra,da_1,da_2,dt_e
     integer(4) :: n
@@ -254,7 +254,7 @@
   subroutine expansion(a0,dt0,da1,da2)
     implicit none
 
-    include 'cubepm.par'
+#    include <cubepm.par>
 
     real(4) :: a0,dt0,dt_x,da1,da2
     real(8) :: a_x,adot,addot,atdot,arkm,a3rlm,omHsq

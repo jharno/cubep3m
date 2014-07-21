@@ -3,11 +3,7 @@
     implicit none
 
     include 'mpif.h'
-#ifdef PPINT
-    include 'cubep3m.fh'
-#else
-    include 'cubepm.fh'
-#endif
+#    include <cubepm.fh>
 
     integer(4) :: buffer_size
     integer(4) :: tag

@@ -4,7 +4,7 @@
     implicit none
 
     include 'mpif.h'
-    include 'cubepm.fh'
+#    include <cubepm.fh>
 
     integer(4) :: i,j,k,pp,pc
     integer(4) :: omp_get_thread_num,omp_get_num_threads

@@ -8,7 +8,7 @@ implicit none
 #ifdef DISP_MESH 
     include 'mpif.h'
 #endif
-    include 'cubepm.fh'
+#    include <cubepm.fh>
 
 #ifdef READ_SEED
     character(len=max_path) :: seedfile

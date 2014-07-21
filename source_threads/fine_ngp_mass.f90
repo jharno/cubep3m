@@ -7,7 +7,7 @@ subroutine fine_ngp_mass(pp,tile,thread)
 #endif
     implicit none
 
-    include 'cubepm.fh'
+#    include <cubepm.fh>
 
     integer(4)               :: pp,thread
     integer(4), dimension(3) :: tile,i1

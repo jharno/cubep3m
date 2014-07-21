@@ -6,11 +6,7 @@ subroutine zoomcheckpoint
     implicit none
 
     include 'mpif.h'
-#ifdef PPINT
-    include 'cubep3m.fh'
-#else
-    include 'cubepm.fh'
-#endif
+#    include <cubepm.fh>
 
     integer, parameter :: rank2write = 0
     integer, parameter :: writeEverySteps = 2

@@ -1,6 +1,6 @@
 ! :: cubepm header file
 
-include 'cubepm.par'
+#include <cubepm.par>
 
 ! :: mpi variables
 
@@ -46,10 +46,11 @@ real(8)									:: f_mesh_mass(cores)
 integer(4), dimension(max_llf,mesh_scale,mesh_scale,mesh_scale,cores,nested_threads) :: llf
 !real(4), dimension(3,max_llf,mesh_scale,mesh_scale,mesh_scale,cores) :: vel_state
 real(4), dimension(3,max_llf,cores,nested_threads) :: pp_force_accum
+#ifdef PP_EXT
 real(4), dimension(3,max_np,cores) :: pp_ext_force_accum
-
 integer(4), dimension(max_np,cores) :: ll_fine
 integer(4), dimension(nf_physical_tile_dim+2*pp_range,nf_physical_tile_dim+2*pp_range,nf_physical_tile_dim+2*pp_range,cores) :: hoc_fine
+#endif
 
 ! :: coarse mesh arrays
 
@@ -69,15 +70,25 @@ real(4), dimension(nc_node_dim,nc_node_dim, nc_pen, 0:nodes_pen-1)      :: recv_
 real(4), dimension(max_buf) 						:: send_buf,recv_buf
 real(4), dimension(max_buf)						:: fast_buf
 integer(4), dimension(max_buf/2)					:: fast_pos
-!!integer(8), dimension(max_buf)						:: send_buf_PID, recv_buf_PID
+#ifdef PID_FLAG
+#ifdef NEUTRINOS
 integer(1), dimension(max_buf)                        :: send_buf_PID, recv_buf_PID
+#else
+integer(8), dimension(max_buf)                        :: send_buf_PID, recv_buf_PID
+#endif
+#endif
 
 ! :: particle arrays
 
 real(4), dimension(6,max_np) 						:: xv
 integer(4), dimension(max_np) 						:: ll
-!!integer(8), dimension(max_np) 						:: PID
+#ifdef PID_FLAG
+#ifdef NEUTRINOS
 integer(1), dimension(max_np)                       :: PID
+#else
+integer(8), dimension(max_np)                       :: PID
+#endif
+#endif
 integer(4), dimension(hoc_nc_l:hoc_nc_h,hoc_nc_l:hoc_nc_h,hoc_nc_l:hoc_nc_h) :: hoc
 integer(4) 								:: np_buf
 
@@ -127,9 +138,11 @@ equivalence (recv_buf, recv_cube, fast_pos)
 
 equivalence (xv, ck)
 
-common /divar / plan, iplan, fftw2_plan, fftw2_iplan !!, PID
+common /divar / plan, iplan, fftw2_plan, fftw2_iplan
 
-common / divar1 / PID
+#ifdef PID_FLAG
+common / divarp / PID
+#endif
 
 common / drvar / rho_pxy, rho_pxz, rho_pyz, rp_buf, f_mesh_mass!, cfmass, cfmass2, cftmass, cftmass2
 

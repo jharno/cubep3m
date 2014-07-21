@@ -3,7 +3,7 @@
     implicit none 
 
     include 'mpif.h'
-    include './cubep3m.fh'
+#    include <cubepm.fh>
   
     integer(kind=4) :: i,j,k,temp(3)
     integer(kind=4) :: errcode,fstat
@@ -273,7 +273,7 @@
       implicit none
 
       include 'mpif.h'
-      include 'cubepm.fh'
+#      include <cubepm.fh>
 
       integer(kind=4) :: i,j,k,i0,j0,k0,hc1,temp(3)
       integer(4) :: il,ih,jl,jh,kl,kh,kx,ky,kz,fstat

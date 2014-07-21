@@ -3,11 +3,7 @@
     implicit none
 
     include 'mpif.h'
-#ifdef PPINT
-    include 'cubep3m.fh'
-#else
-    include 'cubepm.fh'
-#endif
+#    include <cubepm.fh>
 
     integer(kind=4) :: i,j,k
     real(kind=4) :: force,max_force

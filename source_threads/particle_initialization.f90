@@ -4,7 +4,7 @@
     implicit none
 
     include 'mpif.h'
-    include 'cubepm.fh'
+#    include <cubepm.fh>
 
     real(4) :: rnum,z_write,dummy
     integer(4) :: i,j,k,pp,fstat,blocksize,num_writes,nplow,nphigh

@@ -7,11 +7,7 @@
     implicit none
   
     include 'mpif.h'
-#ifdef PPINT
-    include 'cubep3m.fh'
-#else
-    include 'cubepm.fh'
-#endif
+#    include <cubepm.fh>
 
     integer(4), parameter :: hc=nc_dim/2
     integer(4) :: i,j,k,kg,jg,ig

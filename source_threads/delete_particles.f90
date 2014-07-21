@@ -2,7 +2,7 @@
   subroutine delete_particles
     implicit none
     include 'mpif.h'
-    include 'cubepm.fh'
+#    include <cubepm.fh>
 
     integer(4) :: pp,i
 #ifdef DIAG
