@@ -7,7 +7,7 @@
     implicit none
   
     include 'mpif.h'
-#    include <cubepm.fh>
+#    include "cubepm.fh"
 
     integer(4), parameter :: hc=nc_dim/2
     integer(4) :: i,j,k,kg

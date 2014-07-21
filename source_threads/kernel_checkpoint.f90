@@ -3,7 +3,7 @@
     implicit none
 
     include 'mpif.h'
-#    include <cubepm.fh>
+#    include "cubepm.fh"
 
     logical :: mode
     character (len=max_path) :: ofile

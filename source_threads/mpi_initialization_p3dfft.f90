@@ -3,7 +3,7 @@
 
     implicit none
     include 'mpif.h'
-#    include <cubepm.fh>
+#    include "cubepm.fh"
 
     integer(4) :: i, j, nodes_returned
     integer(4) :: dims(3), ndim

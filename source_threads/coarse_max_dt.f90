@@ -3,7 +3,7 @@
     implicit none
 
     include 'mpif.h'
-#    include <cubepm.fh>
+#    include "cubepm.fh"
 
     integer(kind=4) :: i,j,k
     real(kind=4) :: force,max_force

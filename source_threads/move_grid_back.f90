@@ -4,7 +4,7 @@
 #ifdef DISP_MESH 
     include 'mpif.h'
 #endif
-#    include <cubepm.fh>
+#    include "cubepm.fh"
 
     integer(4) :: i
 

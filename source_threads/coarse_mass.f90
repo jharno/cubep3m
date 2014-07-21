@@ -7,7 +7,7 @@
 
    implicit none
 
-#   include <cubepm.fh>
+#   include "cubepm.fh"
 
    integer(4) :: i,j,k,k0,pp,ii,jj,kk
    integer(4), dimension(3) :: i1,i2

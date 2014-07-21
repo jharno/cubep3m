@@ -6,7 +6,7 @@ subroutine zoomcheckpoint
     implicit none
 
     include 'mpif.h'
-#    include <cubepm.fh>
+#    include "cubepm.fh"
 
     integer, parameter :: rank2write = 0
     integer, parameter :: writeEverySteps = 2

@@ -1,7 +1,7 @@
 !! Computes pp force between particles of neighboring fine cells
  subroutine pp_extended_force(tile,thread)
    implicit none
-#   include <cubepm.fh>
+#   include "cubepm.fh"
 
    integer(4)               :: im, jm, km, i, j, k, ib, jb, kb
    integer(4), dimension(3) :: tile, i1, i2, cic_l, cic_h

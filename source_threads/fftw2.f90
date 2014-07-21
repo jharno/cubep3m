@@ -1,7 +1,7 @@
  subroutine cubepm_fftw2(c, thread)
    implicit none
    include 'fftw_f77.i'
-#  include <cubepm.fh>
+#  include "cubepm.fh"
 
    character c
    integer(4) :: thread

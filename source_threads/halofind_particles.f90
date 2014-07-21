@@ -13,7 +13,7 @@ subroutine halofind
     implicit none
 
     include "mpif.h"
-#    include <cubepm.fh>
+#    include "cubepm.fh"
 
     real(4) :: z_write
     integer(4) :: i, j, k, fstat
@@ -361,7 +361,7 @@ subroutine find_halo_candidates(tile, ic)
     use omp_lib
     implicit none
 
-#    include <cubepm.fh>
+#    include "cubepm.fh"
 !    include "mpif.h"
 
     integer(4), dimension(3) :: offset
@@ -474,7 +474,7 @@ subroutine find_halo_particles(HODC, HMASS, HPOS, RODC, ITOT, DOVIR)
     use omp_lib
     implicit none
 
-#    include <cubepm.fh>
+#    include "cubepm.fh"
     include "mpif.h"
 
     real(4), intent(in) :: HODC, HMASS
@@ -708,7 +708,7 @@ subroutine neutrino_properties(HPOS, RSEARCH, XMEAN, VMEAN, NNU)
 
     implicit none
 
-#    include <cubepm.fh>
+#    include "cubepm.fh"
     include "mpif.h"
 
     real(4), dimension(3), intent(in) :: HPOS
@@ -778,7 +778,7 @@ subroutine initialize_halofind
 #endif
 
     implicit none
-#    include <cubepm.fh>
+#    include "cubepm.fh"
     include 'mpif.h'
 
     integer(4) :: ii, i, j, k, fstat

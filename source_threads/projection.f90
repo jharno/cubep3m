@@ -3,7 +3,7 @@
     implicit none
 
     include 'mpif.h'
-#    include <cubepm.fh>
+#    include "cubepm.fh"
 
     character (len=max_path) :: ofile
     character (len=7) :: z_s
@@ -166,7 +166,7 @@
   subroutine build_projection(tile,rho_node)
 #endif
     implicit none
-#    include <cubepm.fh>
+#    include "cubepm.fh"
 
     integer(4) :: os_x, os_y, os_z
     integer(4) :: i,j,k,pp,thread

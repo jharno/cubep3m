@@ -11,7 +11,7 @@
 
     implicit none
     include 'mpif.h'
-#    include <cubepm.fh>
+#    include "cubepm.fh"
 
     integer(4) :: i
     integer(4) :: command 
@@ -74,7 +74,7 @@
     use omp_lib
     implicit none
     include 'mpif.h'
-#    include <cubepm.fh>
+#    include "cubepm.fh"
 
     integer(4) :: i,j,k,i0,i1,k1
     integer(4) :: pen_slice,tag,rtag
@@ -150,7 +150,7 @@
     use omp_lib
     implicit none
     include 'mpif.h'
-#    include <cubepm.fh>
+#    include "cubepm.fh"
 
     integer(4) :: i,j,k,i0,i1,k1
     integer(4) :: pen_slice,num_elements,tag,rtag

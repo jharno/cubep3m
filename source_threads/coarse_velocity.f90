@@ -12,7 +12,7 @@
 #endif
     implicit none
 
-#    include <cubepm.fh>
+#    include "cubepm.fh"
 
     integer(4) :: i,j,k,pp
     integer(4), dimension(3) :: i1,i2

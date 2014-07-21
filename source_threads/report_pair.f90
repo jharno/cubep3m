@@ -3,7 +3,7 @@
     implicit none
 
     include 'mpif.h'
-#    include <cubepm.fh>
+#    include "cubepm.fh"
 
     real(4), dimension(6,2) :: pair 
     integer(4), dimension(mpi_status_size) :: status

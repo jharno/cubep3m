@@ -3,7 +3,7 @@
     implicit none
 
     include 'mpif.h'
-#    include <cubepm.fh>
+#    include "cubepm.fh"
 
     integer(4) :: i,j
     real(4) :: rnum,sep(3)

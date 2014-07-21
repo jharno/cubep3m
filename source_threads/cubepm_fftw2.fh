@@ -1,6 +1,6 @@
 ! :: cubepm header file
 
-#include <cubepm.par>
+#include "cubepm.par"
 
 ! :: mpi variables
 

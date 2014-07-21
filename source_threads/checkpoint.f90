@@ -8,7 +8,7 @@
     implicit none
 
     include 'mpif.h'
-#    include <cubepm.fh>
+#    include "cubepm.fh"
 
     character (len=max_path) :: ofile,ofile2
     character (len=4) :: rank_s

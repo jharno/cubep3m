@@ -5,7 +5,7 @@
 !! pack cubic data into slab decomposition for fftw transform
     implicit none
     include 'mpif.h'
-#    include <cubepm.fh>
+#    include "cubepm.fh"
 
     integer(4) :: i,j,k,i0,j0,i1,j1,k1
 !    integer(4) :: slab_slice,num_elements,tag,rtag
@@ -57,7 +57,7 @@
 !! unpack slab data into cubic decomposition following fftw transform
     implicit none
     include 'mpif.h'
-#    include <cubepm.fh>
+#    include "cubepm.fh"
     
     integer(4) :: i,j,k,i0,j0,i1,j1,k1
     integer(4) :: slab_slice,num_elements,tag,rtag
@@ -105,7 +105,7 @@
 !! 0 ends fftw subprogram, 1 starts forward fft, -1 starts backwards
     implicit none
     include 'mpif.h'
-#    include <cubepm.fh>
+#    include "cubepm.fh"
     include 'fftw_f77.i'
 
     integer(4), parameter :: order=FFTW_NORMAL_ORDER ! FFTW_TRANSPOSED_ORDER

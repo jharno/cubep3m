@@ -2,7 +2,7 @@
   subroutine coarse_force
     implicit none
 
-#    include <cubepm.fh>
+#    include "cubepm.fh"
 
     integer(4) :: i,j,k,ii,im
 #ifdef DEBUG_CRHO

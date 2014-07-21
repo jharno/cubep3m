@@ -5,7 +5,7 @@
 
     implicit none
 
-#    include <cubepm.fh>
+#    include "cubepm.fh"
 
     integer(4), dimension(3) :: tile
     integer(4) :: rlb,rli,rui,rub,rn,rbt

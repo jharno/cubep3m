@@ -12,7 +12,7 @@ program cubep3m
 
   implicit none
   include 'mpif.h'
-#  include <cubepm.fh>
+#  include "cubepm.fh"
 
 #ifdef MHD
   integer(4) :: nc_to_mhd(3)
