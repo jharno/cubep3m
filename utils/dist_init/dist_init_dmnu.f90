@@ -1742,7 +1742,7 @@ end function linear_interpolate
 !! Open input file
 #ifdef VELTRANSFER
     if (COMMAND == 1) then
-       fn=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//'deltaTEMP'//rank_s(1:len_trim(rank_s))
+       fn=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//'delta'//rank_s(1:len_trim(rank_s))
        open(unit=31,file=fn,status='old',iostat=ioerr,access='stream')
        if (ioerr /= 0) then
           print *,'error opening Delta cache file:',fn
@@ -1755,7 +1755,7 @@ end function linear_interpolate
 #ifdef VELTRANSFER
     if (COMMAND == 0) then !! Temp file
        write(*,*) 'Caching xvp on disk'
-       fn=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//'deltaTEMP'//rank_s(1:len_trim(rank_s))
+       fn=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//'delta'//rank_s(1:len_trim(rank_s))
        open(unit=11,file=fn,status='replace',iostat=ioerr,access='stream')
        if (ioerr /= 0) then
           print *,'error opening xvp cache file:',fn
