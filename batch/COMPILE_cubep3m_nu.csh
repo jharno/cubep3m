@@ -1,6 +1,6 @@
 #!/bin/bash
 
-cd ../source_threads_nu
+cd ../source_threads
 
 make clean
 make -f Makefile_GPC_nu NEUTRINOS=0
