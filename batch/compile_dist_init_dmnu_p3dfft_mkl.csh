@@ -10,11 +10,14 @@ rm -f dist_init_dmnu_dm
 rm -f dist_init_dmnu_nu
 
 echo "compile dist_init_dmnu_dm ..."
-mpif90 -shared-intel -fpp -g -O3 -xhost -openmp -i_dynamic -mkl -mcmodel=medium -DDEBUG_LOW dist_init_dmnu.f90 -I$P3DFFT_INC -I$MKL_FFTW_INC -o dist_init_dmnu_dm -L$P3DFFT_LIB -L$MKL_FFTW_LIB -lp3dfft -lmkl_intel_lp64 
+mpif90 -shared-intel -fpp -g -O3 -xhost -openmp -i_dynamic -mkl -mcmodel=medium dist_init_dmnu.f90 -I$P3DFFT_INC -I$MKL_FFTW_INC -o dist_init_dmnu_dm -L$P3DFFT_LIB -L$MKL_FFTW_LIB -lp3dfft -lmkl_intel_lp64 
 echo "done"
 
 echo "compile dist_init_dmnu_nu ..."
-mpif90 -shared-intel -fpp -g -O3 -xhost -openmp -i_dynamic -mkl -mcmodel=medium -DDEBUG_LOW -DNEUTRINOS -DVELTRANSFER dist_init_dmnu.f90 -I$P3DFFT_INC -I$MKL_FFTW_INC -o dist_init_dmnu_nu -L$P3DFFT_LIB -L$MKL_FFTW_LIB -lp3dfft -lmkl_intel_lp64 
+mpif90 -shared-intel -fpp -g -O3 -xhost -openmp -i_dynamic -mkl -mcmodel=medium -DNEUTRINOS -DVELTRANSFER dist_init_dmnu.f90 -I$P3DFFT_INC -I$MKL_FFTW_INC -o dist_init_dmnu_nu -L$P3DFFT_LIB -L$MKL_FFTW_LIB -lp3dfft -lmkl_intel_lp64
 echo "done"
+
+# the largest array that can be set as a private variable in a threaded region is 1000 MB
+export OMP_STACKSIZE="1000M"
 
 cd ../../batch

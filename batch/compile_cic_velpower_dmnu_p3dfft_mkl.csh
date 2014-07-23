@@ -10,7 +10,7 @@ rm -f ngp_velpower_dmnu
 export OMP_NUM_THREADS=24
 
 echo "compile ngp_velpower_dmnu ..."
-mpif90 -shared-intel -fpp -g -O3 -xhost -i_dynamic -mkl -openmp -mcmodel=medium -DNGP -DDIAG  indexedsort.f90 cic_velpower_dmnu.f90 -I$P3DFFT_INC -I$MKL_FFTW_INC -o ngp_velpower_dmnu -L$P3DFFT_LIB -L$MKL_FFTW_LIB -lp3dfft -lmkl_intel_lp64
+mpif90 -shared-intel -fpp -g -O3 -xhost -i_dynamic -mkl -openmp -mcmodel=medium -DNGP -DDIAG -Dwrite_vel indexedsort.f90 cic_velpower_dmnu.f90 -I$P3DFFT_INC -I$MKL_FFTW_INC -o ngp_velpower_dmnu -L$P3DFFT_LIB -L$MKL_FFTW_LIB -lp3dfft -lmkl_intel_lp64
 
 echo "done"
 
