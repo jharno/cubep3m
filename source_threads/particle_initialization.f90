@@ -104,7 +104,7 @@
 
       if (rank == 0) z_write = z_checkpoint(restart_checkpoint)
       call mpi_bcast(z_write,1,mpi_real,0,mpi_comm_world,ierr)
-
+print*, 'restart_checkpoint line number =', restart_checkpoint
       write(z_s,'(f7.3)') z_write
       z_s=adjustl(z_s)
 
@@ -113,6 +113,7 @@
 
       ofile=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'xv'// &
             rank_s(1:len_trim(rank_s))//'.dat'
+print*, 'opening file:',ofile
 
       open(unit=21, file=ofile, status="old", iostat=fstat, access="stream")
 
@@ -124,7 +125,10 @@
 
       read(21) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
                cur_projection,cur_halofind,mass_p
-
+print*, 'nts=',nts
+print*, 'a=',a
+print*, 'z_checkpoint =',z_checkpoint
+print*, 'cur_checkpoint =',cur_checkpoint
       if (rank == 0) print *,'restarting simulation from z=',z_checkpoint(cur_checkpoint-1)
 
       if (np_local > max_np) then

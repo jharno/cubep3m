@@ -10,13 +10,22 @@ MKL_FFTW_INC=-I/vol-th/intel/composer_xe_2013_sp1.1.106/mkl/include/fftw
 
 LDLIBS= -lp3dfft -lmkl_intel_lp64 
 
-FFLAGS=-shared-intel -fpp -g  -O3 -fpic -xhost -i_dynamic -mkl -mcmodel=medium -DDIAG -DNGP -DPPINT -DMPI_TIME -DLRCKCORR -DNGPH -DDISP_MESH -DNESTED_OMP -DCHECKPOINT_KILL -DMKL -DNEUTRINOS -DPID_FLAG -DNOPROJ #  -DPP_EXT # -DOFFLOAD
+NEUTRINOS?=1
+ifeq ($(NEUTRINOS), 0)
+  NFLAGS=
+  TARGET=cubep3m_dm
+else
+  NFLAGS=-DNEUTRINOS -DPID_FLAG
+  TARGET=cubep3m_nu
+endif
+
+FFLAGS=-shared-intel -fpp -g  -O3 -fpic -xhost -i_dynamic -mkl -mcmodel=medium -DDIAG -DNGP -DPPINT -DMPI_TIME -DLRCKCORR -DNGPH -DDISP_MESH -DNESTED_OMP -DCHECKPOINT_KILL -DMKL $(NFLAGS) -DNOPROJ #  -DPP_EXT # -DOFFLOAD -DNEUTRINOS
 
 OBJS=checkpoint.o checkpoint_kill.o coarse_cic_mass.o coarse_cic_mass_buffer.o coarse_force_p3dfft.o coarse_force_buffer.o coarse_mass.o coarse_max_dt.o coarse_mesh.o coarse_power_p3dfft.o coarse_velocity.o cubepm.o delete_particles.o p3dfft_coarse.o fine_cic_mass.o fine_cic_mass_buffer.o fine_ngp_mass.o halofind_particles.o fft_fine.o init_projection.o kernel_checkpoint.o kernel_initialization_p3dfft.o link_list.o move_grid_back.o mpi_initialization_p3dfft.o particle_initialization.o particle_mesh_threaded_nested.o particle_pass.o projection.o report_pair.o report_force.o set_pair.o indexedsort.o timers.o timestep.o update_position.o variable_initialization.o 
 
-run: cubep3m
+run: $(TARGET)
 
-cubep3m: $(OBJS)
+$(TARGET): $(OBJS)
 	$(FC) $(FFLAGS) -openmp  $^ -o $@ $(MKL_FFTW_LIB) $(P3DFFT_LIB) $(LDLIBS) 
 
 cubepm.o: cubepm.f90 

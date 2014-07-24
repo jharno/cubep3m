@@ -73,7 +73,7 @@
         call mpi_abort(mpi_comm_world,ierr,ierr)
       endif 
       do num_projections=1,max_input
-        read(unit=11,err=61,end=71,fmt='(f20.10)') z_projection(num_projections)
+        read(unit=11,err=61,end=71,fmt='(f8.4)') z_projection(num_projections)
         print*, 'projections ',z_projection(num_projections)
       enddo
     71  num_projections=num_projections-1
@@ -117,7 +117,7 @@
         call mpi_abort(mpi_comm_world,ierr,ierr)
       endif 
       do num_checkpoints=1,max_input
-        read(unit=11,err=51,end=41,fmt='(f20.10)') z_checkpoint(num_checkpoints)
+        read(unit=11,err=51,end=41,fmt='(f8.4)') z_checkpoint(num_checkpoints)
         print*,'checkoints', z_checkpoint(num_checkpoints)
       enddo
     41  num_checkpoints=num_checkpoints-1
@@ -175,7 +175,7 @@
         call mpi_abort(mpi_comm_world,ierr,ierr)
       endif
       do num_halofinds=1,max_input
-        read(unit=11,err=81,end=91,fmt='(f20.10)') z_halofind(num_halofinds)
+        read(unit=11,err=81,end=91,fmt='(f8.4)') z_halofind(num_halofinds)
         print*,'check halofinds ', z_halofind(num_halofinds)
       enddo
     91  num_halofinds=num_halofinds-1

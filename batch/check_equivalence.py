@@ -9,9 +9,9 @@ import numpy
 #
 
 nodes_dim      = 1
-tiles_node_dim = 4
-nf_tile        = 112
-density_buffer = 2.0
+tiles_node_dim = 6
+nf_tile        = 176
+density_buffer = 1.5
 
 # Factor to reduce max_buf by in cubepm.par 
 srfac = 1
@@ -27,7 +27,7 @@ ratio_nudm_dim = 2
 no_extpp = True 
 
 # Set this true if not using projections
-no_proj = False 
+no_proj = True
 
 # These set the total number of threads
 cores          = 4
