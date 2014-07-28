@@ -912,7 +912,7 @@ end subroutine di_fftw
 #endif
     else
        fn=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//'seed'//rank_s(1:len_trim(rank_s))//'.init'
-       print *, 'rank',rank,'Reading ',fn(1:len_trim(fn))
+       if (rank == 0) print *, 'rank',rank,'Reading ',fn(1:len_trim(fn))
        open(11,file=fn)
        do k=1,seedsize
           read(11,*) i,iseed(k)
@@ -925,7 +925,7 @@ end subroutine di_fftw
     call random_number(cube)
 
     fn=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//'seed'//rank_s(1:len_trim(rank_s))//'.init'
-    print *, 'rank',rank,'Writing ',fn(1:len_trim(fn))
+    if (rank == 0) print *, 'rank',rank,'Writing ',fn(1:len_trim(fn))
     open(11,file=fn)
     do k=1,seedsize
        write(11,*) k,iseed(k)
@@ -1192,7 +1192,7 @@ end subroutine di_fftw
 
     if (correct_kernel) then
       !! write delta to disk so we can build kernel
-      write(*,*) 'Caching Delta on disk'
+      if (rank == 0) write(*,*) 'Caching Delta on disk'
       write(rank_s,'(i6)') rank
       rank_s=adjustl(rank_s)
       fn=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//'delta'//rank_s(1:len_trim(rank_s))
@@ -1721,8 +1721,8 @@ end function linear_interpolate
     character(len=7) :: z_s
     integer(4), dimension(11) :: header_garbage
     integer(4) :: thread
-    integer(4), parameter :: xsize1 = sizeof(xvp(1:3,:,:,1))
-    integer(4), parameter :: xsize2 = sizeof(xvp(:,:,:,1))
+    integer(4), parameter :: xsize1 = 4*3*np_node_dim**2 
+    integer(4), parameter :: xsize2 = 2*xsize1
     real(4), parameter :: mfac = 180.8892437/mass_neutrino/scalefactor/3.0**0.5
     real(4), parameter :: ffac = 50.2476/mass_neutrino/scalefactor !ckT/m =50.25
 
@@ -1759,7 +1759,7 @@ end function linear_interpolate
 !! Open output file
 #ifdef VELTRANSFER
     if (COMMAND == 0) then !! Temp file
-       write(*,*) 'Caching xvp on disk'
+       if (rank == 0) write(*,*) 'Caching xvp on disk'
        fn=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//'delta'//rank_s(1:len_trim(rank_s))
        open(unit=11,file=fn,status='replace',iostat=ioerr,access='stream')
        if (ioerr /= 0) then
@@ -1827,7 +1827,6 @@ end function linear_interpolate
 #endif
     thread = 1
     thread = omp_get_thread_num() + 1
-    if (rank == 0) write(*,*) "thread = ", thread
 #ifdef VELTRANSFER
     if (COMMAND == 0) then 
         !! First time we call dm
