@@ -142,7 +142,7 @@ program dist_init
   real, dimension(0:nc_node_dim+1,0:nc_node_dim+1) :: phi_buf
 
   !! Particles arrays for subroutine dm
-  real, dimension(6,np_node_dim,np_node_dim) :: xvp
+  real, dimension(6,np_node_dim,np_node_dim,num_threads) :: xvp
   
   !! Timing variables
   real(8) :: sec1, sec2
@@ -1720,6 +1720,11 @@ end function linear_interpolate
     character(len=6) :: rank_s
     character(len=7) :: z_s
     integer(4), dimension(11) :: header_garbage
+    integer(4) :: thread
+    integer(4), parameter :: xsize1 = sizeof(xvp(1:3,:,:,1))
+    integer(4), parameter :: xsize2 = sizeof(xvp(:,:,:,1))
+    real(4), parameter :: mfac = 180.8892437/mass_neutrino/scalefactor/3.0**0.5
+    real(4), parameter :: ffac = 50.2476/mass_neutrino/scalefactor !ckT/m =50.25
 
 #ifdef VELTRANSFER
     integer :: COMMAND
@@ -1816,198 +1821,198 @@ end function linear_interpolate
     vf=vfactor(scalefactor)
 
 #ifndef NEUTRINOS
-!$omp parallel default(shared) private(xvp,k,k1,j,j1,i,i1,pos_in,pos_out)
+    !$omp parallel default(shared) private(k,k1,j,j1,i,i1,pos_in,pos_out,thread)
 #else
-!$omp parallel default(shared) private(xvp,k,k1,j,j1,i,i1,pos_in,pos_out,l,rnum1,rnum2,rnum3,rnum4)
+    !$omp parallel default(shared) private(k,k1,j,j1,i,i1,pos_in,pos_out,l,rnum1,rnum2,rnum3,rnum4,thread)
 #endif
-
+    thread = 1
+    thread = omp_get_thread_num() + 1
+    if (rank == 0) write(*,*) "thread = ", thread
 #ifdef VELTRANSFER
     if (COMMAND == 0) then 
-       !! First time we call dm
-       !! We only need the positions
-!$omp do schedule(dynamic)
-       do k=1,np_node_dim
-          k1=(nc/np)*(k-1)+1
-          pos_out = 1 + sizeof(xvp(1:3,:,:))*(k-1)
-          do j=1,np_node_dim
-             j1=(nc/np)*(j-1)+1
-             do i=1,np_node_dim
-                i1=(nc/np)*(i-1)+1
+        !! First time we call dm
+        !! We only need the positions
+        !$omp do schedule(dynamic)
+        do k=1,np_node_dim
+            k1=(nc/np)*(k-1)+1
+            pos_out = 1 + xsize1*(k-1)
+            do j=1,np_node_dim
+                j1=(nc/np)*(j-1)+1
+                do i=1,np_node_dim
+                    i1=(nc/np)*(i-1)+1
 
-                xvp(1,i,j)=(phi(i1-1,j1,k1)-phi(i1+1,j1,k1))/2./(4.*pi)+(i1-0.5)
-                xvp(2,i,j)=(phi(i1,j1-1,k1)-phi(i1,j1+1,k1))/2./(4.*pi)+(j1-0.5)
-                xvp(3,i,j)=(phi(i1,j1,k1-1)-phi(i1,j1,k1+1))/2./(4.*pi)+(k1-0.5)
+                    xvp(1,i,j,thread)=(phi(i1-1,j1,k1)-phi(i1+1,j1,k1))/2./(4.*pi)+(i1-0.5)
+                    xvp(2,i,j,thread)=(phi(i1,j1-1,k1)-phi(i1,j1+1,k1))/2./(4.*pi)+(j1-0.5)
+                    xvp(3,i,j,thread)=(phi(i1,j1,k1-1)-phi(i1,j1,k1+1))/2./(4.*pi)+(k1-0.5)
 
-             enddo
-          enddo
-          write(unit=11,pos=pos_out) xvp(1:3,:,:) !! save in temp file 
-       enddo
-!$omp end do
-    else
-       !! Second time we call dm
-       !! Now we want velocity
-!$omp do schedule(dynamic)
-       do k=1,np_node_dim
-          k1=(nc/np)*(k-1)+1
-          pos_out = 1 + sizeof(np_local) + sizeof(header_garbage) + sizeof(xvp)*(k-1)
-          pos_in = 1 + sizeof(xvp(1:3,:,:))*(k-1)
-          read(unit=31,pos=pos_in) xvp(1:3,:,:) !! catch from temp file
-          do j=1,np_node_dim
-             j1=(nc/np)*(j-1)+1
-             do i=1,np_node_dim
-                i1=(nc/np)*(i-1)+1
-                
-                xvp(4,i,j)=(phi(i1-1,j1,k1)-phi(i1+1,j1,k1))/2./(4.*pi)
-                xvp(5,i,j)=(phi(i1,j1-1,k1)-phi(i1,j1+1,k1))/2./(4.*pi)
-                xvp(6,i,j)=(phi(i1,j1,k1-1)-phi(i1,j1,k1+1))/2./(4.*pi)
-
-#ifdef NEUTRINOS
-#ifdef NU_RANDOM
-                !! Uses Gaussian velocity distribution
-                !uniform random
-                call random_number(rnum1)
-                call random_number(rnum2)
-                !convert to gaussian
-                rnum3=2*pi*rnum1
-                rnum4=sqrt(-2*log(rnum2))
-                rnum1=rnum4*cos(rnum3)
-                rnum2=rnum4*sin(rnum3)
-                !Convert to real gaussian using dispersion
-                !scale factor cancels out in velocity dispersion and conversion factor
-                !sigma_nu = 181km/s / (mnu * a)
-                rnum1 = rnum1*Vphys2sim*(180.8892437/mass_neutrino/scalefactor/3.0**0.5) !Divide by sqrt3
-                rnum2 = rnum2*Vphys2sim*(180.8892437/mass_neutrino/scalefactor/3.0**0.5) !for each individual component
-
-                xvp(4,i,j)=xvp(4,i,j) + rnum1
-                xvp(5,i,j)=xvp(5,i,j) + rnum2
-
-                call random_number(rnum3)
-                call random_number(rnum4)
-
-                rnum3=2*pi*rnum3
-                rnum4=sqrt(-2*log(rnum4))
-
-                rnum3=rnum4*cos(rnum3)
-                rnum3 = rnum3*Vphys2sim*(180.8892437/mass_neutrino/scalefactor/3.0**0.5)
-
-                xvp(6,i,j)=xvp(6,i,j) + rnum3
-#else
-#ifdef NU_RELFD
-                !! Use Fermi-Dirac velocity distribution
-                call random_number(rnum1) !|vel|
-                call random_number(rnum2) !costheta
-                call random_number(rnum3) !phi
-                !Convert to fermi-dirac
-                do l=1,nv
-                   if (cdf(2,l).GT.rnum1) then
-                      rnum4 = cdf(2,l)-rnum1
-                      if ( (l.NE.1) .AND. (rnum1-cdf(2,l-1) .LT. rnum4) ) then
-                         rnum1 = cdf(1,l-1)
-                      else
-                         rnum1 = cdf(1,l)
-                      endif
-                      exit
-                   endif
                 enddo
-                !convert to fermi-dirac with units rnum1<-rnum1*c*(kT/m)
-                rnum1 = rnum1 *(50.2476/mass_neutrino/scalefactor) !*ckT/m = 50.25
+            enddo
+            write(unit=11,pos=pos_out) xvp(1:3,:,:,thread) !! save in temp file 
+        enddo
+        !$omp end do
+    else
+        !! Second time we call dm
+        !! Now we want velocity
+        !$omp do schedule(dynamic)
+        do k=1,np_node_dim
+            k1=(nc/np)*(k-1)+1
+            pos_out = 1 + sizeof(np_local) + sizeof(header_garbage) + xsize2*(k-1)
+            pos_in = 1 + xsize1*(k-1)
+            read(unit=31,pos=pos_in) xvp(1:3,:,:,thread) !! catch from temp file
+            do j=1,np_node_dim
+                j1=(nc/np)*(j-1)+1
+                do i=1,np_node_dim
+                    i1=(nc/np)*(i-1)+1
+                
+                    xvp(4,i,j,thread)=(phi(i1-1,j1,k1)-phi(i1+1,j1,k1))/2./(4.*pi)
+                    xvp(5,i,j,thread)=(phi(i1,j1-1,k1)-phi(i1,j1+1,k1))/2./(4.*pi)
+                    xvp(6,i,j,thread)=(phi(i1,j1,k1-1)-phi(i1,j1,k1+1))/2./(4.*pi)
 
-                rnum2 = rnum2*2.0-1.0 !convert to range 1,-1
-                rnum3 = rnum3*2.0*pi  !convert to range 0,2pi
-
-                xvp(4,i,j)=xvp(4,i,j) + rnum1*(1.0-rnum2**2)**0.5*cos(rnum3)*Vphys2sim
-                xvp(5,i,j)=xvp(5,i,j) + rnum1*(1.0-rnum2**2)**0.5*sin(rnum3)*Vphys2sim
-                xvp(6,i,j)=xvp(6,i,j) + rnum1*rnum2*Vphys2sim
-#endif
-#endif
-#endif
-             enddo
-          enddo
-          write(unit=11,pos=pos_out) xvp(:,:,:)
-       enddo
-!$omp end do
-    endif
-
-#else
-!$omp do schedule(dynamic)
-    do k=1,np_node_dim
-       k1=(nc/np)*(k-1)+1
-       pos_out = 1 + sizeof(np_local) + sizeof(header_garbage) + sizeof(xvp)*(k-1)
-       do j=1,np_node_dim
-          j1=(nc/np)*(j-1)+1
-          do i=1,np_node_dim
-             i1=(nc/np)*(i-1)+1
-
-             xvp(4,i,j)=(phi(i1-1,j1,k1)-phi(i1+1,j1,k1))/2./(4.*pi)
-             xvp(5,i,j)=(phi(i1,j1-1,k1)-phi(i1,j1+1,k1))/2./(4.*pi)
-             xvp(6,i,j)=(phi(i1,j1,k1-1)-phi(i1,j1,k1+1))/2./(4.*pi)
-             xvp(1,i,j)=xvp(4,i,j)+(i1-0.5)
-             xvp(2,i,j)=xvp(5,i,j)+(j1-0.5)
-             xvp(3,i,j)=xvp(6,i,j)+(k1-0.5)
-             xvp(4,i,j)=xvp(4,i,j)*vf
-             xvp(5,i,j)=xvp(5,i,j)*vf
-             xvp(6,i,j)=xvp(6,i,j)*vf
 #ifdef NEUTRINOS
 #ifdef NU_RANDOM
-             !! Uses Gaussian velocity distribution
-             !uniform random
-             call random_number(rnum1)
-             call random_number(rnum2)
-             !convert to gaussian
-             rnum3=2*pi*rnum1
-             rnum4=sqrt(-2*log(rnum2))
-             rnum1=rnum4*cos(rnum3)
-             rnum2=rnum4*sin(rnum3)
-             !Convert to real gaussian using dispersion
-             !scale factor cancels out in velocity dispersion and conversion factor
-             !sigma_nu = 181km/s / (mnu * a)
-             rnum1 = rnum1*Vphys2sim*(180.8892437/mass_neutrino/scalefactor/3.0**0.5) !Divide by sqrt3
-             rnum2 = rnum2*Vphys2sim*(180.8892437/mass_neutrino/scalefactor/3.0**0.5) !for each individual component
-             xvp(4,i,j)=xvp(4,i,j) + rnum1
-             xvp(5,i,j)=xvp(5,i,j) + rnum2
-             call random_number(rnum3)
-             call random_number(rnum4)
-             rnum3=2*pi*rnum3
-             rnum4=sqrt(-2*log(rnum4))
-             rnum3=rnum4*cos(rnum3)
-             rnum3 = rnum3*Vphys2sim*(180.8892437/mass_neutrino/scalefactor/3.0**0.5)
-             xvp(6,i,j)=xvp(6,i,j) + rnum3
+                    !! Uses Gaussian velocity distribution uniform random
+                    call random_number(rnum1)
+                    call random_number(rnum2)
+                    !! Convert to gaussian
+                    rnum3=2*pi*rnum1
+                    rnum4=sqrt(-2*log(rnum2))
+                    rnum1=rnum4*cos(rnum3)
+                    rnum2=rnum4*sin(rnum3)
+                    !! Convert to real gaussian using dispersion scale factor cancels out in 
+                    !! velocity dispersion and conversion factor sigma_nu = 181km/s / (mnu * a)
+                    rnum1 = rnum1*Vphys2sim*mfac 
+                    rnum2 = rnum2*Vphys2sim*mfac
+
+                    xvp(4,i,j,thread)=xvp(4,i,j,thread) + rnum1
+                    xvp(5,i,j,thread)=xvp(5,i,j,thread) + rnum2
+
+                    call random_number(rnum3)
+                    call random_number(rnum4)
+
+                    rnum3=2*pi*rnum3
+                    rnum4=sqrt(-2*log(rnum4))
+
+                    rnum3=rnum4*cos(rnum3)
+                    rnum3 = rnum3*Vphys2sim*mfac
+
+                    xvp(6,i,j,thread)=xvp(6,i,j,thread) + rnum3
 #else
 #ifdef NU_RELFD
-             !! Use Fermi-Dirac velocity distribution
-             call random_number(rnum1) !|vel|
-             call random_number(rnum2) !costheta
-             call random_number(rnum3) !phi
-             !Convert to fermi-dirac
-             do l=1,nv
-                if (cdf(2,l).GT.rnum1) then
-                   rnum4 = cdf(2,l)-rnum1
-                   if ( (l.NE.1) .AND. (rnum1-cdf(2,l-1) .LT. rnum4) ) then
-                      rnum1 = cdf(1,l-1)
-                   else
-                      rnum1 = cdf(1,l)
-                   endif
-                   exit
-                endif
-             enddo
-             !convert to fermi-dirac with units rnum1<-rnum1*c*(kT/m)
-             rnum1 = rnum1 *(50.2476/mass_neutrino/scalefactor) !*ckT/m = 50.25
-             rnum2 = rnum2*2.0-1.0 !convert to range 1,-1
-             rnum3 = rnum3*2.0*pi  !convert to range 0,2pi
-             xvp(4,i,j)=xvp(4,i,j) + rnum1*(1.0-rnum2**2)**0.5*cos(rnum3)*Vphys2sim
-             xvp(5,i,j)=xvp(5,i,j) + rnum1*(1.0-rnum2**2)**0.5*sin(rnum3)*Vphys2sim
-             xvp(6,i,j)=xvp(6,i,j) + rnum1*rnum2*Vphys2sim
-#endif
-#endif
-#endif
-          enddo
-       enddo
-       write(unit=11,pos=pos_out) xvp(:,:,:)
-    enddo
-!$omp end do 
-#endif
+                    !! Use Fermi-Dirac velocity distribution
+                    call random_number(rnum1) !|vel|
+                    call random_number(rnum2) !costheta
+                    call random_number(rnum3) !phi
 
-!$omp end parallel
+                    !! Convert to fermi-dirac
+                    do l=1,nv
+                       if (cdf(2,l).GT.rnum1) then
+                          rnum4 = cdf(2,l)-rnum1
+                          if ( (l.NE.1) .AND. (rnum1-cdf(2,l-1) .LT. rnum4) ) then
+                             rnum1 = cdf(1,l-1)
+                          else
+                             rnum1 = cdf(1,l)
+                          endif
+                          exit
+                       endif
+                    enddo
+
+                    !! Convert to fermi-dirac with units rnum1<-rnum1*c*(kT/m)
+                    rnum1 = rnum1 * ffac
+
+                    rnum2 = rnum2*2.0-1.0 !convert to range 1,-1
+                    rnum3 = rnum3*2.0*pi  !convert to range 0,2pi
+
+                    xvp(4,i,j,thread)=xvp(4,i,j,thread) + rnum1*(1.0-rnum2**2)**0.5*cos(rnum3)*Vphys2sim
+                    xvp(5,i,j,thread)=xvp(5,i,j,thread) + rnum1*(1.0-rnum2**2)**0.5*sin(rnum3)*Vphys2sim
+                    xvp(6,i,j,thread)=xvp(6,i,j,thread) + rnum1*rnum2*Vphys2sim
+#endif
+#endif
+#endif
+                enddo
+            enddo
+            write(unit=11,pos=pos_out) xvp(:,:,:,thread)
+        enddo
+        !$omp end do
+    endif
+#else
+    !$omp do schedule(dynamic)
+    do k=1,np_node_dim
+        k1=(nc/np)*(k-1)+1
+        pos_out = 1 + sizeof(np_local) + sizeof(header_garbage) + xsize2*(k-1)
+        do j=1,np_node_dim
+            j1=(nc/np)*(j-1)+1
+            do i=1,np_node_dim
+                i1=(nc/np)*(i-1)+1
+
+                 xvp(4,i,j,thread)=(phi(i1-1,j1,k1)-phi(i1+1,j1,k1))/2./(4.*pi)
+                 xvp(5,i,j,thread)=(phi(i1,j1-1,k1)-phi(i1,j1+1,k1))/2./(4.*pi)
+                 xvp(6,i,j,thread)=(phi(i1,j1,k1-1)-phi(i1,j1,k1+1))/2./(4.*pi)
+                 xvp(1,i,j,thread)=xvp(4,i,j,thread)+(i1-0.5)
+                 xvp(2,i,j,thread)=xvp(5,i,j,thread)+(j1-0.5)
+                 xvp(3,i,j,thread)=xvp(6,i,j,thread)+(k1-0.5)
+                 xvp(4,i,j,thread)=xvp(4,i,j,thread)*vf
+                 xvp(5,i,j,thread)=xvp(5,i,j,thread)*vf
+                 xvp(6,i,j,thread)=xvp(6,i,j,thread)*vf
+#ifdef NEUTRINOS
+#ifdef NU_RANDOM
+                 !! Uses Gaussian velocity distribution uniform random
+                 call random_number(rnum1)
+                 call random_number(rnum2)
+                 !! Convert to gaussian
+                 rnum3=2*pi*rnum1
+                 rnum4=sqrt(-2*log(rnum2))
+                 rnum1=rnum4*cos(rnum3)
+                 rnum2=rnum4*sin(rnum3)
+                 !! Convert to real gaussian using dispersion scale factor cancels out in 
+                 !! velocity dispersion and conversion factor sigma_nu = 181km/s / (mnu * a)
+                 rnum1 = rnum1*Vphys2sim*mfac
+                 rnum2 = rnum2*Vphys2sim*mfac
+                 xvp(4,i,j,thread)=xvp(4,i,j,thread) + rnum1
+                 xvp(5,i,j,thread)=xvp(5,i,j,thread) + rnum2
+                 call random_number(rnum3)
+                 call random_number(rnum4)
+                 rnum3=2*pi*rnum3
+                 rnum4=sqrt(-2*log(rnum4))
+                 rnum3=rnum4*cos(rnum3)
+                 rnum3 = rnum3*Vphys2sim*mfac
+                 xvp(6,i,j,thread)=xvp(6,i,j,thread) + rnum3
+#else
+#ifdef NU_RELFD
+                 !! Use Fermi-Dirac velocity distribution
+                 call random_number(rnum1) !|vel|
+                 call random_number(rnum2) !costheta
+                 call random_number(rnum3) !phi
+
+                 !! Convert to fermi-dirac
+                 do l=1,nv
+                    if (cdf(2,l).GT.rnum1) then
+                       rnum4 = cdf(2,l)-rnum1
+                       if ( (l.NE.1) .AND. (rnum1-cdf(2,l-1) .LT. rnum4) ) then
+                          rnum1 = cdf(1,l-1)
+                       else
+                          rnum1 = cdf(1,l)
+                       endif
+                       exit
+                    endif
+                 enddo
+
+                 !! Convert to fermi-dirac with units rnum1<-rnum1*c*(kT/m)
+                 rnum1 = rnum1 * ffac
+                 rnum2 = rnum2*2.0-1.0 !convert to range 1,-1
+                 rnum3 = rnum3*2.0*pi  !convert to range 0,2pi
+                 xvp(4,i,j,thread)=xvp(4,i,j,thread) + rnum1*(1.0-rnum2**2)**0.5*cos(rnum3)*Vphys2sim
+                 xvp(5,i,j,thread)=xvp(5,i,j,thread) + rnum1*(1.0-rnum2**2)**0.5*sin(rnum3)*Vphys2sim
+                 xvp(6,i,j,thread)=xvp(6,i,j,thread) + rnum1*rnum2*Vphys2sim
+#endif
+#endif
+#endif
+            enddo
+        enddo
+        write(unit=11,pos=pos_out) xvp(:,:,:,thread)
+    enddo
+    !$omp end do 
+#endif
+    !$omp end parallel
 
     !! Close I/O files
     close(11)
