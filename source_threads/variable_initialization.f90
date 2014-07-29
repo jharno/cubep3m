@@ -67,6 +67,7 @@
 !! read in when to store projections
 
       open(11,file=projections, status='old', iostat=fstat)
+print*, 'projection input file=',projections
       if (fstat /= 0) then
         write(*,*) 'error opening projection list file'
         write(*,*) 'rank',rank,'file:',projections

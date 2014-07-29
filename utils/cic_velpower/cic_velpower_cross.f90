@@ -9,7 +9,7 @@ program cic_velpower
   include 'mpif.h'
   include '../../parameters'
 
-  character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints'
+  character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints_nu'
 
   !! nc is the number of cells per box length
   integer, parameter :: hc=nc / 2

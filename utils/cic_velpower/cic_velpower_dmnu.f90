@@ -39,7 +39,7 @@ program cic_velpower
   include 'mpif.h'
   include '../../parameters'
 
-  character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints'
+  character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints_nu'
 
 #ifndef MOMENTUM
   !! Threading

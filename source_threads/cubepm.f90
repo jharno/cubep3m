@@ -36,7 +36,7 @@ program cubep3m
 
   sec1 = mpi_wtime(ierr)
   if (rank == 0) write(*,*) "STARTING CUBEP3M: ", sec1
-
+  if (rank == 0) write(*,*) "Output directory:    ", output_path
 #ifdef CHECKPOINT_KILL
   call read_remaining_time
 #endif
