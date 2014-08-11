@@ -61,7 +61,7 @@ subroutine datestamp
   character(len=8) :: td
   call time(t)
   call date_and_time(td)
-  if (rank == 0) print *,td,' ',t
+  print *,td,' ',t
 end subroutine datestamp
 
 !! a small routine that prints the max/min/avg of 'local_time' accross multiple nodes

@@ -30,13 +30,13 @@ program cubep3m
   kill_step_done = .false.
 #endif
 
-  call datestamp
-
   call mpi_initialize
+
+  if (rank == 0) call datestamp
 
   sec1 = mpi_wtime(ierr)
   if (rank == 0) write(*,*) "STARTING CUBEP3M: ", sec1
-  if (rank == 0) write(*,*) "Output directory:    ", output_path
+
 #ifdef CHECKPOINT_KILL
   call read_remaining_time
 #endif
@@ -332,7 +332,7 @@ call mpi_barrier(mpi_comm_world,ierr)
 
   call mpi_finalize(ierr)
 
-  call datestamp
+  if (rank == 0) call datestamp
 
 contains
   
