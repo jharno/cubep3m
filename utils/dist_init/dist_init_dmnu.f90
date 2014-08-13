@@ -1708,7 +1708,8 @@ end function linear_interpolate
   subroutine dm
 #endif
     implicit none
-    integer :: i,j,k,ioerr,pos_in,pos_out 
+    integer :: i,j,k,ioerr
+    integer(8) :: pos_in,pos_out 
     integer :: i1,j1,k1,lb,ub
     real    :: d,dmin,dmax,sum_dm,sum_dm_local,dmint,dmaxt,vf
     real*8  :: dsum,dvar,dsumt,dvart
