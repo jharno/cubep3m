@@ -411,9 +411,11 @@ program cic_crossvel
     ! Write the total velocity power spectra for each field
     ! --------------------------------------------------------------------------------
 
-    do kt = 1, 6 
-        call writepowerspectra(0, kt)
-    enddo
+    if (rank == 0) then
+        do kt = 1, 6 
+            call writepowerspectra(0, kt)
+        enddo
+    endif
 
     ! --------------------------------------------------------------------------------
     ! Compute the power spectrum of the divergence component of velocity for each of 
@@ -440,7 +442,7 @@ program cic_crossvel
     enddo
     call darkmatter(1)
     call powerspectrum(slab, slab2, pkdivg(:,:,1), 1) 
-    call writepowerspectra(1, 1)
+    if (rank == 0) call writepowerspectra(1, 1)
     if (rank == 0) write(*,*)
 
     ! --------------------------------------------------------------------------------                                                            
@@ -462,7 +464,7 @@ program cic_crossvel
     enddo
     call darkmatter(1)
     call powerspectrum(slab, slab2, pkdivg(:,:,2), 1)
-    call writepowerspectra(1, 2)
+    if (rank == 0) call writepowerspectra(1, 2)
     if (rank == 0) write(*,*)
 
     ! --------------------------------------------------------------------------------                                                            
@@ -484,7 +486,7 @@ program cic_crossvel
     enddo
     call darkmatter(1)
     call powerspectrum(slab, slab2, pkdivg(:,:,3), 1)
-    call writepowerspectra(1, 3)
+    if (rank == 0) call writepowerspectra(1, 3)
     if (rank == 0) write(*,*)
 
     ! --------------------------------------------------------------------------------                                                            
@@ -512,7 +514,7 @@ program cic_crossvel
     enddo
     call darkmatter(1)
     call powerspectrum(slab, slab2, pkdivg(:,:,4), 1)
-    call writepowerspectra(1, 4)
+    if (rank == 0) call writepowerspectra(1, 4)
     if (rank == 0) write(*,*)
 
     ! --------------------------------------------------------------------------------                                                            
@@ -540,7 +542,7 @@ program cic_crossvel
     enddo
     call darkmatter(1)
     call powerspectrum(slab, slab2, pkdivg(:,:,5), 1)
-    call writepowerspectra(1, 5)
+    if (rank == 0) call writepowerspectra(1, 5)
     if (rank == 0) write(*,*)
 
     ! --------------------------------------------------------------------------------                                                            
@@ -568,7 +570,7 @@ program cic_crossvel
     enddo
     call darkmatter(1)
     call powerspectrum(slab, slab2, pkdivg(:,:,6), 1)
-    call writepowerspectra(1, 6)
+    if (rank == 0) call writepowerspectra(1, 6)
     if (rank == 0) write(*,*)
 
 #ifdef CURL
@@ -772,9 +774,11 @@ program cic_crossvel
     ! Write the total velocity power spectra for each field
     ! --------------------------------------------------------------------------------
 
-    do kt = 1, 6
-        call writepowerspectra(2, kt)
-    enddo
+    if (rank == 0) then 
+        do kt = 1, 6
+            call writepowerspectra(2, kt)
+        enddo
+    endif
 #endif
 
   enddo
