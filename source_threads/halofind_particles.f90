@@ -53,8 +53,8 @@ subroutine halofind
 #ifdef NEUTRINOS
     real(4), parameter :: nu_search_radius = 2. !! Distance in Mpc/h to search for neutrino properties around each halo  
     real(4), parameter :: nu_search_radius_cells = nu_search_radius * nf_physical_dim / box 
-    if (rank == 0) write(*,*) "Neutrino search radius: ", nu_search_radius_cells
     real(4) :: g4 = box * nf_buf / real(nf_physical_dim) 
+    if (rank == 0) write(*,*) "Neutrino search radius: ", nu_search_radius_cells
     if (rank == 0 .and. g4 < nu_search_radius) write(*,*) "WARNING: Buffer size is only ", g4, " < ", nu_search_radius
 #endif
 
