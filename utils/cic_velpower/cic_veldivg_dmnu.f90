@@ -84,8 +84,8 @@ program cic_crossvel
   integer(4), dimension(3) :: slab_coord, cart_coords
   integer(4) :: slab_rank, mpi_comm_cart, cart_rank, rank, ierr
 
-  integer(4) :: np_local,np_local_dm,np_local_h,np_h,np_add,np_add_dm,np_add_h
-  integer(8) :: plan, iplan
+  integer(4) :: np_local,np_local_dm,np_local_h,np_add,np_add_dm,np_add_h
+  integer(8) :: plan, iplan, np_h
   logical :: firstfftw
 
   !! have velocity power spectra for each x, y, z
@@ -1136,7 +1136,8 @@ subroutine read_particles(command)
 
     implicit none
     
-    real z_write, np_total
+    real z_write
+    integer(8) :: np_total
     integer j, fstat
     character(len=7) :: z_string
     character(len=4) :: rank_string
@@ -1237,19 +1238,19 @@ subroutine read_particles(command)
 
     !! Tally up total number of particles
     if (command == 0) then
-        call mpi_reduce(real(np_local, kind=4), np_total, 1, mpi_real, &
+        call mpi_reduce(int(np_local, kind=8), np_total, 1, mpi_integer8, &
                          mpi_sum, 0, mpi_comm_world, ierr)
     else if (command == 1) then
-        call mpi_reduce(real(np_local_dm, kind=4), np_total, 1, mpi_real, &
+        call mpi_reduce(int(np_local_dm, kind=8), np_total, 1, mpi_integer8, &
                          mpi_sum, 0, mpi_comm_world, ierr)
     else
-        call mpi_reduce(real(np_local_h, kind=4), np_total, 1, mpi_real, &
+        call mpi_reduce(int(np_local_h, kind=8), np_total, 1, mpi_integer8, &
                         mpi_sum, 0, mpi_comm_world, ierr)
-        call mpi_allreduce(np_local_h, np_h, 1, mpi_integer, mpi_sum, &
+        call mpi_allreduce(int(np_local_h,kind=8), np_h, 1, mpi_integer8, mpi_sum, &
                            mpi_comm_world, ierr)
-    endif    
+    endif
 
-    if (rank == 0) write(*,*) 'Total number of particles = ', int(np_total,8)
+    if (rank == 0) write(*,*) 'Total number of particles = ', np_total
 
     if (command == 0) then
         do j=1, np_local
@@ -1929,7 +1930,8 @@ subroutine pass_particles(command)
     
     implicit none
 
-    integer i,pp,np_buf,np_exit,np_final,npo,npi
+    integer i,pp,np_buf,np_exit,npo,npi
+    integer(8) :: np_final
     real x(6),lb,ub
     integer, dimension(mpi_status_size) :: status,sstatus,rstatus
     integer :: tag,srequest,rrequest,sierr,rierr
@@ -2423,23 +2425,23 @@ subroutine pass_particles(command)
                     mpi_comm_world,ierr)
 
   if (command == 0) then
-     call mpi_reduce(np_local,np_final,1,mpi_integer,mpi_sum,0, &
+     call mpi_reduce(int(np_local,kind=8),np_final,1,mpi_integer8,mpi_sum,0, &
           mpi_comm_world,ierr)
   else if (command == 1) then
-     call mpi_reduce(np_local_dm,np_final,1,mpi_integer,mpi_sum,0, &
+     call mpi_reduce(int(np_local_dm,kind=8),np_final,1,mpi_integer8,mpi_sum,0, &
           mpi_comm_world,ierr)
   else
-     call mpi_reduce(np_local_h,np_final,1,mpi_integer,mpi_sum,0, &
+     call mpi_reduce(int(np_local_h,kind=8),np_final,1,mpi_integer8,mpi_sum,0, &
           mpi_comm_world,ierr)
   endif
 
   if (rank == 0) then
      if (command == 0) then
-        if (np_final /= np**3) then
+        if (np_final /= int(np,kind=8)**3) then
            print *,'ERROR: total number of neutrinos incorrect after passing'
         endif
      else if (command == 1) then
-        if (np_final /= (np/ratio_nudm_dim)**3) then
+        if (np_final /= (int(np,kind=8)/ratio_nudm_dim)**3) then
            print *,'ERROR: total number of dark matter particles incorrect after passing'
         endif
      else
