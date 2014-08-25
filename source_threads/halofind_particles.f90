@@ -50,6 +50,14 @@ subroutine halofind
     integer(8) :: imass_vir, i_vir
     integer(8) :: np_halo_local_vir, np_halo_vir
 
+#ifdef NEUTRINOS
+    real(4), parameter :: nu_search_radius = 2. !! Distance in Mpc/h to search for neutrino properties around each halo  
+    real(4), parameter :: nu_search_radius_cells = nu_search_radius * nf_physical_dim / box 
+    real(4) :: g4 = box * nf_buf / real(nf_physical_dim) 
+    if (rank == 0) write(*,*) "Neutrino search radius: ", nu_search_radius_cells
+    if (rank == 0 .and. g4 < nu_search_radius) write(*,*) "WARNING: Buffer size is only ", g4, " < ", nu_search_radius
+#endif
+
     !
     ! Find halo candidates based on local overdensities for each tile
     !
@@ -207,7 +215,7 @@ subroutine halofind
             mass_odc = mass_p * imass_odc
 
 #ifdef NEUTRINOS
-            call neutrino_properties(hpos(:), 2*r_vir, x_mean_nu, v_mean_nu, n_nu)
+            call neutrino_properties(hpos(:), nu_search_radius_cells, x_mean_nu, v_mean_nu, n_nu)
             x_mean_nu = x_mean_nu + offset 
 #endif
 
