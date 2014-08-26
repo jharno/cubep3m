@@ -32,6 +32,8 @@
 
 program cic_power_dmnu
 
+  use omp_lib
+
   implicit none
 
   include 'mpif.h'
@@ -45,6 +47,9 @@ program cic_power_dmnu
   !! integer(4),   parameter :: nc = (nf_tile-2*nf_buf)*tiles_node_dim*nodes_dim / coarsen_factor
   include '../../parameters_hack'
 #endif
+
+  !! Threading
+  integer(4), parameter :: nt = 8
 
   logical, parameter :: correct_kernel=.false.
   character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints_nu'
@@ -64,7 +69,7 @@ program cic_power_dmnu
   real, parameter    :: npr=np
 
 #ifdef LOGBIN
-  integer, parameter :: numbins = hc / 48 
+  integer, parameter :: numbins = 32 
 #endif
 
   !! internals
@@ -81,6 +86,7 @@ program cic_power_dmnu
                                   12*(nf_buf**2)*((nf_tile-2*nf_buf)*tiles_node_dim))/8.0 )
 
   integer(4), parameter :: max_np_dm = max_np / ratio_nudm_dim**3
+  integer(4), parameter :: max_np_h = 1000000  
   integer(4), parameter :: np_buffer=int(2./3.*max_np)
 
   integer(4), parameter :: nodes = nodes_dim * nodes_dim * nodes_dim
@@ -92,9 +98,10 @@ program cic_power_dmnu
   integer(4), dimension(3) :: slab_coord, cart_coords
   integer(4) :: slab_rank, mpi_comm_cart, cart_rank, rank, ierr
 
-  integer(4) :: np_local, np_local_dm
+  integer(4) :: np_local, np_local_dm, np_local_h
+  integer(8) :: np_h
 #ifdef GROUPS
-  real(4) :: np_groups(0:1), np_groups_dm(0:1)
+  real(4) :: np_groups(0:1), np_groups_dm(0:1), np_groups_h(0:1)
 #endif
   integer(8) :: plan, iplan
   logical :: firstfftw
@@ -105,6 +112,7 @@ program cic_power_dmnu
   !! Dark matter arrays
   real, dimension(6,max_np) :: xvp
   real, dimension(6,max_np_dm) :: xvp_dm
+  real, dimension(6,max_np_h)  :: xvmp_h
   real, dimension(3,np_buffer) :: xp_buf
   real, dimension(3*np_buffer) :: send_buf, recv_buf
   real, dimension(0:nc_node_dim+1,0:nc_node_dim+1,0:nc_node_dim+1) :: den 
@@ -112,7 +120,7 @@ program cic_power_dmnu
 
   !! Power spectrum arrays
   real, dimension(3,nc) :: pkdm
-  real, dimension(3,nc) :: poisson_dm, poisson_nu
+  real, dimension(3,nc) :: poisson_dm, poisson_nu, poisson_h
 #ifdef PLPLOT
   real*8, dimension(3,nc) :: pkplot
 #endif
@@ -146,29 +154,35 @@ program cic_power_dmnu
   integer(1) :: GID(max_np)
 #endif
 
+  !! For threading 
+  integer :: kt
+#ifdef SLAB
+  integer, parameter :: kt_stop = nc_slab
+#else
+  integer, parameter :: kt_stop = nc_pen+2
+#endif
+
   !! Equivalence arrays to save memory
 #ifdef SLAB
   equivalence (den,slab_work,recv_cube,xp_buf)
 #else
   equivalence (den,recv_cube,xp_buf) 
 #endif
-#ifndef GROUPS
-  equivalence (xvp,slab,cube)
-#else
   equivalence (slab,cube)
-#endif
 
   !! Common block
 #ifdef PLPLOT
- common xvp,xvp_dm,send_buf,den_buf,den,recv_buf,pkdm,poisson_dm,poisson_nu,pkplot,slab2
+ common xvp,xvp_dm,xvmp_h,send_buf,den_buf,den,recv_buf,pkdm,poisson_dm,poisson_nu,poisson_h,pkplot,slab,slab2
 #else
- common xvp,xvp_dm,send_buf,den_buf,den,recv_buf,pkdm,poisson_dm,poisson_nu,slab2
+ common xvp,xvp_dm,xvmp_h,send_buf,den_buf,den,recv_buf,pkdm,poisson_dm,poisson_nu,poisson_h,slab,slab2
 #endif
 #ifdef GROUPS
-  common /gvar/ slab, GID
+  common /gvar/ GID
 #endif
 
-!!---start main--------------------------------------------------------------!!
+! ---------------------------------------------------------------------------------------------------
+! MAIN
+! ---------------------------------------------------------------------------------------------------
 
     call mpi_initialize
 #ifdef GROUPS
@@ -185,29 +199,32 @@ program cic_power_dmnu
         call initvar
 
 #ifndef GROUPS 
-        !
-        ! Compute Poisson noise first so don't overwrite slab's later
-        !
+        ! ---------------------------------------------------------------------------------------------------
+        ! COMPUTE POISSON NOISE FIRST SO DON'T OVERWRITE SLAB LATER        
+        ! ---------------------------------------------------------------------------------------------------
 
+        !! Neutrino and dark matter particle numbers are known in advance
         call PoissonNoise(0) 
         call powerspectrum(slab,slab,poisson_nu)
         call PoissonNoise(1) 
         call powerspectrum(slab,slab,poisson_dm)
+        
+        !! Halo files must be read in order to determine the number of halos
+        call read_particles(2)
+        call PoissonNoise(2)
+        call powerspectrum(slab,slab,poisson_h)
 #endif
 
-        !
-        ! Compute neutrino power spectrum
-        !
+        ! ---------------------------------------------------------------------------------------------------
+        ! NEUTRINO AUTO POWER
+        ! ---------------------------------------------------------------------------------------------------
 
         call read_particles(0)
         call pass_particles(0)
 #ifdef GROUPS
-        !! Randomly assign neutrinos to one of two groups 
         call assign_groups(0)
-        !! Fourier transform density field for group 0 and store in slab2
         call darkmatter(0, 0, 0)
-        slab2(:,:,:) = slab(:,:,:)
-        !! Fourier transform density field for group 1 and compute correlation with group 0
+        call swap_slab12
         call darkmatter(0, 1, 0)
         call powerspectrum(slab,slab2,pkdm)
 #else
@@ -216,24 +233,16 @@ program cic_power_dmnu
 #endif
         if (rank == 0) call writepowerspectra(0)
     
-#ifndef GROUPS
-        !! Store dark matter Fourier field in slab2 for cross spectra later
-        slab2(:,:,:) = slab(:,:,:) 
-#endif    
-
-        !
-        ! Compute dark matter power spectrum
-        !
+        ! ---------------------------------------------------------------------------------------------------
+        ! DARK MATTER AUTO POWER
+        ! ---------------------------------------------------------------------------------------------------
  
         call read_particles(1)
         call pass_particles(1)
 #ifdef GROUPS
-        !! Randomly assign dark matter to one of two groups 
         call assign_groups(1)
-        !! Fourier transform density field for group 0 and store in slab2
         call darkmatter(1, 0, 0)
-        slab2(:,:,:) = slab(:,:,:)
-        !! Fourier transform density field for group 1 and compute correlation with group 0
+        call swap_slab12
         call darkmatter(1, 1, 0)
         call powerspectrum(slab,slab2,pkdm)
 #else
@@ -242,30 +251,88 @@ program cic_power_dmnu
 #endif
         if (rank == 0) call writepowerspectra(1)
 
-        !
-        ! Compute cross power spectra
-        !
+        ! ---------------------------------------------------------------------------------------------------
+        ! HALO AUTO POWER
+        ! ---------------------------------------------------------------------------------------------------
+
+        call read_particles(2)
+        call pass_particles(2)
+#ifdef GROUPS
+        call assign_groups(2)
+        call darkmatter(2, 0, 0)
+        call swap_slab12
+        call darkmatter(2, 1, 0)
+        call powerspectrum(slab,slab2,pkdm)
+#else
+        call darkmatter(2)
+        call powerspectrum(slab,slab,pkdm)
+#endif
+        if (rank == 0) call writepowerspectra(2)
+
+        ! ---------------------------------------------------------------------------------------------------
+        ! NEUTRINO-DARK MATTER CROSS SPECTRA
+        ! ---------------------------------------------------------------------------------------------------
 
 #ifdef GROUPS
-        !! Put all particles into group 0
         call clear_groups
-        !! Fourier transform neutrino density field and store in slab2
+#endif
+
+#ifdef GROUPS
         call darkmatter(0, 0, 1)
-        slab2(:,:,:) = slab(:,:,:)
-        !! Fourier transform dark matter density field and cross with neutrinos
+        call swap_slab12
         call darkmatter(1, 0, 1) 
+#else
+        call darkmatter(0)
+        call swap_slab12
+        call darkmatter(1)
 #endif
         call powerspectrum(slab,slab2,pkdm)
-        if (rank == 0) call writepowerspectra(2)
+        if (rank == 0) call writepowerspectra(3)
+
+        ! ---------------------------------------------------------------------------------------------------
+        ! NEUTRINO-HALO CROSS SPECTRA
+        ! ---------------------------------------------------------------------------------------------------
+
+#ifdef GROUPS
+        call darkmatter(0, 0, 0)
+        call swap_slab12
+        call darkmatter(2, 0, 1)
+#else
+        call darkmatter(0)
+        call swap_slab12
+        call darkmatter(2)
+#endif
+        call powerspectrum(slab,slab2,pkdm)
+        if (rank == 0) call writepowerspectra(4)
+
+        ! ---------------------------------------------------------------------------------------------------
+        ! DARK MATTER-HALO CROSS SPECTRA
+        ! ---------------------------------------------------------------------------------------------------
+
+#ifdef GROUPS
+        call darkmatter(1, 0, 0)
+        call swap_slab12
+        call darkmatter(2, 0, 0)
+#else
+        call darkmatter(1)
+        call swap_slab12
+        call darkmatter(2)
+#endif
+        call powerspectrum(slab,slab2,pkdm)
+        if (rank == 0) call writepowerspectra(5)
 
     enddo
   
     call cp_fftw(0)
     call mpi_finalize(ierr)
 
+! ---------------------------------------------------------------------------------------------------
+! SUBROUTINES
+! ---------------------------------------------------------------------------------------------------
+
 contains
 
-!!---------------------------------------------------------------------------!!
+! ---------------------------------------------------------------------------------------------------
 
   subroutine mpi_initialize
     implicit none
@@ -387,7 +454,8 @@ contains
   subroutine read_particles(command)
     implicit none
     
-    real z_write,np_total
+    real z_write
+    integer(8) :: np_total
     integer i,j,fstat, blocksize, nplow, nphigh, num_writes
     character(len=7) :: z_string
     character(len=4) :: rank_string
@@ -397,6 +465,12 @@ contains
     !! these are unnecessary headers from the checkpoint
     real(4) :: a,t,tau,dt_f_acc,dt_c_acc,dt_pp_acc,mass_p
     integer(4) :: nts,sim_checkpoint,sim_projection,sim_halofind
+
+    !! unnecessary data for halos
+    real(4)                :: garbage1
+    real(4), dimension(3)  :: garbage3
+    real(4), dimension(4)  :: garbage4
+    real(4), dimension(15) :: garbage15
 
 !! generate checkpoint names on each node
     if (rank==0) then
@@ -420,7 +494,7 @@ contains
            check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'xv'// &
                    rank_string(1:len_trim(rank_string))//'_nu.dat'
         endif
-    else
+    else if (command == 1) then
         if(z_write .eq. z_i) then
            check_name=ic_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'xv'// &
                    rank_string(1:len_trim(rank_string))//'.dat'
@@ -428,6 +502,9 @@ contains
            check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'xv'// &
                    rank_string(1:len_trim(rank_string))//'.dat'
         endif
+    else
+        check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'halo'//&
+                   rank_string(1:len_trim(rank_string))//'.dat'
     endif
 
 !! open checkpoint    
@@ -445,9 +522,11 @@ contains
     if (command == 0) then
         read(21) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint, &
                    sim_projection,sim_halofind,mass_p
-    else
+    else if (command == 1) then
         read(21) np_local_dm,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint, &
                    sim_projection,sim_halofind,mass_p
+    else
+        read(21) np_local_h,t, tau
     endif
 
     !! Check for memory problems
@@ -457,32 +536,63 @@ contains
           write(*,*) 'rank', rank, 'np_local', np_local, 'max_np', max_np
           call mpi_abort(mpi_comm_world, ierr, ierr)
         endif
-    else
+    else if (command == 1) then
         if (np_local_dm > max_np_dm) then
           write(*,*) 'ERROR: Too many particles to store in memory!'
           write(*,*) 'rank', rank, 'np_local', np_local, 'max_np', max_np
+          call mpi_abort(mpi_comm_world, ierr, ierr)
+        endif
+    else
+        if (np_local_h > max_np_h) then
+          write(*,*) 'ERROR: Too many halos to store in memory!'
+          write(*,*) 'rank', rank, 'np_local_h', np_local_h, 'max_np_h', max_np_h
           call mpi_abort(mpi_comm_world, ierr, ierr)
         endif
     endif
 
     !! Tally up total number of particles
     if (command == 0) then
-        call mpi_reduce(real(np_local, kind=4), np_total, 1, mpi_real, &
+        call mpi_reduce(int(np_local, kind=8), np_total, 1, mpi_integer8, &
+                         mpi_sum, 0, mpi_comm_world, ierr)
+    else if (command == 1) then
+        call mpi_reduce(int(np_local_dm, kind=8), np_total, 1, mpi_integer8, &
                          mpi_sum, 0, mpi_comm_world, ierr)
     else
-        call mpi_reduce(real(np_local_dm, kind=4), np_total, 1, mpi_real, &
-                         mpi_sum, 0, mpi_comm_world, ierr)
+        call mpi_reduce(int(np_local_h, kind=8), np_total, 1, mpi_integer8, &
+                        mpi_sum, 0, mpi_comm_world, ierr)
+        call mpi_allreduce(int(np_local_h,kind=8), np_h, 1, mpi_integer8, mpi_sum, &
+                           mpi_comm_world, ierr)
     endif
 
-    if (rank == 0) write(*,*) 'Total number of particles = ', int(np_total,8)
+    if (rank == 0) write(*,*) 'Total number of particles = ', np_total 
 
     if (command == 0) then
         do j=1, np_local
             read(21) xvp(:,j)
         enddo
-    else
+    else if (command == 1) then
         do j=1, np_local_dm
             read(21) xvp_dm(:,j)
+        enddo
+    else
+        !! Read halo global coordinates and velocities
+        do j=1, np_local_h
+            read(21) xvmp_h(1:3, j)
+            read(21) garbage4 !! m (x2) + r (x2) 
+            read(21) garbage3 !! xbar (x3)
+            read(21) xvmp_h(4:6, j)
+            read(21) garbage3 !! angular momentum
+            read(21) garbage3 !! var in vel
+            read(21) garbage3 !! var in pos
+            read(21) garbage3 !! moment of inertia
+            read(21) garbage3 !! moment of inertia
+            read(21) garbage3 !! xbar nu
+            read(21) garbage3 !! vbar nu
+            read(21) garbage1 !! nbr nu
+        enddo
+        !! Convert global halo coordinates to local node coordinates
+        do j=1 , np_local_h
+            xvmp_h(1:3, j) = xvmp_h(1:3, j) - slab_coord(:)*nc_node_dim
         enddo
     endif
 
@@ -491,9 +601,13 @@ contains
         do j=1, np_local
             xvp(1:3,j) = xvp(1:3,j)/coarsen_factor
         enddo
-    else
+    else if (command == 1) then
         do j=1, np_local_dm
             xvp_dm(1:3,j) = xvp_dm(1:3,j)/coarsen_factor
+        enddo
+    else
+        do j=1, np_local_h
+            xvmp_h(1:3,j) = xvmp_h(1:3,j)/coarsen_factor
         enddo
     endif
 #endif
@@ -507,9 +621,11 @@ contains
     !cancels the H0...
 
     if (command == 0) then
-        xvp(3,:)=xvp(3,:) + xvp(6,:)*1.5/sqrt(a*(1+a*(1-omega_m-omega_l)/omega_m + omega_l/omega_m*a**3))
+        xvp(3,:) = xvp(3,:) + xvp(6,:)*1.5/sqrt(a*(1+a*(1-omega_m-omega_l)/omega_m + omega_l/omega_m*a**3))
+    else if (command == 1) then
+        xvp_dm(3,:) = xvp_dm(3,:) + xvp_dm(6,:)*1.5/sqrt(a*(1+a*(1-omega_m-omega_l)/omega_m + omega_l/omega_m*a**3))
     else
-        xvp_dm(3,:)=xvp_dm(3,:) + xvp_dm(6,:)*1.5/sqrt(a*(1+a*(1-omega_m-omega_l)/omega_m + omega_l/omega_m*a**3))
+        xvmp_h(3,:) = xvmp_h(3,:) + xvmp_h(6,:)*1.5/sqrt(a*(1+a*(1-omega_m-omega_l)/omega_m + omega_l/omega_m*a**3))
     endif
 
     call pass_particles(command)
@@ -935,19 +1051,31 @@ end subroutine cp_fftw
 
 #ifdef KAISER
     if (command == 1) then !! Dark matter power spectra
-        fn=output_path//z_write(1:len_trim(z_write))//prefix//'-RSD.dat' 
+        fn=output_path//z_write(1:len_trim(z_write))//prefix//'-RSD_dmdm.dat' 
     else if (command == 0) then !! Neutrino power spectra
-        fn=output_path//z_write(1:len_trim(z_write))//prefix//'-RSD_nu.dat'
-    else !! Dark matter-neutrino cross spectra
+        fn=output_path//z_write(1:len_trim(z_write))//prefix//'-RSD_nunu.dat'
+    else if (command == 2) then !! Halo power spectra
+        fn=output_path//z_write(1:len_trim(z_write))//prefix//'-RSD_haha.dat'
+    else if (command == 3) then !! Dark matter-neutrino cross spectra
         fn=output_path//z_write(1:len_trim(z_write))//prefix//'-RSD_dmnu.dat'
+    else if (command == 4) then !! Neutrino-halo cross spectra
+        fn=output_path//z_write(1:len_trim(z_write))//prefix//'-RSD_nuha.dat'
+    else if (command == 5) then !! Dark matter-halo cross spectra
+        fn=output_path//z_write(1:len_trim(z_write))//prefix//'-RSD_dmha.dat'
     endif
 #else
     if (command == 1) then !! Dark matter power spectra
-        fn=output_path//z_write(1:len_trim(z_write))//prefix//'.dat'
+        fn=output_path//z_write(1:len_trim(z_write))//prefix//'_dmdm.dat'
     else if (command == 0) then !! Neutrino power spectra
-        fn=output_path//z_write(1:len_trim(z_write))//prefix//'_nu.dat'
-    else !! Dark matter-neutrino cross spectra
+        fn=output_path//z_write(1:len_trim(z_write))//prefix//'_nunu.dat'
+    else if (command == 2) then !! Halo power spectra
+        fn=output_path//z_write(1:len_trim(z_write))//prefix//'_haha.dat'
+    else if (command == 3) then !! Dark matter-neutrino cross spectra
         fn=output_path//z_write(1:len_trim(z_write))//prefix//'_dmnu.dat'
+    else if (command == 4) then !! Neutrino-halo cross spectra
+        fn=output_path//z_write(1:len_trim(z_write))//prefix//'_nuha.dat'
+    else if (command == 5) then !! Dark matter-halo cross spectra
+        fn=output_path//z_write(1:len_trim(z_write))//prefix//'_dmha.dat'
     endif
 #endif
 
@@ -967,6 +1095,8 @@ end subroutine cp_fftw
          write(11,*) pkdm(3,k-1),pkdm(1:2,k-1),poisson_dm(1:2,k-1)
        else if (command == 0) then
          write(11,*) pkdm(3,k-1),pkdm(1:2,k-1),poisson_nu(1:2,k-1)
+       else if (command == 2) then
+         write(11,*) pkdm(3,k-1),pkdm(1:2,k-1),poisson_h(1:2,k-1)
        else !! No poission noise with cross spectra
          write(11,*) pkdm(3,k-1),pkdm(1:2,k-1)
        endif
@@ -979,6 +1109,8 @@ end subroutine cp_fftw
          write(11,*) pkdm(3,k),pkdm(1:2,k),poisson_dm(1:2,k)
        else if (command == 0) then
          write(11,*) pkdm(3,k),pkdm(1:2,k),poisson_nu(1:2,k)
+       else if (command == 2) then
+         write(11,*) pkdm(3,k),pkdm(1:2,k),poisson_h(1:2,k)
        else !! No poission noise with cross spectra
          write(11,*) pkdm(3,k),pkdm(1:2,k)
        endif
@@ -1065,18 +1197,24 @@ subroutine darkmatter(command)
 #ifdef KAISER
         if (command == 1) then !! Dark matter
         check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'den'// &
-                   rank_string(1:len_trim(rank_string))//'-rsd.dat'
-        else !! Neutrinos
+                   rank_string(1:len_trim(rank_string))//'-rsd.bin'
+        else if (command == 0) then!! Neutrinos
         check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'den'// &
-                   rank_string(1:len_trim(rank_string))//'-rsd_nu.dat'
+                   rank_string(1:len_trim(rank_string))//'-rsd_nu.bin'
+        else
+        check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'den'// &
+                   rank_string(1:len_trim(rank_string))//'-rsd_h.bin'
         endif
 #else 
         if (command == 1) then !! Dark matter
         check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'den'// &
-                   rank_string(1:len_trim(rank_string))//'.dat'
-        else !! Neutrinos
+                   rank_string(1:len_trim(rank_string))//'.bin'
+        else if (command == 0) then !! Neutrinos
         check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'den'// &
-                   rank_string(1:len_trim(rank_string))//'_nu.dat'
+                   rank_string(1:len_trim(rank_string))//'_nu.bin'
+        else
+        check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'den'// &
+                   rank_string(1:len_trim(rank_string))//'_h.bin'
         endif
 #endif
 
@@ -1132,9 +1270,14 @@ subroutine darkmatter(command)
           write(*,*) 'DM max    ',dmaxt
           write(*,*) 'Delta sum ',real(dsum,8)
           write(*,*) 'Delta var ',real(dvar,8)
-      else
+      else if (command == 0) then
           write(*,*) 'NU min    ',dmint
           write(*,*) 'NU max    ',dmaxt
+          write(*,*) 'Delta sum ',real(dsum,8)
+          write(*,*) 'Delta var ',real(dvar,8)
+      else
+          write(*,*) 'HL min    ',dmint
+          write(*,*) 'HL max    ',dmaxt
           write(*,*) 'Delta sum ',real(dsum,8)
           write(*,*) 'Delta var ',real(dvar,8)
       endif
@@ -1177,17 +1320,22 @@ subroutine darkmatter(command)
     ! Randomize positions across all nodes, hence np_local should be equal
     if (command == 0) then 
         np_local = np_node_dim**3 
-    else !! Dark matter are further reduced by factor of ratio_nudm_dim 
+    else if (command == 1) then !! Dark matter are further reduced by factor of ratio_nudm_dim 
         np_local_dm = (np_node_dim/ratio_nudm_dim)**3
+    else
+        np_local_h = int(np_h/real(nodes)) 
     endif
 
     ! Assign particles to random positions between 0 and nc_node_dim
     if (command == 0) then
         call random_number(xvp(1:3,:np_local))
         xvp(1:3,:np_local) = xvp(1:3,:np_local)*nc_node_dim
-    else
+    else if (command == 1) then
         call random_number(xvp_dm(1:3,:np_local_dm))
         xvp_dm(1:3,:np_local_dm) = xvp_dm(1:3,:np_local_dm)*nc_node_dim
+    else
+        call random_number(xvmp_h(1:3,:np_local_h))
+        xvmp_h(1:3,:np_local_h) = xvmp_h(1:3,:np_local_h)*nc_node_dim
     endif
 
     !! Assign masses to grid to compute dm power spectrum
@@ -1214,18 +1362,24 @@ subroutine darkmatter(command)
 #ifdef KAISER
     if (command == 1) then !! Dark matter
     check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'den-poisson'// &
-               rank_string(1:len_trim(rank_string))//'-rsd.dat'
-    else !! Neutrinos
+               rank_string(1:len_trim(rank_string))//'-rsd.bin'
+    else if (command == 0) then !! Neutrinos
     check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'den-poisson'// &
-               rank_string(1:len_trim(rank_string))//'-rsd_nu.dat'
+               rank_string(1:len_trim(rank_string))//'-rsd_nu.bin'
+    else !! Halos
+    check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'den-poisson'//&
+               rank_string(1:len_trim(rank_string))//'-rsd_h.bin'
     endif
 #else 
     if (command == 1) then !! Dark matter
     check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'den-poisson'// &
-               rank_string(1:len_trim(rank_string))//'.dat'
-    else !! Neutrinos
+               rank_string(1:len_trim(rank_string))//'.bin'
+    else if (command == 0) then !! Neutrinos
     check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'den-poisson'// &
-               rank_string(1:len_trim(rank_string))//'_nu.dat'
+               rank_string(1:len_trim(rank_string))//'_nu.bin'
+    else !! Halos
+    check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'den-poisson'//&
+               rank_string(1:len_trim(rank_string))//'_h.bin'
     endif
 #endif
 
@@ -1300,7 +1454,8 @@ subroutine pass_particles(command)
 
     implicit none
 
-    integer i,pp,np_buf,np_exit,np_final,npo,npi
+    integer i,pp,np_buf,np_exit,npo,npi
+    integer(8) :: np_final
     real x(3),lb,ub
     integer, dimension(mpi_status_size) :: status,sstatus,rstatus
     integer :: tag,srequest,rrequest,sierr,rierr
@@ -1324,15 +1479,19 @@ subroutine pass_particles(command)
 
         if (command == 0) then
             if (pp > np_local) exit
-        else
+        else if (command == 1) then
             if (pp > np_local_dm) exit
+        else
+            if (pp > np_local_h) exit
         endif
 
         !! Read its position  
         if (command == 0) then
             x = xvp(1:3, pp)
-        else
+        else if (command == 1) then
             x = xvp_dm(1:3, pp)
+        else
+            x = xvmp_h(1:3, pp)
         endif
 
         !! See if it lies within the buffer
@@ -1351,10 +1510,14 @@ subroutine pass_particles(command)
                 xp_buf(:, np_buf) = xvp(1:3, pp)
                 xvp(:, pp)        = xvp(:, np_local)
                 np_local          = np_local - 1
-            else
+            else if (command == 1) then
                 xp_buf(:, np_buf) = xvp_dm(1:3, pp)
                 xvp_dm(:, pp)     = xvp_dm(:, np_local_dm)
                 np_local_dm       = np_local_dm - 1
+            else
+                xp_buf(:, np_buf) = xvmp_h(1:3, pp)
+                xvmp_h(:, pp)     = xvmp_h(:, np_local_h)
+                np_local_h       = np_local_h - 1
             endif
 
             cycle
@@ -1390,7 +1553,7 @@ subroutine pass_particles(command)
       if (pp > np_buf) exit
       if (xp_buf(1, pp) >= ub) then
         npo = npo + 1
-        send_buf((npo-1)*6+1:npo*6) = xp_buf(:, pp)
+        send_buf((npo-1)*3+1:npo*3) = xp_buf(:, pp)
         xp_buf(:, pp) = xp_buf(:, np_buf)
         np_buf = np_buf - 1
         cycle
@@ -1411,23 +1574,22 @@ subroutine pass_particles(command)
                               tag, cart_neighbor(5), tag, mpi_comm_world, &
                               status, ierr)
 
-    call mpi_isend(send_buf, npo*6, mpi_real, cart_neighbor(6), &
+    call mpi_isend(send_buf, npo*3, mpi_real, cart_neighbor(6), &
                    tag, mpi_comm_world, srequest, sierr)
-    call mpi_irecv(recv_buf, npi*6, mpi_real, cart_neighbor(5), &
+    call mpi_irecv(recv_buf, npi*3, mpi_real, cart_neighbor(5), &
                    tag, mpi_comm_world, rrequest, rierr)
     call mpi_wait(srequest, sstatus, sierr)
     call mpi_wait(rrequest, rstatus, rierr)
 
     do pp = 1, npi
-      xp_buf(:, np_buf + pp) = recv_buf((pp-1)*6+1:pp*6)
+      xp_buf(:, np_buf + pp) = recv_buf((pp-1)*3+1:pp*3)
       xp_buf(1, np_buf + pp) = max(xp_buf(1, np_buf+pp) - ub, lb)
     enddo
 
 #ifdef DEBUG
     do i = 0, nodes-1
       if (rank == i .and. command == 0) print *, rank, 'x+ np_local=', np_local
-      if (rank == i .and. command == 1) print *, rank, 'x+ np_local_dm=',
-np_local_dm
+      if (rank == i .and. command == 1) print *, rank, 'x+ np_local_dm=', np_local_dm
       call mpi_barrier(mpi_comm_world, ierr)
     enddo
 #endif 
@@ -1442,9 +1604,12 @@ np_local_dm
         if (command == 0) then
             np_local = np_local + 1
             xvp(1:3, np_local) = x
-        else
+        else if (command == 1) then
             np_local_dm = np_local_dm + 1
             xvp_dm(1:3, np_local_dm) = x
+        else
+            np_local_h = np_local_h + 1
+            xvmp_h(1:3, np_local_h) = x
         endif
         xp_buf(:, np_buf+pp) = xp_buf(:, np_buf+npi)
         npi = npi - 1
@@ -1474,7 +1639,7 @@ np_local_dm
       if (pp > np_buf) exit
       if (xp_buf(1, pp) < lb) then
         npo = npo + 1
-        send_buf((npo-1)*6+1:npo*6) = xp_buf(:, pp)
+        send_buf((npo-1)*3+1:npo*3) = xp_buf(:, pp)
         xp_buf(:, pp) = xp_buf(:, np_buf)
         np_buf = np_buf - 1
         cycle
@@ -1488,15 +1653,15 @@ np_local_dm
                               tag, cart_neighbor(6), tag, mpi_comm_world, &
                               status, ierr)
 
-    call mpi_isend(send_buf, npo*6, mpi_real, cart_neighbor(5), &
+    call mpi_isend(send_buf, npo*3, mpi_real, cart_neighbor(5), &
                    tag, mpi_comm_world, srequest, sierr)
-    call mpi_irecv(recv_buf, npi*6, mpi_real, cart_neighbor(6), &
+    call mpi_irecv(recv_buf, npi*3, mpi_real, cart_neighbor(6), &
                    tag, mpi_comm_world, rrequest, rierr)
     call mpi_wait(srequest, sstatus, sierr)
     call mpi_wait(rrequest, rstatus, rierr)
 
     do pp = 1, npi
-      xp_buf(:, np_buf+pp) = recv_buf((pp-1)*6+1:pp*6)
+      xp_buf(:, np_buf+pp) = recv_buf((pp-1)*3+1:pp*3)
       xp_buf(1, np_buf+pp) = min(xp_buf(1,np_buf+pp) + ub, ub-eps)
     enddo
 
@@ -1509,9 +1674,12 @@ np_local_dm
         if (command == 0) then
             np_local = np_local + 1
             xvp(1:3, np_local) = x
-        else
+        else if (command == 1) then
             np_local_dm = np_local_dm + 1
             xvp_dm(1:3, np_local_dm) = x
+        else
+            np_local_h = np_local_h + 1
+            xvmp_h(1:3, np_local_h) = x
         endif
         xp_buf(:, np_buf+pp) = xp_buf(:, np_buf+npi)
         npi = npi - 1
@@ -1533,7 +1701,7 @@ np_local_dm
       if (pp > np_buf) exit
       if (xp_buf(2, pp) >= ub) then
         npo = npo + 1
-        send_buf((npo-1)*6+1:npo*6) = xp_buf(:, pp)
+        send_buf((npo-1)*3+1:npo*3) = xp_buf(:, pp)
         xp_buf(:, pp) = xp_buf(:, np_buf)
         np_buf = np_buf - 1
         cycle
@@ -1547,15 +1715,15 @@ np_local_dm
                               tag, cart_neighbor(3), tag, mpi_comm_world, &
                               status, ierr)
 
-    call mpi_isend(send_buf, npo*6, mpi_real, cart_neighbor(4), &
+    call mpi_isend(send_buf, npo*3, mpi_real, cart_neighbor(4), &
                    tag, mpi_comm_world, srequest, sierr)
-    call mpi_irecv(recv_buf, npi*6, mpi_real, cart_neighbor(3), &
+    call mpi_irecv(recv_buf, npi*3, mpi_real, cart_neighbor(3), &
                    tag, mpi_comm_world, rrequest, rierr)
     call mpi_wait(srequest, sstatus, sierr)
     call mpi_wait(rrequest, rstatus, rierr)
 
     do pp = 1, npi
-      xp_buf(:, np_buf+pp) = recv_buf((pp-1)*6+1:pp*6)
+      xp_buf(:, np_buf+pp) = recv_buf((pp-1)*3+1:pp*3)
       xp_buf(2, np_buf+pp) = max(xp_buf(2, np_buf+pp)-ub, lb)
     enddo
 
@@ -1568,9 +1736,12 @@ np_local_dm
         if (command == 0) then
             np_local = np_local + 1
             xvp(1:3, np_local) = x
-        else
+        else if (command == 1) then
             np_local_dm = np_local_dm + 1
             xvp_dm(1:3, np_local_dm) = x
+        else
+            np_local_h = np_local_h + 1
+            xvmp_h(1:3, np_local_h) = x
         endif
         xp_buf(:, np_buf+pp) = xp_buf(:, np_buf+npi)
         npi = npi-1
@@ -1592,7 +1763,7 @@ np_local_dm
       if (pp > np_buf) exit
       if (xp_buf(2,pp) < lb) then
         npo = npo+1
-        send_buf((npo-1)*6+1:npo*6) = xp_buf(:, pp)
+        send_buf((npo-1)*3+1:npo*3) = xp_buf(:, pp)
         xp_buf(:, pp) = xp_buf(:, np_buf)
         np_buf = np_buf - 1
         cycle
@@ -1606,15 +1777,15 @@ np_local_dm
                               tag, cart_neighbor(4), tag, mpi_comm_world, &
                               status, ierr)
 
-    call mpi_isend(send_buf, npo*6, mpi_real, cart_neighbor(3), &
+    call mpi_isend(send_buf, npo*3, mpi_real, cart_neighbor(3), &
                    tag, mpi_comm_world, srequest, sierr)
-    call mpi_irecv(recv_buf, npi*6, mpi_real, cart_neighbor(4), &
+    call mpi_irecv(recv_buf, npi*3, mpi_real, cart_neighbor(4), &
                    tag, mpi_comm_world, rrequest, rierr)
     call mpi_wait(srequest, sstatus, sierr)
     call mpi_wait(rrequest, rstatus, rierr)
 
     do pp = 1, npi
-      xp_buf(:, np_buf+pp) = recv_buf((pp-1)*6+1:pp*6)
+      xp_buf(:, np_buf+pp) = recv_buf((pp-1)*3+1:pp*3)
       xp_buf(2, np_buf+pp) = min(xp_buf(2, np_buf+pp)+ub, ub-eps)
     enddo
 
@@ -1627,9 +1798,12 @@ np_local_dm
         if (command == 0) then
             np_local = np_local+1
             xvp(1:3, np_local) = x
-        else
+        else if (command == 1) then
             np_local_dm = np_local_dm+1
             xvp_dm(1:3, np_local_dm) = x
+        else
+            np_local_h = np_local_h+1
+            xvmp_h(1:3, np_local_h) = x
         endif
         xp_buf(:, np_buf+pp) = xp_buf(:, np_buf+npi)
         npi=npi-1
@@ -1651,7 +1825,7 @@ np_local_dm
       if (pp > np_buf) exit
       if (xp_buf(3, pp) >= ub) then
         npo = npo + 1
-        send_buf((npo-1)*6+1:npo*6) = xp_buf(:, pp)
+        send_buf((npo-1)*3+1:npo*3) = xp_buf(:, pp)
         xp_buf(:, pp) = xp_buf(:, np_buf)
         np_buf = np_buf - 1
         cycle
@@ -1665,15 +1839,15 @@ np_local_dm
                               tag,cart_neighbor(1),tag,mpi_comm_world, &
                               status,ierr)
 
-    call mpi_isend(send_buf,npo*6,mpi_real,cart_neighbor(2), &
+    call mpi_isend(send_buf,npo*3,mpi_real,cart_neighbor(2), &
                    tag,mpi_comm_world,srequest,sierr)
-    call mpi_irecv(recv_buf,npi*6,mpi_real,cart_neighbor(1), &
+    call mpi_irecv(recv_buf,npi*3,mpi_real,cart_neighbor(1), &
                    tag,mpi_comm_world,rrequest,rierr)
     call mpi_wait(srequest,sstatus,sierr)
     call mpi_wait(rrequest,rstatus,rierr)
 
     do pp=1,npi
-      xp_buf(:,np_buf+pp)=recv_buf((pp-1)*6+1:pp*6)
+      xp_buf(:,np_buf+pp)=recv_buf((pp-1)*3+1:pp*3)
       xp_buf(3,np_buf+pp)=max(xp_buf(3,np_buf+pp)-ub,lb)
     enddo
 
@@ -1686,9 +1860,12 @@ np_local_dm
         if (command == 0) then
             np_local=np_local+1
             xvp(1:3,np_local)=x
-        else
+        else if (command == 1) then
             np_local_dm=np_local_dm+1
             xvp_dm(1:3,np_local_dm)=x
+        else
+            np_local_h=np_local_h+1
+            xvmp_h(1:3,np_local_h)=x
         endif
         xp_buf(:,np_buf+pp)=xp_buf(:,np_buf+npi)
         npi=npi-1
@@ -1710,7 +1887,7 @@ np_local_dm
       if (pp > np_buf) exit
       if (xp_buf(3,pp) < lb) then
         npo=npo+1
-        send_buf((npo-1)*6+1:npo*6)=xp_buf(:,pp)
+        send_buf((npo-1)*3+1:npo*3)=xp_buf(:,pp)
         xp_buf(:,pp)=xp_buf(:,np_buf)
         np_buf=np_buf-1
         cycle
@@ -1724,15 +1901,15 @@ np_local_dm
                               tag,cart_neighbor(2),tag,mpi_comm_world, &
                               status,ierr)
 
-    call mpi_isend(send_buf,npo*6,mpi_real,cart_neighbor(1), &
+    call mpi_isend(send_buf,npo*3,mpi_real,cart_neighbor(1), &
                    tag,mpi_comm_world,srequest,sierr)
-    call mpi_irecv(recv_buf,npi*6,mpi_real,cart_neighbor(2), &
+    call mpi_irecv(recv_buf,npi*3,mpi_real,cart_neighbor(2), &
                    tag,mpi_comm_world,rrequest,rierr)
     call mpi_wait(srequest,sstatus,sierr)
     call mpi_wait(rrequest,rstatus,rierr)
 
     do pp=1,npi
-      xp_buf(:,np_buf+pp)=recv_buf((pp-1)*6+1:pp*6)
+      xp_buf(:,np_buf+pp)=recv_buf((pp-1)*3+1:pp*3)
       xp_buf(3,np_buf+pp)=min(xp_buf(3,np_buf+pp)+ub,ub-eps)
     enddo
 
@@ -1745,9 +1922,12 @@ np_local_dm
         if (command == 0) then
             np_local=np_local+1
             xvp(1:3,np_local)=x
-        else
+        else if (command == 1) then
             np_local_dm=np_local_dm+1
             xvp_dm(1:3,np_local_dm)=x
+        else
+            np_local_h=np_local_h+1
+            xvmp_h(1:3,np_local_h)=x
         endif
         xp_buf(:,np_buf+pp)=xp_buf(:,np_buf+npi)
         npi=npi-1
@@ -1768,44 +1948,64 @@ np_local_dm
     call mpi_reduce(np_buf,np_exit,1,mpi_integer,mpi_sum,0, &
                     mpi_comm_world,ierr)
 
-    if (rank == 0) print *,'total buffered particles =',np_exit
+  if (command == 0) then
+     call mpi_reduce(int(np_local,kind=8),np_final,1,mpi_integer8,mpi_sum,0, &
+          mpi_comm_world,ierr)
+  else if (command == 1) then
+     call mpi_reduce(int(np_local_dm,kind=8),np_final,1,mpi_integer8,mpi_sum,0, &
+          mpi_comm_world,ierr)
+  else
+     call mpi_reduce(int(np_local_h,kind=8),np_final,1,mpi_integer8,mpi_sum,0, &
+          mpi_comm_world,ierr)
+  endif
 
-    if (command == 0) then
-        call mpi_reduce(np_local,np_final,1,mpi_integer,mpi_sum,0, &
-                    mpi_comm_world,ierr)
-    else
-        call mpi_reduce(np_local_dm,np_final,1,mpi_integer,mpi_sum,0, &
-                    mpi_comm_world,ierr)
-    endif
-
-    if (rank == 0) then
-      print *,'total particles =',np_final
-      if (np_final /= np**3) then
-        print *,'ERROR: total number of particles incorrect after passing'
-      endif
-    endif
+  if (rank == 0) then
+     if (command == 0) then
+        if (np_final /= int(np,kind=8)**3) then
+           print *,'ERROR: total number of neutrinos incorrect after passing'
+        endif
+     else if (command == 1) then
+        if (np_final /= (int(np,kind=8)/ratio_nudm_dim)**3) then
+           print *,'ERROR: total number of dark matter particles incorrect after passing'
+        endif
+     else
+        if (np_final /= np_h) then
+           print *,'ERROR: total number of halos incorrect after passing'
+        endif
+     endif
+  endif
 
 !!  Check for particles out of bounds
 
-    if (command == 0) then
-        do i=1,np_local
-          if (xvp(1,i) < 0 .or. xvp(1,i) >= nc_node_dim .or. &
-              xvp(2,i) < 0 .or. xvp(2,i) >= nc_node_dim .or. &
-              xvp(3,i) < 0 .or. xvp(3,i) >= nc_node_dim) then
-            print *,'particle out of bounds',rank,i,xvp(:3,i),nc_node_dim
-          endif
-        enddo
-    else
-        do i=1,np_local_dm
-          if (xvp_dm(1,i) < 0 .or. xvp_dm(1,i) >= nc_node_dim .or. &
-              xvp_dm(2,i) < 0 .or. xvp_dm(2,i) >= nc_node_dim .or. &
-              xvp_dm(3,i) < 0 .or. xvp_dm(3,i) >= nc_node_dim) then
-            print *,'particle out of bounds',rank,i,xvp_dm(:3,i),nc_node_dim
-          endif
-        enddo
-    endif
+  if (command == 0) then
+     do i=1,np_local
+        if (xvp(1,i) < 0 .or. xvp(1,i) >= nc_node_dim .or. &
+             xvp(2,i) < 0 .or. xvp(2,i) >= nc_node_dim .or. &
+             xvp(3,i) < 0 .or. xvp(3,i) >= nc_node_dim) then
+           print *,'neutrino out of bounds',rank,i,xvp(:3,i),nc_node_dim
+        endif
+     enddo
+  else if (command == 1) then
+     do i=1,np_local_dm
+        if (xvp_dm(1,i) < 0 .or. xvp_dm(1,i) >= nc_node_dim .or. &
+             xvp_dm(2,i) < 0 .or. xvp_dm(2,i) >= nc_node_dim .or. &
+             xvp_dm(3,i) < 0 .or. xvp_dm(3,i) >= nc_node_dim) then
+           print *,'dark matter particle out of bounds',rank,i,xvp_dm(:3,i),nc_node_dim
+        endif
+     enddo
+  else
+     do i=1,np_local_h
+        if (xvmp_h(1,i) < 0 .or. xvmp_h(1,i) >= nc_node_dim .or. &
+             xvmp_h(2,i) < 0 .or. xvmp_h(2,i) >= nc_node_dim .or. &
+             xvmp_h(3,i) < 0 .or. xvmp_h(3,i) >= nc_node_dim) then
+           print *,'halo out of bounds',rank,i,xvmp_h(:3,i),nc_node_dim
+        endif
+     enddo
+  endif
 
     time2 = mpi_wtime(ierr)
+    if (rank == 0) write(*,*) 'total buffered particles =', np_exit
+    if (rank == 0) write(*,*) 'total particles          =', np_final
     if (rank == 0) write(*, *) "Finished pass_particles ... elapsed time = ", time2-time1
 
     return
@@ -1880,8 +2080,10 @@ subroutine assign_groups(command)
 
     if (command == 0) then
         np_tot = np_local
-    else
+    else if (command == 1) then
         np_tot = np_local_dm
+    else
+        np_tot = np_local_h
     endif
 
     np0 = 0
@@ -1909,9 +2111,12 @@ subroutine assign_groups(command)
     if (command == 0) then
         np_groups(0) = real(np1_tot)
         np_groups(1) = real(np2_tot)
-    else
+    else if (command == 1) then
         np_groups_dm(0) = real(np1_tot)
         np_groups_dm(1) = real(np2_tot)
+    else
+        np_groups_h(0) = real(np1_tot)
+        np_groups_h(1) = real(np2_tot)
     endif
 
     if (rank == 0) then
@@ -1935,8 +2140,10 @@ subroutine clear_groups
 
     np_groups(0) = real(np)**3 
     np_groups_dm(0) = (real(np)/ratio_nudm_dim)**3 
+    np_groups_h(0) = real(np_h)
     np_groups(1) = 0.
     np_groups_dm(1) = 0.
+    np_groups_h(1) = 0.
 
     return
 
@@ -1966,13 +2173,20 @@ end subroutine clear_groups
         mp = (ncr/(np/ratio_nudm_dim))**3
 #endif
         np_total = np_local_dm
-    else
+    else if (command == 0) then
 #ifdef GROUPS
         mp = ncr**3 / np_groups(glook)
 #else
         mp = (ncr/np)**3
 #endif
         np_total = np_local
+    else
+#ifdef GROUPS
+        mp = ncr**3 / np_groups_h(glook)
+#else
+        mp = ncr**3 / np_h
+#endif
+        np_total = np_local_h
     endif 
 
     do i=1,np_total 
@@ -1984,10 +2198,14 @@ end subroutine clear_groups
          x=xvp(1,i)-0.5
          y=xvp(2,i)-0.5
          z=xvp(3,i)-0.5
-       else
+       else if (command == 1) then
          x=xvp_dm(1,i)-0.5
          y=xvp_dm(2,i)-0.5
          z=xvp_dm(3,i)-0.5
+       else
+         x=xvmp_h(1,i)-0.5
+         y=xvmp_h(2,i)-0.5
+         z=xvmp_h(3,i)-0.5
        endif
 
        i1=floor(x)+1
@@ -2272,6 +2490,7 @@ end subroutine clear_groups
        pkdm(:,k)=0
        poisson_dm(:,k)=0
        poisson_nu(:,k)=0
+       poisson_h(:,k)=0
     enddo    
     call cpu_time(time2)
     time2=(time2-time1)
@@ -2344,4 +2563,24 @@ subroutine mesh_buffer
 
   end subroutine mesh_buffer
 
+!!------------------------------------------------------------------!!
+
+subroutine swap_slab12
+    !
+    ! Swaps the data between slab and slab2.
+    !
+
+    implicit none
+
+    !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                     
+    do kt = 1, kt_stop
+        slab2(:,:,kt) = slab(:,:,kt)
+    enddo
+    !$omp end parallel do
+
+end subroutine swap_slab12
+
+!!------------------------------------------------------------------!!
+
 end program cic_power_dmnu
+

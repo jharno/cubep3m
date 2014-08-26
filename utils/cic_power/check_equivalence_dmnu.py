@@ -3,17 +3,18 @@ import numpy
 # ----------------------- parameters -----------------------
 
 # Parameters that we need
-nodes_dim      = 2
+nodes_dim      = 4
 tiles_node_dim = 4
 nf_tile        = 176 
-density_buffer = 3.
-ratio_nudm_dim = 2
+density_buffer = 2.0
+ratio_nudm_dim = 1
+max_np_h       = 1000000 
 
 # Set this ture if using GROUPS algorithm
 groups = True
 
 # Set this true if using P3DFFT for pencil decomposition
-pencil = True
+pencil = True 
 
 # Usually won't need to change these
 nf_cutoff   = 16
@@ -76,7 +77,7 @@ if maxeq1 != den:
     print "xp_buf    = ", xp_buf
     print
 
-# Second statement (xvp, slab, cube) or (slab, cube)
+# Second statement (slab, cube) 
 xvp = 4 * (6 * max_np) 
 cube = 4 * nc_node_dim**3
 if pencil:
@@ -84,42 +85,28 @@ if pencil:
 else:
     slab = 4 * ((nc + 2) * nc * nc_slab)
 
-if not groups: 
+maxeq2 = max(slab, cube)
 
-    maxeq2 = max(xvp, slab, cube)
-    
-    if maxeq2 != xvp:
+if maxeq2 != slab:
 
-        print "Change equivalence and common block accordingly:"
-        print "xvp  = ", xvp
-        print "slab = ", slab
-        print "cube = ", cube
-        print
-
-else: 
-
-    maxeq2 = max(slab, cube)
-
-    if maxeq2 != slab:
-
-        print "Change equivalence and common block accordingly:"
-        print "slab = ", slab
-        print "cube = ", cube
-        print
+    print "Change equivalence and common block accordingly:"
+    print "slab = ", slab
+    print "cube = ", cube
+    print
 
 #
 # Compute the sizes of other big arrays
 #
 
 xvp_dm = xvp / ratio_nudm_dim**3
+xvp_h  = 4 * 6 * max_np_h
 if groups : GID = max_np
 else: GID = 0
 send_buf = 4 * 3 * np_buffer
 recv_buf = send_buf
 den_buf = 4 * (nc_node_dim+2)**2
 slab2 = slab
-if not groups: xvp = 0
 
-print "Total memory used by large arrays [GB]: ", (maxeq1 + maxeq2 + xvp + xvp_dm + send_buf + recv_buf + GID + den_buf + slab2) / 1024.**3 
+print "Total memory used by large arrays [GB]: ", (maxeq1 + maxeq2 + xvp + xvp_dm + xvp_h + send_buf + recv_buf + GID + den_buf + slab2) / 1024.**3 
 print
 
