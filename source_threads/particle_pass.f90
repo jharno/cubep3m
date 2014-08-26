@@ -884,6 +884,15 @@
     if(rank==0) write(*,*) '*** max allowed                = ' , max_buf/6 , '    ***'
     if(rank==0) write(*,*) '*****************************************************'
 
+#ifdef WRITELOG
+    if(rank==0) then
+       open(unit=76,file=logfile,status='old',iostat=fstat,form='formatted',access='append')
+       write(unit=76,fmt='(i5,2x,f7.4)') nts, 1.0/a-1.0
+       write(unit=76,fmt='(2x,f7.4)') real(np_max)*density_buffer/real(max_np)
+    
+    endif
+#endif
+
     call system_clock(count=count_f,count_rate=count_r)
 #ifdef MPI_TIME
     call mpi_time_analyze('par pass',real(count_f-count_i)/real(count_r),rank,nodes)
