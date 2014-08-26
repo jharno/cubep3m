@@ -88,7 +88,7 @@ print*, 'projection input file=',projections
       print*,num_projections,' projections to do'
       if (num_projections.eq.1) then
         write(*,*) 'problem reading projections '
-        call mpi_abort(mpi_comm_world,i,ierr)
+!!        call mpi_abort(mpi_comm_world,i,ierr)
       endif
 
 
@@ -127,7 +127,7 @@ print*, 'projection input file=',projections
       print*,num_checkpoints,' checkpoints to do'
       if (num_checkpoints.eq.1) then
         write(*,*) 'problem reading checkpoints '
-        call mpi_abort(mpi_comm_world,i,ierr)
+!!        call mpi_abort(mpi_comm_world,i,ierr)
       endif
 
 !! temporary rig
@@ -190,7 +190,7 @@ print*, 'projection input file=',projections
         print*,num_halofinds,' halofinds to do'
         if (num_halofinds.eq.1) then
         write(*,*) 'problem reading halofinds '
-        call mpi_abort(mpi_comm_world,i,ierr)
+!!        call mpi_abort(mpi_comm_world,i,ierr)
       endif
 
 

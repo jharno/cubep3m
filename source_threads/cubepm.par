@@ -17,7 +17,11 @@ character(*), parameter :: kernel_path=cubepm_root//'kernels/'
 character(*), parameter :: killtime_path=cubepm_root//'batch/killtime.txt' 
 
 #ifdef WRITELOG
-character (len=max_path) :: logfile = output_path//'log.txt'
+#ifdef NEUTRINOS
+character(*), parameter  :: logfile = output_path//'log_nu.txt'
+#else
+character(*), parameter  :: logfile = output_path//'log_dm.txt'
+#endif
 #endif
 
 !! cosmological parameters

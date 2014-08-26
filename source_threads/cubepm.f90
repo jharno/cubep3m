@@ -18,6 +18,10 @@ program cubep3m
   integer(4) :: nc_to_mhd(3)
 #endif
 
+#ifdef WRITELOG
+  integer(4) :: fstat, np_max
+#endif
+
   real(4) :: t_elapsed
   external t_elapsed
 
@@ -126,6 +130,14 @@ call mpi_barrier(mpi_comm_world,ierr)
 
 
   if (rank == 0) write(*,*) 'starting main loop'
+
+#ifdef WRITELOG
+  if (rank==0) then
+    fstat=0
+    open(unit=76,file=logfile,status='replace',iostat=fstat,form='formatted')
+  endif
+#endif
+
   do 
     call timestep
     sec1a = mpi_wtime(ierr)
@@ -133,10 +145,11 @@ call mpi_barrier(mpi_comm_world,ierr)
 
 
 #ifdef WRITELOG
+    call mpi_reduce(np_local,np_max,1,mpi_integer,mpi_max,0,mpi_comm_world,ierr)
     if(rank==0) then
-       open(unit=76,file=logfile,status='old',iostat=fstat,form='formatted',access='append')
-       write(unit=76,fmt='(f9.6') (sec1a-sec1)/3600.
-
+       write(unit=76,fmt='(i6,2x,f8.4,2x)',advance='no') nts, 1.0/a-1.0
+       write(unit=76,fmt='(f10.6,2x)',advance='no') (sec1a-sec1)/3600.
+       write(unit=76,fmt='(f10.6)',advance='yes') real(np_max)*density_buffer/real(max_np)
     endif
 #endif
 
@@ -318,6 +331,12 @@ call mpi_barrier(mpi_comm_world,ierr)
 
     if (nts == max_nts .or. final_step .or. a .gt. 1.0) exit
   enddo
+
+
+#ifdef WRITELOG
+    if(rank==0) close(76)
+#endif
+
 
 #ifdef TIMING
   if (rank==0) then
