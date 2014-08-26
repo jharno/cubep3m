@@ -24,7 +24,7 @@ program dist_init
   logical, parameter :: correct_kernel=.true.
 
   real, parameter :: ns = 0.96 
-  real, parameter :: s8 = 0.779
+  real, parameter :: s8 = 0.83
   real, parameter :: omegal=omega_l 
   real, parameter :: omegam=1.0-omegal 
 
@@ -57,18 +57,18 @@ program dist_init
 #endif
 
   !! NEUTRINO sims may use this:
-  integer, parameter      :: nk=706
+  integer, parameter      :: nk=612
 !fntf depends on redshift which could vary for neutrinos and dm
 #ifdef NEUTRINOS
-  character(*), parameter :: fntf = 'nu_mnu0p2_transfer_out_z10.dat'
+  character(*), parameter :: fntf = 'sim_mnu0p2_transfer_out_z10.dat'
 #else
-  character(*), parameter :: fntf = 'nu_mnu0p2_transfer_out_z10.dat'
+  character(*), parameter :: fntf = 'sim_mnu0p2_transfer_out_z10.dat'
 #endif
 #ifdef VELTRANSFER
 #ifdef NEUTRINOS
-  character(*), parameter :: vfntf = 'nu_mnu0p2_veltransfer_out_z10.dat'
+  character(*), parameter :: vfntf = 'sim_mnu0p2_veltransfer_out_z10.dat'
 #else
-  character(*), parameter :: vfntf = 'nu_mnu0p2_veltransfer_out_z10.dat'
+  character(*), parameter :: vfntf = 'sim_mnu0p2_veltransfer_out_z10.dat'
 #endif
   real(4), parameter :: Vphys2sim = 1.0/(300. * sqrt(omega_m) * box * (1. + redshift) / 2. / nc)!(180.8892437/mass_neutrino)/(box*300.0*(omega_m)**0.5/2.0/nc)
 #endif
@@ -186,6 +186,7 @@ program dist_init
   sec2 = mpi_wtime(ierr)
   if (rank == 0) write(*,*) "STOPPING INITIAL CONDITIONS: ", sec2
   if (rank == 0) write(*,*) "ELAPSED TIME: ", sec2-sec1
+  call mpi_barrier(mpi_comm_world, ierr)
 
   call mpi_finalize(ierr)
 
