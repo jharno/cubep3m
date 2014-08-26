@@ -94,7 +94,9 @@ integer(4) 								:: np_buf
 
 ! density projection arrays
 
+#ifndef NOPROJ
 real(4), dimension(nf_physical_dim,nf_physical_dim)        :: rp_buf,rho_pxy,rho_pxz,rho_pyz
+#endif
 
 ! arrays storing modification to mass_p for -DNEUTRINOS simulation
 real(4), dimension(2) :: mass_p_nudm_fac
@@ -144,7 +146,11 @@ common /divar / plan, iplan, fftw2_plan, fftw2_iplan
 common / divarp / PID
 #endif
 
-common / drvar / rho_pxy, rho_pxz, rho_pyz, rp_buf, f_mesh_mass!, cfmass, cfmass2, cftmass, cftmass2
+#ifdef NOPROJ
+common / drvar / f_mesh_mass
+#else
+common / drvar / rho_pxy, rho_pxz, rho_pyz, rp_buf, f_mesh_mass
+#endif
 
 common / ivar / slab_rank, num_projections, num_checkpoints, &
                 slab_coord, slab_neighbor, pen_neighbor_to, pen_neighbor_fm, mpi_comm_cart, cur_projection, cur_checkpoint, &

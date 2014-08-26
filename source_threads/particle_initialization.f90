@@ -125,10 +125,7 @@ print*, 'opening file:',ofile
 
       read(21) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
                cur_projection,cur_halofind,mass_p
-print*, 'nts=',nts
-print*, 'a=',a
-print*, 'z_checkpoint =',z_checkpoint
-print*, 'cur_checkpoint =',cur_checkpoint
+
       if (rank == 0) print *,'restarting simulation from z=',z_checkpoint(cur_checkpoint-1)
 
       if (np_local > max_np) then
