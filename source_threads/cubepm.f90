@@ -131,6 +131,16 @@ call mpi_barrier(mpi_comm_world,ierr)
     sec1a = mpi_wtime(ierr)
     if (rank == 0) write(*,*) "TIMESTEP_TIME [hrs] = ", (sec1a - sec1) / 3600.
 
+
+#ifdef WRITELOG
+    if(rank==0) then
+       open(unit=76,file=logfile,status='old',iostat=fstat,form='formatted',access='append')
+       write(unit=76,fmt='(f9.6') (sec1a-sec1)/3600.
+
+    endif
+#endif
+
+
 #ifdef MHD
 
 ! Note that the dimensions of u and b don't match the

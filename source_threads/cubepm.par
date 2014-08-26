@@ -16,6 +16,10 @@ character(*), parameter :: halofinds=  cubepm_root//'input/halofinds'
 character(*), parameter :: kernel_path=cubepm_root//'kernels/'
 character(*), parameter :: killtime_path=cubepm_root//'batch/killtime.txt' 
 
+#ifdef WRITELOG
+character (len=max_path) :: logfile = output_path//'log.txt'
+#endif
+
 !! cosmological parameters
 
 ! turn this off for pair-wise force tests
