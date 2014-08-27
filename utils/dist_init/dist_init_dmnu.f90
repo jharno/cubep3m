@@ -47,10 +47,6 @@ program dist_init
 #endif
 
 #ifdef NEUTRINOS
-#undef NU_RANDOM
-#define NU_RELFD
-  logical, parameter :: nu_random = .false.
-  logical, parameter :: nu_relfd = .true.
   integer, parameter :: nv=10000
   character(*), parameter :: cdfTable = 'CDFTable.txt'
   real(4), dimension(2,nv) :: cdf    !Col1 is v, col2 is cdf
@@ -678,8 +674,6 @@ end subroutine di_fftw
 #ifdef NEUTRINOS
     write(*,*) 'ratio_nudm_dim ', ratio_nudm_dim 
     write(*,*) 'Vphys2sim ',Vphys2sim
-    write(*,*) 'nu_random ', nu_random
-    write(*,*) 'nu_relfd ', nu_relfd    
 #endif
 
     call cpu_time(time2)
@@ -1830,8 +1824,7 @@ end function linear_interpolate
     thread = omp_get_thread_num() + 1
 #ifdef VELTRANSFER
     if (COMMAND == 0) then 
-        !! First time we call dm
-        !! We only need the positions
+        !! First time we call dm We only need the positions
         !$omp do schedule(dynamic)
         do k=1,np_node_dim
             k1=(nc/np)*(k-1)+1
@@ -1851,58 +1844,30 @@ end function linear_interpolate
         enddo
         !$omp end do
     else
-        !! Second time we call dm
-        !! Now we want velocity
-        !$omp do schedule(dynamic)
+        !! Second time we call dm we want velocity
+        !$omp do schedule(static,1) ordered
         do k=1,np_node_dim
             k1=(nc/np)*(k-1)+1
             pos_out = 1 + sizeof(np_local) + sizeof(header_garbage) + xsize2*(k-1)
             pos_in = 1 + xsize1*(k-1)
             read(unit=31,pos=pos_in) xvp(1:3,:,:,thread) !! catch from temp file
+            !$omp ordered
+            call random_number(xvp(4:6,:,:,thread))
+            !$omp end ordered
             do j=1,np_node_dim
                 j1=(nc/np)*(j-1)+1
                 do i=1,np_node_dim
                     i1=(nc/np)*(i-1)+1
-                
+
+                    rnum1 = xvp(4,i,j,thread)
+                    rnum2 = xvp(5,i,j,thread)
+                    rnum3 = xvp(6,i,j,thread)                
+
                     xvp(4,i,j,thread)=(phi(i1-1,j1,k1)-phi(i1+1,j1,k1))/2./(4.*pi)
                     xvp(5,i,j,thread)=(phi(i1,j1-1,k1)-phi(i1,j1+1,k1))/2./(4.*pi)
                     xvp(6,i,j,thread)=(phi(i1,j1,k1-1)-phi(i1,j1,k1+1))/2./(4.*pi)
 
 #ifdef NEUTRINOS
-#ifdef NU_RANDOM
-                    !! Uses Gaussian velocity distribution uniform random
-                    call random_number(rnum1)
-                    call random_number(rnum2)
-                    !! Convert to gaussian
-                    rnum3=2*pi*rnum1
-                    rnum4=sqrt(-2*log(rnum2))
-                    rnum1=rnum4*cos(rnum3)
-                    rnum2=rnum4*sin(rnum3)
-                    !! Convert to real gaussian using dispersion scale factor cancels out in 
-                    !! velocity dispersion and conversion factor sigma_nu = 181km/s / (mnu * a)
-                    rnum1 = rnum1*Vphys2sim*mfac 
-                    rnum2 = rnum2*Vphys2sim*mfac
-
-                    xvp(4,i,j,thread)=xvp(4,i,j,thread) + rnum1
-                    xvp(5,i,j,thread)=xvp(5,i,j,thread) + rnum2
-
-                    call random_number(rnum3)
-                    call random_number(rnum4)
-
-                    rnum3=2*pi*rnum3
-                    rnum4=sqrt(-2*log(rnum4))
-
-                    rnum3=rnum4*cos(rnum3)
-                    rnum3 = rnum3*Vphys2sim*mfac
-
-                    xvp(6,i,j,thread)=xvp(6,i,j,thread) + rnum3
-#else
-#ifdef NU_RELFD
-                    !! Use Fermi-Dirac velocity distribution
-                    call random_number(rnum1) !|vel|
-                    call random_number(rnum2) !costheta
-                    call random_number(rnum3) !phi
-
                     !! Convert to fermi-dirac
                     do l=1,nv
                        if (cdf(2,l).GT.rnum1) then
@@ -1918,15 +1883,12 @@ end function linear_interpolate
 
                     !! Convert to fermi-dirac with units rnum1<-rnum1*c*(kT/m)
                     rnum1 = rnum1 * ffac
-
                     rnum2 = rnum2*2.0-1.0 !convert to range 1,-1
                     rnum3 = rnum3*2.0*pi  !convert to range 0,2pi
 
                     xvp(4,i,j,thread)=xvp(4,i,j,thread) + rnum1*(1.0-rnum2**2)**0.5*cos(rnum3)*Vphys2sim
                     xvp(5,i,j,thread)=xvp(5,i,j,thread) + rnum1*(1.0-rnum2**2)**0.5*sin(rnum3)*Vphys2sim
                     xvp(6,i,j,thread)=xvp(6,i,j,thread) + rnum1*rnum2*Vphys2sim
-#endif
-#endif
 #endif
                 enddo
             enddo
@@ -1935,14 +1897,21 @@ end function linear_interpolate
         !$omp end do
     endif
 #else
-    !$omp do schedule(dynamic)
+    !$omp do schedule(static,1) ordered
     do k=1,np_node_dim
         k1=(nc/np)*(k-1)+1
         pos_out = 1 + sizeof(np_local) + sizeof(header_garbage) + xsize2*(k-1)
+        !$omp ordered
+        call random_number(xvp(4:6,:,:,thread))
+        !$omp end ordered
         do j=1,np_node_dim
             j1=(nc/np)*(j-1)+1
             do i=1,np_node_dim
                 i1=(nc/np)*(i-1)+1
+
+                 rnum1 = xvp(4,i,j,thread)
+                 rnum2 = xvp(5,i,j,thread)
+                 rnum3 = xvp(6,i,j,thread)
 
                  xvp(4,i,j,thread)=(phi(i1-1,j1,k1)-phi(i1+1,j1,k1))/2./(4.*pi)
                  xvp(5,i,j,thread)=(phi(i1,j1-1,k1)-phi(i1,j1+1,k1))/2./(4.*pi)
@@ -1954,35 +1923,6 @@ end function linear_interpolate
                  xvp(5,i,j,thread)=xvp(5,i,j,thread)*vf
                  xvp(6,i,j,thread)=xvp(6,i,j,thread)*vf
 #ifdef NEUTRINOS
-#ifdef NU_RANDOM
-                 !! Uses Gaussian velocity distribution uniform random
-                 call random_number(rnum1)
-                 call random_number(rnum2)
-                 !! Convert to gaussian
-                 rnum3=2*pi*rnum1
-                 rnum4=sqrt(-2*log(rnum2))
-                 rnum1=rnum4*cos(rnum3)
-                 rnum2=rnum4*sin(rnum3)
-                 !! Convert to real gaussian using dispersion scale factor cancels out in 
-                 !! velocity dispersion and conversion factor sigma_nu = 181km/s / (mnu * a)
-                 rnum1 = rnum1*Vphys2sim*mfac
-                 rnum2 = rnum2*Vphys2sim*mfac
-                 xvp(4,i,j,thread)=xvp(4,i,j,thread) + rnum1
-                 xvp(5,i,j,thread)=xvp(5,i,j,thread) + rnum2
-                 call random_number(rnum3)
-                 call random_number(rnum4)
-                 rnum3=2*pi*rnum3
-                 rnum4=sqrt(-2*log(rnum4))
-                 rnum3=rnum4*cos(rnum3)
-                 rnum3 = rnum3*Vphys2sim*mfac
-                 xvp(6,i,j,thread)=xvp(6,i,j,thread) + rnum3
-#else
-#ifdef NU_RELFD
-                 !! Use Fermi-Dirac velocity distribution
-                 call random_number(rnum1) !|vel|
-                 call random_number(rnum2) !costheta
-                 call random_number(rnum3) !phi
-
                  !! Convert to fermi-dirac
                  do l=1,nv
                     if (cdf(2,l).GT.rnum1) then
@@ -2004,8 +1944,7 @@ end function linear_interpolate
                  xvp(5,i,j,thread)=xvp(5,i,j,thread) + rnum1*(1.0-rnum2**2)**0.5*sin(rnum3)*Vphys2sim
                  xvp(6,i,j,thread)=xvp(6,i,j,thread) + rnum1*rnum2*Vphys2sim
 #endif
-#endif
-#endif
+
             enddo
         enddo
         write(unit=11,pos=pos_out) xvp(:,:,:,thread)
