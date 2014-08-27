@@ -104,7 +104,6 @@
 
       if (rank == 0) z_write = z_checkpoint(restart_checkpoint)
       call mpi_bcast(z_write,1,mpi_real,0,mpi_comm_world,ierr)
-print*, 'restart_checkpoint line number =', restart_checkpoint
       write(z_s,'(f7.3)') z_write
       z_s=adjustl(z_s)
 
@@ -113,7 +112,7 @@ print*, 'restart_checkpoint line number =', restart_checkpoint
 
       ofile=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'xv'// &
             rank_s(1:len_trim(rank_s))//'.dat'
-print*, 'opening file:',ofile
+      if (rank==0) print*, 'opening dark matter checkpoint file:',ofile
 
       open(unit=21, file=ofile, status="old", iostat=fstat, access="stream")
 
@@ -146,12 +145,12 @@ print*, 'opening file:',ofile
             read(21) xv(:,j)
          enddo
       enddo
- 
       close(21)
 
 #ifdef NEUTRINOS
         ofile=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'xv'// &
             rank_s(1:len_trim(rank_s))//'_nu.dat'
+        if (rank==0) print*, 'opening neutrino checkpoint file:',ofile
 
         open(unit=21, file=ofile, status="old", iostat=fstat, access="stream")
         if (fstat /= 0) then
@@ -182,8 +181,8 @@ print*, 'opening file:',ofile
                 read(21) xv(:,j)
             enddo
         enddo
-
         close(21)
+
 #endif
 
 #ifndef NEUTRINOS
@@ -376,7 +375,7 @@ print*, 'opening file:',ofile
       rank_s=adjustl(rank_s)
 
       ofile=ic_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'xv'//rank_s(1:len_trim(rank_s))//'.dat'
-      print *,'opening particle list:',ofile(1:len_trim(ofile))
+      if (rank==0) print *,'opening particle list:',ofile(1:len_trim(ofile))
 
       open(unit=20, file=ofile, status="old", iostat=fstat, access="stream")
       if (fstat /= 0) then

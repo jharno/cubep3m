@@ -15,6 +15,7 @@
     character (len=7) :: z_s  
 
     integer(kind=4) :: i,j,fstat,blocksize,num_writes,nplow,nphigh
+    integer(kind=4) :: cur_proj,cur_halo
     real(kind=4) :: z_write
 #ifdef NEUTRINOS
     integer(4) :: np_dm, np_nu, ind_check1, ind_check2
@@ -67,6 +68,12 @@
 !! Increment checkpoint counter so restart works on next checkpoint
 
     cur_checkpoint=cur_checkpoint+1
+    cur_proj = cur_projection
+    cur_halo = cur_halofind
+    if (projection_step) cur_proj = cur_proj + 1
+    if (halofind_step) cur_halo = cur_halo + 1
+
+
 
 !! This is the file header
 
@@ -97,14 +104,14 @@
 
 
     write(12) np_dm,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
-              cur_projection,cur_halofind,mass_p
+              cur_proj,cur_halo,mass_p
     write(22) np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
-              cur_projection,cur_halofind,mass_p
+              cur_proj,cur_halo,mass_p
 
 #else
 
     write(12) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
-              cur_projection,cur_halofind,mass_p
+              cur_proj,cur_halo,mass_p
 
 #endif
 
@@ -189,7 +196,7 @@
 !! This is the file header
 
     write(15) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
-              cur_projection,cur_halofind,mass_p
+              cur_proj,cur_halo,mass_p
 
 !! Particle list
 !    do i=0,nodes-1
@@ -217,6 +224,13 @@
 !! Write gas checkpoint
     call mpi_tvd_mhd_state_output(output_path,nts,t,z_s)
 #endif
+
+if (rank==0) then
+   print*, 'current steps recorded in xv file:'
+   print*, 'cur_checkpoint =', cur_checkpoint
+   print*, 'cur_projection =', cur_proj
+   print*, 'cur_halofind   =', cur_halo
+endif
 
     write(*,*) 'Finished checkpoint:',rank
 

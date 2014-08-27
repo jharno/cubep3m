@@ -873,11 +873,12 @@
 
     call mpi_reduce(np_local,np_max,1,mpi_integer, &
                            mpi_max,0,mpi_comm_world,ierr)
+    min_den_buf = real(np_max)*density_buffer/real(max_np)
     if(rank==0) write(*,*) '*************** Density_buffer Analysis *************'
     if(rank==0) write(*,*) '*** max np allowed             = ' , max_np, '    ***'
     if(rank==0) write(*,*) '*** max np_local (with ghosts) = ' , np_max, '    ***'
     !if(rank==0) write(*,*) '*** no density_buffer          = ', real(max_np)/density_buffer, ' ***'
-    if(rank==0) write(*,*) '*** min density_buffer allowed = ', real(np_max)*density_buffer/real(max_np), ' ***'
+    if(rank==0) write(*,*) '*** min density_buffer allowed = ', min_den_buf, ' ***'
 
     if(rank==0) write(*,*) '*************** SendRecv Analysis *******************'
     if(rank==0) write(*,*) '*** max np_buf                 = ' , np_buf_max, '    ***'

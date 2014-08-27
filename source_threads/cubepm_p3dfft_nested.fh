@@ -91,6 +91,9 @@ integer(8), dimension(max_np)                       :: PID
 #endif
 integer(4), dimension(hoc_nc_l:hoc_nc_h,hoc_nc_l:hoc_nc_h,hoc_nc_l:hoc_nc_h) :: hoc
 integer(4) 								:: np_buf
+#ifdef WRITELOG
+real(4) :: min_den_buf
+#endif
 
 ! density projection arrays
 
@@ -150,6 +153,10 @@ common / divarp / PID
 common / drvar / f_mesh_mass
 #else
 common / drvar / rho_pxy, rho_pxz, rho_pyz, rp_buf, f_mesh_mass
+#endif
+
+#ifdef WRITELOG
+common / lvar / min_den_buf
 #endif
 
 common / ivar / slab_rank, num_projections, num_checkpoints, &

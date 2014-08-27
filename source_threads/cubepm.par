@@ -55,7 +55,7 @@ integer(4), parameter   :: max_nts = 6000
 
 #ifdef NEUTRINOS
 logical, parameter  :: restart_ic =  .true.
-integer(4), parameter   :: restart_checkpoint = 2 ! line number in input/checkpoint
+integer(4), parameter   :: restart_checkpoint = 1 ! line number in input/checkpoint
 #else
 logical, parameter	:: restart_ic =  .false.
 integer(4), parameter   :: restart_checkpoint = 1 ! line number in input/checkpoint 
