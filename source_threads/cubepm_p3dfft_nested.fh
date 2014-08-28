@@ -91,9 +91,7 @@ integer(8), dimension(max_np)                       :: PID
 #endif
 integer(4), dimension(hoc_nc_l:hoc_nc_h,hoc_nc_l:hoc_nc_h,hoc_nc_l:hoc_nc_h) :: hoc
 integer(4) 								:: np_buf
-#ifdef WRITELOG
 real(4) :: min_den_buf
-#endif
 
 ! density projection arrays
 
