@@ -36,7 +36,7 @@ implicit none
        !allocate(old(seedsize))
 
 
-       seedfile = ic_path//'seed0.init'  !or any other seed files available
+       seedfile = ic_path//'node0/seed0.init'  !or any other seed files available
        open(11,file=seedfile)
        write(*,*) 'opened ',seedfile
        do i = 1,seedsize 
