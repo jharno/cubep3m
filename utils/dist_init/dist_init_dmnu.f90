@@ -1845,23 +1845,31 @@ end function linear_interpolate
         !$omp end do
     else
         !! Second time we call dm we want velocity
+#ifdef NEUTRINOS
         !$omp do schedule(static,1) ordered
+#else
+        !$omp do schedule(dynamic)
+#endif
         do k=1,np_node_dim
             k1=(nc/np)*(k-1)+1
             pos_out = 1 + sizeof(np_local) + sizeof(header_garbage) + xsize2*(k-1)
             pos_in = 1 + xsize1*(k-1)
             read(unit=31,pos=pos_in) xvp(1:3,:,:,thread) !! catch from temp file
+#ifdef NEUTRINOS
             !$omp ordered
             call random_number(xvp(4:6,:,:,thread))
             !$omp end ordered
+#endif
             do j=1,np_node_dim
                 j1=(nc/np)*(j-1)+1
                 do i=1,np_node_dim
                     i1=(nc/np)*(i-1)+1
 
+#ifdef NEUTRINOS
                     rnum1 = xvp(4,i,j,thread)
                     rnum2 = xvp(5,i,j,thread)
                     rnum3 = xvp(6,i,j,thread)                
+#endif
 
                     xvp(4,i,j,thread)=(phi(i1-1,j1,k1)-phi(i1+1,j1,k1))/2./(4.*pi)
                     xvp(5,i,j,thread)=(phi(i1,j1-1,k1)-phi(i1,j1+1,k1))/2./(4.*pi)
@@ -1897,21 +1905,29 @@ end function linear_interpolate
         !$omp end do
     endif
 #else
+#ifdef NEUTRINOS
     !$omp do schedule(static,1) ordered
+#else
+    !$omp do schedule(dynamic)
+#endif
     do k=1,np_node_dim
         k1=(nc/np)*(k-1)+1
         pos_out = 1 + sizeof(np_local) + sizeof(header_garbage) + xsize2*(k-1)
+#ifdef NEUTRINOS
         !$omp ordered
         call random_number(xvp(4:6,:,:,thread))
         !$omp end ordered
+#endif
         do j=1,np_node_dim
             j1=(nc/np)*(j-1)+1
             do i=1,np_node_dim
                 i1=(nc/np)*(i-1)+1
 
+#ifdef NEUTRINOS
                  rnum1 = xvp(4,i,j,thread)
                  rnum2 = xvp(5,i,j,thread)
                  rnum3 = xvp(6,i,j,thread)
+#endif
 
                  xvp(4,i,j,thread)=(phi(i1-1,j1,k1)-phi(i1+1,j1,k1))/2./(4.*pi)
                  xvp(5,i,j,thread)=(phi(i1,j1-1,k1)-phi(i1,j1+1,k1))/2./(4.*pi)
