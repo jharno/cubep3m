@@ -153,9 +153,7 @@ common / drvar / f_mesh_mass
 common / drvar / rho_pxy, rho_pxz, rho_pyz, rp_buf, f_mesh_mass
 #endif
 
-#ifdef WRITELOG
 common / lvar / min_den_buf
-#endif
 
 common / ivar / slab_rank, num_projections, num_checkpoints, &
                 slab_coord, slab_neighbor, pen_neighbor_to, pen_neighbor_fm, mpi_comm_cart, cur_projection, cur_checkpoint, &
