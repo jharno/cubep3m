@@ -308,12 +308,19 @@
               do im_n = 1, 3
                 i2_n(im_n) = mod(i1_n(im_n)-1,mesh_scale) + 1
               enddo
-              ipl_n(i2_n(1),i2_n(2),i2_n(3)) = ipl_n(i2_n(1),i2_n(2),i2_n(3))+1
-              if (ipl_n(i2_n(1),i2_n(2),i2_n(3))>max_llf) then
-                print *,'exceeded max_llf',max_llf,i1_n,i2_n,ipl_n
-                stop
+#if defined(NEUTRINOS) && defined(NONUPP)
+              if (PID(pp_n) < 2) then
+#endif
+                  ipl_n(i2_n(1),i2_n(2),i2_n(3)) = ipl_n(i2_n(1),i2_n(2),i2_n(3))+1
+                  if (ipl_n(i2_n(1),i2_n(2),i2_n(3))>max_llf) then
+                    print *,'exceeded max_llf',max_llf,i1_n,i2_n,ipl_n
+                    stop
+                  endif
+                  llf(ipl_n(i2_n(1),i2_n(2),i2_n(3)),i2_n(1),i2_n(2),i2_n(3),thread,thread_n)=pp_n
+#if defined(NEUTRINOS) && defined(NONUPP)
               endif
-              llf(ipl_n(i2_n(1),i2_n(2),i2_n(3)),i2_n(1),i2_n(2),i2_n(3),thread,thread_n)=pp_n
+#endif
+
 #endif
 !********************************************************
 
@@ -483,18 +490,25 @@
                 pp_n = hoc(i_n, j_n, k_n)
 
                 do; if (pp_n == 0) exit
-                    ii_n = floor(xv(1,pp_n))+1
-                    jj_n = floor(xv(2,pp_n))+1
-                    kk_n = floor(xv(3,pp_n))+1
 
-                    if (ii_n >= cic_fine_l(1,thread) .and. ii_n <= cic_fine_h(1,thread) .and. &
-                        jj_n >= cic_fine_l(2,thread) .and. jj_n <= cic_fine_h(2,thread) .and. &
-                        kk_n >= cic_fine_l(3,thread) .and. kk_n <= cic_fine_h(3,thread)) then
+#if defined(NEUTRINOS) && defined(NONUPP)
+                    if (PID(pp_n) < 2) then 
+#endif                
+                        ii_n = floor(xv(1,pp_n))+1
+                        jj_n = floor(xv(2,pp_n))+1
+                        kk_n = floor(xv(3,pp_n))+1
 
-                        ll_fine(pp_n,thread) = hoc_fine(ii_n-cic_fine_l(1,thread)+1, jj_n-cic_fine_l(2,thread)+1, kk_n-cic_fine_l(3,thread)+1,thread)
-                        hoc_fine(ii_n-cic_fine_l(1,thread)+1, jj_n-cic_fine_l(2,thread)+1, kk_n-cic_fine_l(3,thread)+1,thread)=pp_n
+                        if (ii_n >= cic_fine_l(1,thread) .and. ii_n <= cic_fine_h(1,thread) .and. &
+                            jj_n >= cic_fine_l(2,thread) .and. jj_n <= cic_fine_h(2,thread) .and. &
+                            kk_n >= cic_fine_l(3,thread) .and. kk_n <= cic_fine_h(3,thread)) then
 
-                    endif
+                            ll_fine(pp_n,thread) = hoc_fine(ii_n-cic_fine_l(1,thread)+1, jj_n-cic_fine_l(2,thread)+1, kk_n-cic_fine_l(3,thread)+1,thread)
+                            hoc_fine(ii_n-cic_fine_l(1,thread)+1, jj_n-cic_fine_l(2,thread)+1, kk_n-cic_fine_l(3,thread)+1,thread)=pp_n
+
+                        endif
+#if defined(NEUTRINOS) && defined(NONUPP)
+                    endif 
+#endif
 
                     pp_n = ll(pp_n)
                 enddo
@@ -624,6 +638,7 @@
 #ifdef NEUTRINOS
                                     !! Determine if partilce pp2_n is a neutrino or dark matter
                                     fpp2_n = mass_p_nudm_fac(PID(pp2_n))
+
 #endif
 
 #ifdef DEBUG_PP_EXT
