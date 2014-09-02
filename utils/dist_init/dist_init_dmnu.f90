@@ -148,7 +148,7 @@ program dist_init
   equivalence (slab,cube)
 
   !! Common block
-  common /rvar/ tf, pkm, pkn, phi_buf
+  common /rvar/ tf, pkm, pkn, phi_buf, xvp
   common / equiv1 / phi
   common / equiv2 / slab
 
