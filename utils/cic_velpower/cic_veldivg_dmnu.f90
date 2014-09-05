@@ -150,7 +150,7 @@ program cic_crossvel
   integer(4), parameter :: hoc_pass_depth = 2*nc_buf
   real(4), parameter    :: rnf_buf = real(nfine_buf)
   integer(4), parameter :: num_ngbhs = (2*nc_buf+1)**3
-  integer(4), parameter :: nfine_buf_h = 64
+  integer(4), parameter :: nfine_buf_h = 128
   integer(4), parameter :: mesh_scale_h = 8
   integer(4), parameter :: nc_buf_h = nfine_buf_h / mesh_scale_h
   integer(4), parameter :: nm_node_dim_h = nc_node_dim / mesh_scale_h
@@ -4233,6 +4233,7 @@ end subroutine velocity_curl
     integer :: i, j, k, kg, ig, mg, jg
     integer :: k1, k2
     real    :: kr, kx, ky, kz, w1, w2, pow, x, y, z, sync_x, sync_y, sync_z, kernel
+    real    :: kxx, kyy, kzz, krr
 #ifdef SLAB
     real, dimension(3,nc,nc_slab) :: pkt
 #else
@@ -4241,7 +4242,9 @@ end subroutine velocity_curl
     real, dimension(3, nc) :: pktsum
 
     real(8), dimension(nc) :: kcen, kcount
+    real(8), dimension(nc) :: kcen2
     real(8), dimension(nc) :: kcensum, kcountsum
+    real(8), dimension(nc) :: kcensum2
     real    :: kavg
     integer :: ind, dx, dxy
 
@@ -4259,6 +4262,8 @@ end subroutine velocity_curl
     kcount(:) = 0.
     kcensum(:) = 0.
     kcountsum(:) = 0.
+    kcen2(:)   = 0.
+    kcensum2(:) = 0.
 
 #ifndef SLAB
     dx  = fsize(1)
@@ -4359,12 +4364,21 @@ end subroutine velocity_curl
                     pkt(2,k2,k)=pkt(2,k2,k)+w2*pow**2
                     pkt(3,k2,k)=pkt(3,k2,k)+w2
 
+                    kxx = sin(2.*pi*kx/ncr)
+                    kyy = sin(2.*pi*ky/ncr)
+                    kzz = sin(2.*pi*kz/ncr)
+                    krr = sqrt(kxx**2+kyy**2+kzz**2)
+
 #ifdef LOGBIN
                     kcen(k1) = kcen(k1) + w1 * log10(kr)
                     kcen(k2) = kcen(k2) + w2 * log10(kr)
+                    kcen2(k1) = kcen2(k1) + w1 * log10(krr)
+                    kcen2(k2) = kcen2(k2) + w2 * log10(krr)
 #else
                     kcen(k1) = kcen(k1) + w1 * kr
                     kcen(k2) = kcen(k2) + w2 * kr
+                    kcen2(k1) = kcen2(k1) + w1 * krr
+                    kcen2(k2) = kcen2(k2) + w2 * krr
 #endif
 
                     kcount(k1) = kcount(k1) + w1
@@ -4387,6 +4401,7 @@ end subroutine velocity_curl
     !! Reduce to rank 0
     call mpi_reduce(pkt(:,:,1),pktsum,3*nc,mpi_real,mpi_sum,0,mpi_comm_world,ierr)
     call mpi_reduce(kcen, kcensum, nc, mpi_real8, mpi_sum, 0, mpi_comm_world, ierr)
+    call mpi_reduce(kcen2, kcensum2, nc, mpi_real8, mpi_sum, 0, mpi_comm_world, ierr)
     call mpi_reduce(kcount, kcountsum, nc, mpi_real8, mpi_sum, 0, mpi_comm_world, ierr)
 
     !! Divide by weights
@@ -4423,7 +4438,13 @@ end subroutine velocity_curl
                 !! Divide by k^2 for divergence 
                 if (command == 1) then
 
-                    pk(1:2, k) = pk(1:2, k) / pk(3, k)**2
+#ifdef LOGBIN
+                    kavg = real(10**(kcensum2(k) / kcountsum(k)), kind=4)
+#else
+                    kavg = real(kcensum2(k) / kcountsum(k), kind=4)
+#endif
+                    kavg = kavg / box * ncr
+                    pk(1:2, k) = pk(1:2, k) / kavg**2 
 
                 endif
 
