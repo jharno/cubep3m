@@ -13,6 +13,9 @@ max_np_h       = 1000000
 # Set this ture if using GROUPS algorithm
 groups = True
 
+# Set this true if using HALOMASS algorithm
+halomass = False 
+
 # Set this true if using P3DFFT for pencil decomposition
 pencil = True 
 
@@ -64,7 +67,10 @@ if pencil:
 else:
     recv_cube = 4 * (nc_node_dim**2 * nc_slab * nodes_slab)
     slab_work = 4 * ((nc + 2) * nc * nc_slab)
-xp_buf = 3 * 4 * np_buffer
+if halomass:
+    xp_buf = 4 * 4 * np_buffer
+else:
+    xp_buf = 3 * 4 * np_buffer
 
 maxeq1 = max(den, slab_work, recv_cube, xp_buf)
 
@@ -78,7 +84,7 @@ if maxeq1 != den:
     print
 
 # Second statement (slab, cube) 
-xvp = 4 * (6 * max_np) 
+xvp = 4 * (3 * max_np) 
 cube = 4 * nc_node_dim**3
 if pencil:
     slab = 4 * nc * nc_node_dim * (nc_pen+2)
@@ -94,19 +100,34 @@ if maxeq2 != slab:
     print "cube = ", cube
     print
 
+# Third statement (slab2, send_buf)
+slab2 = slab
+if halomass:
+    send_buf = 4 * 4 * np_buffer
+else:
+    send_buf = 4 * 3 * np_buffer
+
+maxeq3 = max(slab2, send_buf)
+
+if maxeq3 != slab2:
+
+    print "Change equivalence and common block accordingly:"
+    print "slab2    = ", slab2
+    print "send_buf = ", send_buf
+    print
+
 #
 # Compute the sizes of other big arrays
 #
 
 xvp_dm = xvp / ratio_nudm_dim**3
-xvp_h  = 4 * 6 * max_np_h
+if halomass: xvp_h  = 4 * 4 * max_np_h
+else: xvp_h  = 4 * 3 * max_np_h
 if groups : GID = max_np
 else: GID = 0
-send_buf = 4 * 3 * np_buffer
 recv_buf = send_buf
 den_buf = 4 * (nc_node_dim+2)**2
-slab2 = slab
 
-print "Total memory used by large arrays [GB]: ", (maxeq1 + maxeq2 + xvp + xvp_dm + xvp_h + send_buf + recv_buf + GID + den_buf + slab2) / 1024.**3 
+print "Total memory used by large arrays [GB]: ", (maxeq1 + maxeq2 + maxeq3 + xvp + xvp_dm + xvp_h + recv_buf + GID + den_buf) / 1024.**3 
 print
 
