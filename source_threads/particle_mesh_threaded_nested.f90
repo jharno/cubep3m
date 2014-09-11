@@ -154,7 +154,11 @@
 #else
 
 #ifdef NEUTRINOS
+#ifdef NUPID
+                        rho_f(i1_n(1),i1_n(2),i1_n(3),thread) = rho_f(i1_n(1),i1_n(2),i1_n(3),thread)+mass_p*mass_p_nudm_fac(nuPIDmap(PID(pp_n)))
+#else
                         rho_f(i1_n(1),i1_n(2),i1_n(3),thread) = rho_f(i1_n(1),i1_n(2),i1_n(3),thread)+mass_p*mass_p_nudm_fac(PID(pp_n))
+#endif
 #else
                         rho_f(i1_n(1),i1_n(2),i1_n(3),thread) = rho_f(i1_n(1),i1_n(2),i1_n(3),thread)+mass_p
 #endif
@@ -386,7 +390,11 @@
                     pp1_n = llf(ip_n, im_n, jm_n, km_n, thread, thread_n)
 #ifdef NEUTRINOS
                     !! Determine if partilce pp1_n is a neutrino or dark matter
+#ifdef NUPID
+                    fpp1_n = mass_p_nudm_fac(nuPIDmap(PID(pp1_n)))
+#else
                     fpp1_n = mass_p_nudm_fac(PID(pp1_n)) 
+#endif
 #endif
                     do jp_n = ip_n+1, ipl_n(im_n,jm_n,km_n)
                       pp2_n = llf(jp_n, im_n, jm_n, km_n, thread, thread_n)
@@ -400,7 +408,11 @@
 #endif
 #ifdef NEUTRINOS
                         !! Determine if particle pp2_n is a neutrino or dark matter
+#ifdef NUPID
+                        fpp2_n = mass_p_nudm_fac(nuPIDmap(PID(pp2_n)))
+#else
                         fpp2_n = mass_p_nudm_fac(PID(pp2_n)) 
+#endif
                         pp_force_accum(:, ip_n, thread, thread_n) = pp_force_accum(:, ip_n, thread, thread_n) - force_pp_n*fpp2_n
                         pp_force_accum(:, jp_n, thread, thread_n) = pp_force_accum(:, jp_n, thread, thread_n) + force_pp_n*fpp1_n
 #else
@@ -602,7 +614,11 @@
 
 #ifdef NEUTRINOS
                         !! Determine if partilce pp1_n is a neutrino or dark matter
+#ifdef NUPID
+                        fpp1_n = mass_p_nudm_fac(nuPIDmap(PID(pp1_n)))
+#else
                         fpp1_n = mass_p_nudm_fac(PID(pp1_n))
+#endif
 #endif
  
                         kp_min_n = k_n
@@ -637,8 +653,11 @@
 
 #ifdef NEUTRINOS
                                     !! Determine if partilce pp2_n is a neutrino or dark matter
+#ifdef NUPID
+                                    fpp2_n = mass_p_nudm_fac(nuPIDmap(PID(pp2_n)))
+#else
                                     fpp2_n = mass_p_nudm_fac(PID(pp2_n))
-
+#endif
 #endif
 
 #ifdef DEBUG_PP_EXT
@@ -721,7 +740,11 @@
 
 #ifdef NEUTRINOS
                                             !! Determine if partilce pp2_n is a neutrino or dark matter
+#ifdef NUPID
+                                            fpp2_n = mass_p_nudm_fac(nuPIDmap(PID(pp2_n)))
+#else
                                             fpp2_n = mass_p_nudm_fac(PID(pp2_n))
+#endif
 #endif
                            
                                         enddo !! pp2_n
@@ -733,8 +756,13 @@
 
 #ifdef NEUTRINOS
                                         !! Determine what species pp1_n and pp2_n are 
+#ifdef NUPID
+                                        fpp1_n = mass_p_nudm_fac(nuPIDmap(PID(pp1_n)))
+                                        fpp2_n = mass_p_nudm_fac(nuPIDmap(PID(pp2_n)))
+#else
                                         fpp1_n = mass_p_nudm_fac(PID(pp1_n))
                                         fpp2_n = mass_p_nudm_fac(PID(pp2_n))
+#endif
 #endif
                         
                                     enddo !! pp1_n
@@ -746,7 +774,11 @@
 
 #ifdef NEUTRINOS
                                     !! Determine if partilce pp1_n is a neutrino or dark matter
+#ifdef NUPID
+                                    fpp1_n = mass_p_nudm_fac(nuPIDmap(PID(pp1_n)))
+#else
                                     fpp1_n = mass_p_nudm_fac(PID(pp1_n))
+#endif
 #endif
                         
                                 enddo !! ip_n                    

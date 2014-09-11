@@ -11,12 +11,13 @@
     integer*8 :: np_total,npl8
     character(len=max_path) :: ofile
     character(len=4) :: rank_s
-    character(len=7) :: z_s
+    character(len=7) :: z_s, z_s2
+    integer(4) :: np_nu
 #ifdef CHECK_IP
     real(8) :: xva(6)
 #endif
 #ifdef NEUTRINOS
-    integer(4) :: np_dm, np_nu
+    integer(4) :: np_dm
     integer(8) :: np_total_nu
 
     !! Check that the PID flag is also defined
@@ -24,7 +25,6 @@
     write(*,*) "ERROR: Using Neutrinos but PID is not enabled !!"
     call mpi_abort(mpi_comm_world,ierr,ierr)
 #endif
-
 #endif
 
     fstat=0
@@ -183,9 +183,44 @@
         enddo
         close(21)
 
+#ifdef NUPID
+      !! DM PIDs are 0 
+      do j = 1, np_local
+        PID(j) = 0
+      enddo
+
+      !! Read neutrino PIDs
+      ofile=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'PID'// &
+            rank_s(1:len_trim(rank_s))//'_nu.dat'
+
+      open(unit=21, file=ofile, status="old", iostat=fstat, access="stream")
+      if (fstat /= 0) then
+        write(*,*) 'error opening checkpoint'
+        write(*,*) 'rank',rank,'file:',ofile
+        call mpi_abort(mpi_comm_world,ierr,ierr)
+      endif
+
+      read(21) np_dm,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy
+
+      if (np_dm /= np_nu) then
+        write(*,*) "ERROR WITH NEUTRINO PID FILE: ", rank, np_dm, np_nu, ofile
+        call mpi_abort(mpi_comm_world,ierr,ierr)
+      endif
+
+      blocksize=(32*1024*1024)/24
+      num_writes=np_nu/blocksize+1
+
+      do i = 1,num_writes
+         nplow=(i-1)*blocksize+1 + np_local
+         nphigh=min(i*blocksize,np_nu) + np_local
+         do j=nplow,nphigh
+            read(21) PID(j)
+         enddo
+      enddo
+      close(21)
 #endif
 
-#ifndef NEUTRINOS
+#else
 #ifdef PID_FLAG
 
       ofile=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'PID'// &
@@ -312,9 +347,45 @@
         enddo
 
         close(21)
+
+#ifdef NUPID
+      !! DM PIDs are 0 
+      do j = 1, np_local
+        PID(j) = 0
+      enddo
+
+      !! Read neutrino PIDs
+      ofile=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//reskill_prefix//'PIDres'// &
+            rank_s(1:len_trim(rank_s))//'_nu.dat'
+
+      open(unit=21, file=ofile, status="old", iostat=fstat, access="stream")
+      if (fstat /= 0) then
+        write(*,*) 'error opening checkpoint'
+        write(*,*) 'rank',rank,'file:',ofile
+        call mpi_abort(mpi_comm_world,ierr,ierr)
+      endif
+
+      read(21) np_dm,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy
+
+      if (np_dm /= np_nu) then
+        write(*,*) "ERROR WITH NEUTRINO PID FILE: ", rank, np_dm, np_nu, ofile
+        call mpi_abort(mpi_comm_world,ierr,ierr)
+      endif
+
+      blocksize=(32*1024*1024)/24
+      num_writes=np_nu/blocksize+1
+
+      do i = 1,num_writes
+         nplow=(i-1)*blocksize+1 + np_local
+         nphigh=min(i*blocksize,np_nu) + np_local
+         do j=nplow,nphigh
+            read(21) PID(j)
+         enddo
+      enddo
+      close(21)
 #endif
 
-#ifndef NEUTRINOS
+#else
 #ifdef PID_FLAG
 
       ofile=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//reskill_prefix//'PIDres'// &
@@ -370,6 +441,10 @@
 
       write(z_s,'(f7.3)') z_i
       z_s=adjustl(z_s)
+#ifdef NUPID
+      write(z_s2,'(f7.3)') z_i_nu
+      z_s2=adjustl(z_s2)
+#endif
 
       write(rank_s,'(i4)') rank
       rank_s=adjustl(rank_s)
@@ -392,38 +467,23 @@
       read(20) xv(:,:np_local)
       close(20)
 
-#ifdef NEUTRINOS
-
-        !
-        ! Open neutrino ICs
-        !
-
-        ofile=ic_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'xv'//rank_s(1:len_trim(rank_s))//'_nu.dat'
-        print *,'opening particle list:',ofile(1:len_trim(ofile))
-
-        open(unit=20, file=ofile, status="old", iostat=fstat, access="stream")
+#ifdef NUPID
+        !! Write PIDs to a binary file so that when neutrinos restart at z_i_nu they can read in the PIDs.
+        np_nu = np_local * ratio_nudm_dim**3
+        dummy = 0
+        ofile=ic_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s2(1:len_trim(z_s2))//'PID'//rank_s(1:len_trim(rank_s))//'_nu.dat'
+        open(unit=21, file=ofile, iostat=fstat, access="stream")
         if (fstat /= 0) then
-            write(*,*) 'error opening initial conditions'
-            write(*,*) 'rank',rank,'file:',ofile
+            write(*,*) 'error writing initial PID', ofile
             call mpi_abort(mpi_comm_world,ierr,ierr)
         endif
-      
-        !! Read header
-        read(20) np_nu,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy 
+        write(21) np_nu,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy
+        do i = 1, np_nu
+            write(21) int(i,kind=8) + int(rank*int(np_nu,kind=8),kind=8)
+        enddo
+        close(21)
+#endif
 
-        !! Check if we have enough memory to store particles
-        if (np_local+np_nu > max_np) then
-            write(*,*) 'too many particles to store'
-            write(*,*) 'rank',rank,'np_local',np_local+np_nu,'max_np',max_np
-            call mpi_abort(mpi_comm_world,ierr,ierr)
-        endif
-
-        read(20) xv(:,np_local+1:np_local+np_nu) 
-        close(20)
-
-#endif 
-
-#ifndef NEUTRINOS
 #ifdef PID_FLAG
         write(*,*) 'np_local before delete', np_local, 'rank =', rank
         !call delete_particles
@@ -454,7 +514,6 @@
         write(21) PID(:np_local)
         close(21)
 
-#endif
 #endif
 
 ! ---------------------------------------------------------------------------------------------
@@ -487,6 +546,7 @@
     if (rank == 0) write(*,*) 'total dark matter mass =', mass_p * np_total
 
 #ifdef NEUTRINOS
+#ifndef NUPID
     !
     ! Assign 1 byte integer PIDs
     !
@@ -497,6 +557,7 @@
     do i = np_local+1, np_local+np_nu
         PID(i) = 2 !! All neutrinos will have a PID of 2 
     enddo
+#endif
 
     !
     ! Print some stats to screen

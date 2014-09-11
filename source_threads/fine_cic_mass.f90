@@ -63,8 +63,13 @@ subroutine fine_cic_mass(pp,tile,thread)
       dx1(:) = i1(:) - x(:)
       dx2(:) = 1 - dx1(:)
 
+#ifdef NUPID
+      dx1(1) = mass_p * dx1(1) * mass_p_nudm_fac(nuPIDmap(PID(pp)))
+      dx2(1) = mass_p * dx2(1) * mass_p_nudm_fac(nuPIDmap(PID(pp)))
+#else
       dx1(1) = mass_p * dx1(1) * mass_p_nudm_fac(PID(pp)) 
       dx2(1) = mass_p * dx2(1) * mass_p_nudm_fac(PID(pp))
+#endif
 
       rho_f(i1(1),i1(2),i1(3),thread) = rho_f(i1(1),i1(2),i1(3),thread) &
                                        + dx1(1) * dx1(2) * dx1(3)
@@ -101,7 +106,11 @@ subroutine fine_cic_mass(pp,tile,thread)
       dx1(:) = i1(:) - x(:)
       dx2(:) = 1 - dx1(:)
 
+#ifdef NUPID
+      if ( (ispec == 1 .and. PID(pp) == 0) .or. (ispec > 1 .and. PID(pp) > 0) ) then
+#else
       if (PID(pp) == ispec) then !! This is the particle we want 
+#endif
 
           dx1(1) = mass_p * dx1(1) * fpp
           dx2(1) = mass_p * dx2(1) * fpp

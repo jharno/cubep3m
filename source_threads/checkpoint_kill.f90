@@ -44,15 +44,18 @@
 
     ofile=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'xvres'// &
          rank_s(1:len_trim(rank_s))//'.dat'
-#ifndef NEUTRINOS
+#ifdef NEUTRINOS
+    ofile_nu=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'xvres'// &
+         rank_s(1:len_trim(rank_s))//'_nu.dat'
+#ifdef NUPID
+    ofile2_nu=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'PIDres'// &
+         rank_s(1:len_trim(rank_s))//'_nu.dat'
+#endif
+#else
 #ifdef PID_FLAG
     ofile2=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'PIDres'// &
          rank_s(1:len_trim(rank_s))//'.dat'
 #endif
-#endif
-#ifdef NEUTRINOS
-    ofile_nu=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'xvres'// &
-         rank_s(1:len_trim(rank_s))//'_nu.dat'
 #endif
 
 !! Open checkpoint
@@ -74,19 +77,32 @@
 
     !! Open neutrino checkpoint file
     open(unit=22, file=ofile_nu, status="replace", iostat=fstat, access="stream")
-
     if (fstat /= 0) then
       write(*,*) 'error opening checkpoint file for write'
       write(*,*) 'rank',rank,'file:',ofile_nu
       call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
 
+#ifdef NUPID
+    !! Open neutrino PID file
+    open(unit=23, file=ofile2_nu, status="replace", iostat=fstat, access="stream")
+    if (fstat /= 0) then
+      write(*,*) 'error opening checkpoint file for write'
+      write(*,*) 'rank',rank,'file:',ofile2_nu
+      call mpi_abort(mpi_comm_world,ierr,ierr)
+    endif
+#endif
+
     !! Determine how many dark matter and neutrino particles this rank has
     np_dm = 0
     np_nu = 0
 
     do i = 1, np_local
+#ifdef NUPID
+        if (PID(i) == 0) then
+#else
         if (PID(i) == 1) then
+#endif
             np_dm = np_dm + 1
         else
             np_nu = np_nu + 1
@@ -95,11 +111,14 @@
 
     if (rank == 0) write(*,*) "checkpoint np_dm, np_nu = ", np_dm, np_nu
 
-
     write(12) np_dm,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
               cur_projection,cur_halofind,mass_p
     write(22) np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
               cur_projection,cur_halofind,mass_p
+#ifdef NUPID
+    write(23) np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint, &
+              cur_projection,cur_halofind,mass_p
+#endif
 
 #else
 
@@ -117,7 +136,11 @@
       nplow=(i-1)*blocksize+1
       nphigh=min(i*blocksize,np_local)
       do j=nplow,nphigh
+#ifdef NUPID
+        if (PID(j) == 0) then
+#else
         if (PID(j) == 1) then
+#endif
 #ifdef DISP_MESH
             write(12) xv(1:3,j) - shake_offset
             write(12) xv(4:6,j)
@@ -132,6 +155,9 @@
 #else
             write(22) xv(:,j)
 #endif
+#ifdef NUPID
+            write(23) PID(j)
+#endif
             ind_check2 = ind_check2 + 1
         endif
       enddo
@@ -139,6 +165,9 @@
 
     close(12)
     close(22)
+#ifdef NUPID
+    close(23)
+#endif
 
     !! Consistency check
     if (ind_check1 .ne. np_dm .or. ind_check2 .ne. np_nu) then

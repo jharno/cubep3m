@@ -70,7 +70,11 @@ real(4), dimension(max_buf)						:: fast_buf
 integer(4), dimension(max_buf/2)					:: fast_pos
 #ifdef PID_FLAG
 #ifdef NEUTRINOS
+#ifdef NUPID
+integer(8), dimension(max_buf)                        :: send_buf_PID, recv_buf_PID
+#else
 integer(1), dimension(max_buf)                        :: send_buf_PID, recv_buf_PID
+#endif
 #else
 integer(8), dimension(max_buf)                        :: send_buf_PID, recv_buf_PID
 #endif
@@ -82,7 +86,11 @@ real(4), dimension(6,max_np) 						:: xv
 integer(4), dimension(max_np) 						:: ll
 #ifdef PID_FLAG
 #ifdef NEUTRINOS
+#ifdef NUPID
+integer(8), dimension(max_np)                       :: PID
+#else
 integer(1), dimension(max_np)                       :: PID
+#endif
 #else
 integer(8), dimension(max_np)                       :: PID
 #endif

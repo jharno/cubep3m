@@ -140,7 +140,11 @@ subroutine halofind
     !! Exclude neutrinos from being included in halos by
     !! making the halofinder think they have already been inclued in a halo
     do i = 1, np_local
+#ifdef NUPID
+        if (PID(i) > 0) then
+#else
         if (PID(i) > 1) then
+#endif
             hpart_odc(i) = 1
             hpart_vir(i) = 1
         endif
@@ -319,7 +323,11 @@ subroutine halofind
     np_halo_local_odc = 0
     do ii = 1, np_local
 #ifdef NEUTRINOS
+#ifdef NUPID
+        if (PID(ii) == 0 .and. hpart_odc(ii) == 1) np_halo_local_odc = np_halo_local_odc + 1
+#else
         if (PID(ii) == 1 .and. hpart_odc(ii) == 1) np_halo_local_odc = np_halo_local_odc + 1
+#endif
 #else
         if (hpart_odc(ii) == 1) np_halo_local_odc = np_halo_local_odc + 1
 #endif
@@ -329,7 +337,11 @@ subroutine halofind
     np_halo_local_vir = 0
     do ii = 1, np_local
 #ifdef NEUTRINOS
+#ifdef NUPID
+        if (PID(ii) == 0 .and. hpart_vir(ii) == 1) np_halo_local_vir = np_halo_local_vir + 1
+#else
         if (PID(ii) == 1 .and. hpart_vir(ii) == 1) np_halo_local_vir = np_halo_local_vir + 1
+#endif
 #else
         if (hpart_vir(ii) == 1) np_halo_local_vir = np_halo_local_vir + 1
 #endif
@@ -754,7 +766,11 @@ subroutine neutrino_properties(HPOS, RSEARCH, XMEAN, VMEAN, NNU)
                 pp = hoc(i, j, k)
                 do
                     if (pp == 0) exit
+#ifdef NUPID
+                    if (PID(pp) > 0) then !! this is a neutrino
+#else
                     if (PID(pp) > 1) then !! this is a neutrino
+#endif
                         p(:) = xv(:3, pp)
                         dr   = HPOS(:) - p(:)
                         r    = sqrt(dr(1)**2 + dr(2)**2 + dr(3)**2)

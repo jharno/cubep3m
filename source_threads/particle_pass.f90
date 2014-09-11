@@ -171,10 +171,17 @@
     call mpi_wait(rrequest,rstatus,rierr)
 
 #ifdef NEUTRINOS
+#ifdef NUPID
+    call mpi_isend(send_buf_PID,np_buf,MPI_integer8,cart_neighbor(6), &
+         tag,mpi_comm_world,srequest,sierr)
+    call mpi_irecv(recv_buf_PID,nppx,MPI_integer8,cart_neighbor(5), &
+         tag,mpi_comm_world,rrequest,rierr)
+#else
     call mpi_isend(send_buf_PID,np_buf,MPI_integer1,cart_neighbor(6), &
          tag,mpi_comm_world,srequest,sierr)
     call mpi_irecv(recv_buf_PID,nppx,MPI_integer1,cart_neighbor(5), &
          tag,mpi_comm_world,rrequest,rierr)
+#endif
 #else
     call mpi_isend(send_buf_PID,np_buf,MPI_integer8,cart_neighbor(6), &
          tag,mpi_comm_world,srequest,sierr)
@@ -292,10 +299,17 @@
     call mpi_wait(rrequest,rstatus,rierr)
 
 #ifdef NEUTRINOS
+#ifdef NUPID
+    call mpi_isend(send_buf_PID,np_buf,MPI_integer8,cart_neighbor(5), &
+         tag,mpi_comm_world,srequest,sierr)
+    call mpi_irecv(recv_buf_PID,npmx,MPI_integer8,cart_neighbor(6), &
+         tag,mpi_comm_world,rrequest,rierr)
+#else
     call mpi_isend(send_buf_PID,np_buf,MPI_integer1,cart_neighbor(5), &
          tag,mpi_comm_world,srequest,sierr)
     call mpi_irecv(recv_buf_PID,npmx,MPI_integer1,cart_neighbor(6), &
          tag,mpi_comm_world,rrequest,rierr)
+#endif
 #else
     call mpi_isend(send_buf_PID,np_buf,MPI_integer8,cart_neighbor(5), &
          tag,mpi_comm_world,srequest,sierr)
@@ -451,10 +465,17 @@
     call mpi_wait(rrequest,rstatus,rierr)
 
 #ifdef NEUTRINOS
+#ifdef NUPID
+    call mpi_isend(send_buf_PID,np_buf,MPI_integer8,cart_neighbor(3), &
+         tag,mpi_comm_world,srequest,sierr)
+    call mpi_irecv(recv_buf_PID,npmy,MPI_integer8,cart_neighbor(4), &
+         tag,mpi_comm_world,rrequest,rierr)
+#else
     call mpi_isend(send_buf_PID,np_buf,MPI_integer1,cart_neighbor(3), &
          tag,mpi_comm_world,srequest,sierr)
     call mpi_irecv(recv_buf_PID,npmy,MPI_integer1,cart_neighbor(4), &
          tag,mpi_comm_world,rrequest,rierr)
+#endif
 #else
     call mpi_isend(send_buf_PID,np_buf,MPI_integer8,cart_neighbor(3), &
          tag,mpi_comm_world,srequest,sierr)
@@ -580,10 +601,17 @@
     call mpi_wait(rrequest,rstatus,rierr)
 
 #ifdef NEUTRINOS
+#ifdef NUPID
+    call mpi_isend(send_buf_PID,np_buf,MPI_integer8,cart_neighbor(4), &
+         tag,mpi_comm_world,srequest,sierr)
+    call mpi_irecv(recv_buf_PID,nppy,MPI_integer8,cart_neighbor(3), &
+         tag,mpi_comm_world,rrequest,rierr)
+#else
     call mpi_isend(send_buf_PID,np_buf,MPI_integer1,cart_neighbor(4), &
          tag,mpi_comm_world,srequest,sierr)
     call mpi_irecv(recv_buf_PID,nppy,MPI_integer1,cart_neighbor(3), &
          tag,mpi_comm_world,rrequest,rierr)
+#endif
 #else
     call mpi_isend(send_buf_PID,np_buf,MPI_integer8,cart_neighbor(4), &
          tag,mpi_comm_world,srequest,sierr)
@@ -724,10 +752,17 @@
     call mpi_wait(rrequest,rstatus,rierr)
 
 #ifdef NEUTRINOS
+#ifdef NUPID
+    call mpi_isend(send_buf_PID,np_buf,MPI_integer8,cart_neighbor(2), &
+         tag,mpi_comm_world,srequest,sierr)
+    call mpi_irecv(recv_buf_PID,nppz,MPI_integer8,cart_neighbor(1), &
+         tag,mpi_comm_world,rrequest,rierr)
+#else
     call mpi_isend(send_buf_PID,np_buf,MPI_integer1,cart_neighbor(2), &
          tag,mpi_comm_world,srequest,sierr)
     call mpi_irecv(recv_buf_PID,nppz,MPI_integer1,cart_neighbor(1), &
          tag,mpi_comm_world,rrequest,rierr)
+#endif
 #else
     call mpi_isend(send_buf_PID,np_buf,MPI_integer8,cart_neighbor(2), &
          tag,mpi_comm_world,srequest,sierr)
@@ -835,10 +870,17 @@
 #ifdef PID_FLAG
 
 #ifdef NEUTRINOS
+#ifdef NUPID
+    call mpi_isend(send_buf_PID,np_buf,MPI_integer8,cart_neighbor(1), &
+         tag,mpi_comm_world,srequest,sierr)
+    call mpi_irecv(recv_buf_PID,npmz,MPI_integer8,cart_neighbor(2), &
+         tag,mpi_comm_world,rrequest,rierr)
+#else
     call mpi_isend(send_buf_PID,np_buf,MPI_integer1,cart_neighbor(1), &
          tag,mpi_comm_world,srequest,sierr)
     call mpi_irecv(recv_buf_PID,npmz,MPI_integer1,cart_neighbor(2), &
          tag,mpi_comm_world,rrequest,rierr)
+#endif
 #else
     call mpi_isend(send_buf_PID,np_buf,MPI_integer8,cart_neighbor(1), &
          tag,mpi_comm_world,srequest,sierr)
