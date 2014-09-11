@@ -1375,10 +1375,8 @@ subroutine pack_pencils
 
     integer(4) :: i,j,k,i0,i1,k1
     integer(4) :: pen_slice,tag,rtag
-    integer(4) :: num_elements !possibly should be double so as not to 
-                               !overflow for large runs, but integer*8 
-                               !might be unsupported by MPI
-
+    integer(8) :: num_elements_i8
+    integer(4) :: num_elements
     integer(4), dimension(2*nodes_dim) :: requests
     integer(4), dimension(MPI_STATUS_SIZE,2*nodes_dim) :: wait_status
     integer(4) nc_pen_break, breakup
@@ -1389,12 +1387,12 @@ subroutine pack_pencils
     !
 
     breakup = 1
-    num_elements = nc_node_dim * nc_node_dim * nc_pen
-    passGB = 4. * num_elements / 1024.**3
+    num_elements_i8 = int(nc_node_dim,kind=8) * nc_node_dim * nc_pen
+    passGB = 4. * num_elements_i8 / 1024.**3
     if (passGB > 1.) then
         breakup = 2**ceiling(log(passGB)/log(2.))
     endif
-    num_elements = num_elements / breakup
+    num_elements = num_elements_i8 / breakup
 
     !
     ! Send the data from cube to recv_cube
@@ -1497,6 +1495,7 @@ subroutine unpack_pencils
 
     integer(4) :: i,j,k,i0,i1,k1
     integer(4) :: pen_slice,num_elements,tag,rtag
+    integer(8) :: num_elements_i8
     integer(4), dimension(2*nodes_dim) :: requests
     integer(4), dimension(MPI_STATUS_SIZE,2*nodes_dim) :: wait_status
     integer(4) nc_pen_break, breakup
@@ -1522,12 +1521,12 @@ subroutine unpack_pencils
     !
 
     breakup = 1
-    num_elements = nc_node_dim * nc_node_dim * nc_pen
-    passGB = 4. * num_elements / 1024.**3
+    num_elements_i8 = int(nc_node_dim,kind=8) * nc_node_dim * nc_pen
+    passGB = 4. * num_elements_i8 / 1024.**3
     if (passGB > 1.) then
         breakup = 2**ceiling(log(passGB)/log(2.))
     endif
-    num_elements = num_elements / breakup
+    num_elements = num_elements_i8 / breakup
 
     !
     ! Put this data back into cube
