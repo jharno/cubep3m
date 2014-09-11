@@ -62,6 +62,8 @@ subroutine halofind
     ! Find halo candidates based on local overdensities for each tile
     !
 
+    num_candidates = 0
+
     do i = 1, tiles_node
         tile(3) = (i-1) / (tiles_node_dim * tiles_node_dim)
         j = i - tile(3) * tiles_node_dim * tiles_node_dim
