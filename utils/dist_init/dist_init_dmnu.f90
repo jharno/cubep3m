@@ -138,18 +138,24 @@ program dist_init
   real, dimension(0:nc_node_dim+1,0:nc_node_dim+1) :: phi_buf
 
   !! Particles arrays for subroutine dm
+#ifdef openmp
   real, dimension(6,np_node_dim,np_node_dim,num_threads) :: xvp
-  
+#else
+  real, dimension(6,np_node_dim,np_node_dim,1) :: xvp
+#endif
+
   !! Timing variables
   real(8) :: sec1, sec2
 
   !! Equivalence arrays to save memory
-  equivalence (phi,slab_work,recv_cube) 
+  !equivalence (phi,slab_work,recv_cube) 
+  equivalence (slab_work,phi,recv_cube) 
   equivalence (slab,cube)
 
   !! Common block
   common /rvar/ tf, pkm, pkn, phi_buf, xvp
-  common / equiv1 / phi
+  !common / equiv1 / phi
+  common / equiv1 / slab_work
   common / equiv2 / slab
 
   call mpi_initialize
@@ -157,7 +163,15 @@ program dist_init
   sec1 = mpi_wtime(ierr)
   if (rank == 0) write(*,*) "STARTING INITIAL CONDITIONS: ", sec1
 
+#ifdef openmp
   call omp_set_num_threads(num_threads)
+  sec2 = mpi_wtime(ierr)
+  if (rank == 0) print*, 'Note: compile with openmp: num_threads=', num_threads
+#else
+  call omp_set_num_threads(1)
+  sec2 = mpi_wtime(ierr)
+  if (rank == 0) print*, 'Note: compile without openmp: num_threads=', num_threads
+#endif
 
   if (rank == 0) call writeparams
 
