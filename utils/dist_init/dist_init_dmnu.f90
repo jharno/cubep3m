@@ -148,14 +148,12 @@ program dist_init
   real(8) :: sec1, sec2
 
   !! Equivalence arrays to save memory
-  !equivalence (phi,slab_work,recv_cube) 
-  equivalence (slab_work,phi,recv_cube) 
+  equivalence (phi,slab_work,recv_cube) 
   equivalence (slab,cube)
 
   !! Common block
   common /rvar/ tf, pkm, pkn, phi_buf, xvp
-  !common / equiv1 / phi
-  common / equiv1 / slab_work
+  common / equiv1 / phi
   common / equiv2 / slab
 
   call mpi_initialize
