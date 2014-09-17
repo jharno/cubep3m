@@ -29,9 +29,12 @@ no_extpp = True
 # Set this true if not using projections
 no_proj = True
 
+# Set this true if you are turning off openmp in ICs
+no_openmp_ICs = False
+
 # These set the total number of threads
-cores          = 4
-nested_threads = 6
+cores          = 8
+nested_threads = 2
 
 #
 # These ones are usually not changed
@@ -345,6 +348,9 @@ nc_pen = nc / nodes_dim**2
 nc_slab     = nc / nodes
 nodes_slab  = nodes_dim**2
 nodes_pen   = nodes_dim
+np_node_dim = nc_node_dim / 2
+num_threads_ic = cores * nested_threads 
+if no_openmp_ICs: num_threads_ic = 1
 
 #
 # Determine size of largest arrays
@@ -356,6 +362,7 @@ slab        = 4 * (nc + 2) * nc * nc_slab
 slab_work   = 4 * (nc + 2) * nc * nc_slab
 phi         = 4 * (nc_node_dim + 2)**3
 phi_buf     = 4 * (nc_node_dim + 2)**2
+xvp         = 4 * 6 * np_node_dim**2 * num_threads_ic 
 
 # Changes if P3DFFT is used instead of slab decomposition on the fine mesh.
 if pencil:
@@ -369,15 +376,35 @@ if pencil:
 
 bytes_eq1 = max(phi, slab_work, recv_cube)
 bytes_eq2 = max(slab, cube)
-bytes_oth = phi_buf
+bytes_oth = phi_buf + xvp
+
+#
+# Determine memory usage of large P3DFFT arrays if applicable
+#
+
+bytes_p3dfft = 0
+
+if pencil:
+
+    if nodes_dim == 1:
+        nm = int(nc_node_dim * nc_node_dim * (nc_node_dim+2) / 2)
+    else:
+        nm = int(nc_node_dim * (nc_node_dim + nodes_dim) * (nc_node_dim + 2./nodes_dim) / 2.)
+
+    buf1 = 4 * 2 * nm
+    buf2 = 4 * 2 * nm
+    R    = 4 * 2 * nm
+    bytes_p3dfft = buf1 + buf2 + R
 
 #
 # Print memory usage
 #
 
-totalbytes = bytes_eq1 + bytes_eq2 + bytes_oth
+totalbytes = bytes_eq1 + bytes_eq2 + bytes_oth + bytes_p3dfft
 
-print "TOTAL MEMORY USAGE: " + str(totalbytes/1024.**3) + " GB"
+print "TOTAL MEMORY USAGE:  " + str(totalbytes/1024.**3) + " GB"
+if pencil:
+    print "P3DFFT MEMORY USAGE: " + str(bytes_p3dfft/1024.**3) + " GB"
 print
 
 #
