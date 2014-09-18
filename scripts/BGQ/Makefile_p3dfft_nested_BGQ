@@ -1,0 +1,138 @@
+SHELL = /bin/sh
+
+FC=mpif90
+
+P3DFFT_LIB=/home/p/pen/emberson/lib/p3dfft_2.5.1/lib
+P3DFFT_INC=/home/p/pen/emberson/lib/p3dfft_2.5.1/include
+
+LDLIBS= -lp3dfft -lfftw3f_omp -lfftw3f -lm -ldl 
+
+FFLAGS=-q64 -O3 -qhot -qarch=qp -qtune=qp -WF,-DDIAG,-DNGP,-DPPINT,-DMPI_TIME,-DLRCKCORR,-DNGPH,-DDISP_MESH,-DCHECKPOINT_KILL,-DNESTED_OMP,-DNEUTRINOS,-DPID_FLAG
+
+OBJS=checkpoint.o checkpoint_kill.o coarse_cic_mass.o coarse_cic_mass_buffer.o coarse_force_p3dfft.o coarse_force_buffer.o coarse_mass.o coarse_max_dt.o coarse_mesh.o coarse_power_p3dfft.o coarse_velocity.o cubepm.o delete_particles.o p3dfft_coarse.o fine_cic_mass.o fine_cic_mass_buffer.o fine_ngp_mass.o halofind_particles.o fft_fine.o init_projection.o kernel_checkpoint.o kernel_initialization_p3dfft.o link_list.o move_grid_back.o mpi_initialization_p3dfft.o particle_initialization.o particle_mesh_threaded_nested.o particle_pass.o projection.o indexedsort.o timers.o timestep.o update_position.o variable_initialization.o 
+
+run: cubep3m_p3dfft
+
+cubep3m_p3dfft: $(OBJS)
+	$(FC) $(FFLAGS) -qsmp=nested_par $^ -o $@ -L$(SCINET_FFTW_LIB) -L$(P3DFFT_LIB) $(LDLIBS) 
+
+cubepm.o: cubepm.F90 
+	$(FC) $(FFLAGS) -qsmp=nested_par -c $<  
+
+checkpoint.o: checkpoint.F90 
+	$(FC) $(FFLAGS) -c $<
+
+checkpoint_kill.o: checkpoint_kill.F90
+	$(FC) $(FFLAGS) -c $<
+
+coarse_cic_mass.o: coarse_cic_mass.F90
+	$(FC) $(FFLAGS) -qsmp=nested_par -c $<
+
+coarse_cic_mass_buffer.o: coarse_cic_mass_buffer.F90
+	$(FC) $(FFLAGS) -qsmp=nested_par -c $<
+
+coarse_force_p3dfft.o: coarse_force_p3dfft.F90
+	$(FC) $(FFLAGS) -qsmp=nested_par -c $<
+
+coarse_force_buffer.o: coarse_force_buffer.F90
+	$(FC) $(FFLAGS) -c $<
+
+coarse_mass.o: coarse_mass.F90 
+	$(FC) $(FFLAGS) -qsmp=nested_par -c $<
+
+coarse_max_dt.o: coarse_max_dt.F90
+	$(FC) $(FFLAGS) -c $<
+
+coarse_mesh.o: coarse_mesh.F90
+	$(FC) $(FFLAGS) -c $<
+
+coarse_power_p3dfft.o: coarse_power_p3dfft.F90
+	$(FC) $(FFLAGS) -c $<
+
+coarse_velocity.o: coarse_velocity.F90 
+	$(FC) $(FFLAGS) -qsmp=nested_par -c $<
+
+delete_particles.o: delete_particles.F90
+	$(FC) $(FFLAGS) -c $<
+
+p3dfft_coarse.o: p3dfft_coarse.F90
+	$(FC) $(FFLAGS) -I$(SCINET_FFTW_INC) -I$(P3DFFT_INC) -c $<
+
+fine_cic_mass.o: fine_cic_mass.F90
+	$(FC) $(FFLAGS) -c $<
+
+fine_cic_mass_buffer.o: fine_cic_mass_buffer.F90
+	$(FC) $(FFLAGS) -c $<
+
+#fine_mesh.o: fine_mesh.f90 
+#	$(FC) $(FFLAGS) -openmp -c $<
+
+fine_ngp_mass.o: fine_ngp_mass.F90
+	$(FC) $(FFLAGS) -c $<
+
+#fine_velocity.o: fine_velocity.f90 
+#	$(FC) $(FFLAGS) -c $<
+
+halofind_particles.o: halofind_particles.F90
+	$(FC) $(FFLAGS) -c $<
+
+fft_fine.o: fft_fine.F90
+	$(FC) $(FFLAGS) -I$(SCINET_FFTW_INC) -qsmp=nested_par -c $<
+
+init_projection.o: init_projection.F90
+	$(FC) $(FFLAGS) -c $<
+
+kernel_checkpoint.o: kernel_checkpoint.F90
+	$(FC) $(FFLAGS) -c $<
+
+kernel_initialization_p3dfft.o: kernel_initialization_p3dfft.F90
+	$(FC) $(FFLAGS) -c $<
+
+link_list.o: link_list.F90
+	$(FC) $(FFLAGS) -c $<
+
+move_grid_back.o: move_grid_back.F90
+	$(FC) $(FFLAGS) -c $<
+
+mpi_initialization_p3dfft.o: mpi_initialization_p3dfft.F90
+	$(FC) $(FFLAGS) -c $<
+
+particle_initialization.o: particle_initialization.F90
+	$(FC) $(FFLAGS) -c $<
+
+particle_mesh_threaded_nested.o: particle_mesh_threaded_nested.F90
+	$(FC) $(FFLAGS) -qsmp=nested_par -c $<
+
+particle_pass.o: particle_pass.F90
+	$(FC) $(FFLAGS) -c $<
+
+projection.o: projection.F90
+	$(FC) $(FFLAGS) -c $<
+
+#report_pair.o: report_pair.F90
+#	$(FC) $(FFLAGS) -c $<
+
+#report_force.o: report_force.F90
+#	$(FC) $(FFLAGS) -c $<
+
+#set_pair.o: set_pair.F90
+#	$(FC) $(FFLAGS) -c $<
+
+indexedsort.o: indexedsort.F90
+	$(FC) $(FFLAGS) -c $<
+
+timers.o: timers.F90
+	$(FC) $(FFLAGS) -c $<
+
+timestep.o: timestep.F90 
+	$(FC) $(FFLAGS) -c $<
+
+update_position.o: update_position.F90
+	$(FC) $(FFLAGS) -qsmp=nested_par -c $<
+
+variable_initialization.o: variable_initialization.F90
+	$(FC) $(FFLAGS) -c $<
+
+clean:
+	rm -f *.o *.pc cubep3m cubep3m_p3dfft 
+
