@@ -1550,8 +1550,8 @@ subroutine veltransfer
     ind = 0
 #endif
 #ifdef SLAB
-    !! This loop has not been tested and we are not certain it gives correct results with SLAB (works for pencil)
-    write(*,*) "WARNING: THIS LOOP HAS NOT BEEN TESTED WITH -DSLAB ... USE WITH CAUTION"
+    !$omp parallel default(shared) private(k, j, i, kz, ky,kx, kphys, kr, interpMTF, interpVTF, w1, w2, ii)
+    !$omp do schedule(dynamic)
     do k = 1, nc_slab
         kg=k+nc_slab*rank
         if (kg .lt. hc+2) then
@@ -1559,17 +1559,20 @@ subroutine veltransfer
         else
             kz=kg-1-nc
         endif
-        kz=2*sin(pi*kz/ncr)
         do j = 1, nc
             if (j .lt. hc+2) then
                 ky=j-1
             else
                 ky=j-1-nc
             endif
-            ky=2*sin(pi*ky/ncr)
             do i = 1, nc+2, 2
                 kx=(i-1)/2
-                kx=2*sin(pi*kx/ncr)
+                
+                kphys = 2*pi*sqrt(kx**2+ky**2+kz**2)/box
+                kx = 2*sin(pi*kx/ncr)
+                ky = 2*sin(pi*ky/ncr)
+                kz = 2*sin(pi*kz/ncr)
+
 #else
     !$omp parallel default(shared) private(k, j, i, kg, mg, jg, ig, ind, kz, ky, kx, kphys, kr, interpMTF, interpVTF, w1, w2, ii)
     !$omp do schedule(dynamic)
@@ -1644,10 +1647,8 @@ subroutine veltransfer
             enddo
         enddo
     enddo
-#ifndef SLAB
     !$omp end do 
     !$omp end parallel 
-#endif
 
     !
     ! Inverse FFT potential field

@@ -18,6 +18,7 @@ srfac = 1
 
 # Set this true if using P3DFFT for pencil decomposition
 pencil = True
+pencil_ICs = True
 
 # Set this true if using neutrinos
 neutrinos = True
@@ -28,6 +29,9 @@ no_extpp = True
 
 # Set this true if not using projections
 no_proj = True
+
+# Set this true if not using PIDs (ignored if neutrinos is True)
+no_pid = True 
 
 # Set this true if you are turning off openmp in ICs
 no_openmp_ICs = False
@@ -203,6 +207,12 @@ if neutrinos:
     send_buf_PID        = 1 * max_buf
     recv_buf_PID        = 1 * max_buf
 
+# Changes if PIDs are not used
+if no_pid and not neutrinos:
+    PID                 = 0
+    send_buf_PID        = 0 
+    recv_buf_PID        = 0 
+
 #
 # Determine memory usage of equivalenced arrays
 #
@@ -365,7 +375,7 @@ phi_buf     = 4 * (nc_node_dim + 2)**2
 xvp         = 4 * 6 * np_node_dim**2 * num_threads_ic 
 
 # Changes if P3DFFT is used instead of slab decomposition on the fine mesh.
-if pencil:
+if pencil_ICs:
     recv_cube   = 4 * nc_node_dim**2 * nc_pen * nodes_pen
     slab        = 4 * nc * nc_node_dim * (nc_pen+2)
     slab_work   = 4 * nc * nc_node_dim * (nc_pen+2)
@@ -384,7 +394,7 @@ bytes_oth = phi_buf + xvp
 
 bytes_p3dfft = 0
 
-if pencil:
+if pencil_ICs:
 
     if nodes_dim == 1:
         nm = int(nc_node_dim * nc_node_dim * (nc_node_dim+2) / 2)
