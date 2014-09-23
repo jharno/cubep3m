@@ -27,6 +27,7 @@
     dt_pp_ext_acc=1000.0
 #endif
 #endif
+    dt_vmax=1000.0
 
 !! zero everything else 
 

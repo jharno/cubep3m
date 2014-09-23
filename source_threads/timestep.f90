@@ -17,8 +17,23 @@
     real(4) :: cfl,amax,cmax,D1,D2,dta,dtc
 #endif
 
+    real(4) :: vmax, vmax_local
+
     nts = nts + 1
     if (nts /= 1) dt_old = dt
+
+    !! Compute maximum timestep allowed by the maximum velocity
+    vmax_local = 0.
+    do n = 1, np_local
+        vmax_local = max(vmax_local, maxval(abs(xv(4:6,n))))
+    enddo 
+    call mpi_allreduce(vmax_local, vmax, 1, mpi_real, mpi_max, mpi_comm_world, ierr)
+#ifdef DISP_MESH
+    dt_vmax = 2.*(nf_buf-4*mesh_scale)/vmax - dt_old 
+#else
+    dt_vmax = 2.*nf_buf/vmax - dt_old
+#endif
+    if (rank == 0) write(*,*) 'vmax and maximum timestep from vmax=',vmax,dt_vmax
 
 #ifdef MHD
 !! calculate cfl for gas and calculate minimum gas timestep
@@ -37,6 +52,7 @@
     dtc=0.7/cmax
     dt_f_acc=0.7*dt_f_acc
     dt_c_acc=0.7*dt_c_acc
+    dt_vmax=0.7*dt_vmax
 #ifdef PPINT
     dt_pp_acc=0.7*dt_pp_acc
 #endif
@@ -45,6 +61,7 @@
     dtc=cfl/cmax
     dt_f_acc=cfl*dt_f_acc
     dt_c_acc=cfl*dt_c_acc
+    dt_vmax=cfl*dt_vmax
 #ifdef PPINT
     dt_pp_acc=cfl*dt_pp_acc
 #endif
@@ -93,22 +110,22 @@
 #ifdef MHD
 #ifdef PPINT
 #ifdef PP_EXT
-        dt = min(dt_e,dt_f_acc,dt_pp_acc,dt_pp_ext_acc,dt_c_acc,dta,dtc)
+        dt = min(dt_e,dt_f_acc,dt_vmax,dt_pp_acc,dt_pp_ext_acc,dt_c_acc,dta,dtc)
 #else
-        dt = min(dt_e,dt_f_acc,dt_pp_acc,dt_c_acc,dta,dtc)
+        dt = min(dt_e,dt_f_acc,dt_vmax,dt_pp_acc,dt_c_acc,dta,dtc)
 #endif
 #else
-        dt = min(dt_e,dt_f_acc,dt_c_acc,dta,dtc)
+        dt = min(dt_e,dt_f_acc,dt_vmax,dt_c_acc,dta,dtc)
 #endif
 #else
 #ifdef PPINT
 #ifdef PP_EXT
-        dt = min(dt_e,dt_f_acc,dt_pp_acc,dt_pp_ext_acc,dt_c_acc)
+        dt = min(dt_e,dt_f_acc,dt_vmax,dt_pp_acc,dt_pp_ext_acc,dt_c_acc)
 #else
-        dt = min(dt_e,dt_f_acc,dt_pp_acc,dt_c_acc)
+        dt = min(dt_e,dt_f_acc,dt_vmax,dt_pp_acc,dt_c_acc)
 #endif
 #else
-        dt = min(dt_e,dt_f_acc,dt_c_acc)
+        dt = min(dt_e,dt_f_acc,dt_vmax,dt_c_acc)
 #endif
 #endif
 
@@ -175,19 +192,19 @@
         write(*,*) 'Expansion   : ',ra
 #ifdef MHD
 #ifdef PPINT
-        write(*,*) 'Time step   : ',dt,dt_e,dt_f_acc,dt_pp_acc,dt_c_acc,dta,dtc
+        write(*,*) 'Time step   : ',dt,dt_e,dt_f_acc,dt_vmax,dt_pp_acc,dt_c_acc,dta,dtc
 #else
-        write(*,*) 'Time step   : ',dt,dt_e,dt_f_acc,dt_c_acc,dta,dtc
+        write(*,*) 'Time step   : ',dt,dt_e,dt_f_acc,dt_vmax,dt_c_acc,dta,dtc
 #endif
 #else
 #ifdef PPINT
 #ifdef PP_EXT
-        write(*,*) 'Time step   : ',dt,dt_e,dt_f_acc,dt_pp_acc,dt_pp_ext_acc,dt_c_acc
+        write(*,*) 'Time step   : ',dt,dt_e,dt_f_acc,dt_vmax,dt_pp_acc,dt_pp_ext_acc,dt_c_acc
 #else
-        write(*,*) 'Time step   : ',dt,dt_e,dt_f_acc,dt_pp_acc,dt_c_acc
+        write(*,*) 'Time step   : ',dt,dt_e,dt_f_acc,dt_vmax,dt_pp_acc,dt_c_acc
 #endif
 #else
-        write(*,*) 'Time step   : ',dt,dt_e,dt_f_acc,dt_c_acc
+        write(*,*) 'Time step   : ',dt,dt_e,dt_f_acc,dt_vmax,dt_c_acc
 #endif
 #endif
 
@@ -203,21 +220,21 @@
 #ifdef PPINT
         if (pair_infall) then
 !          dt = min(0.1/sqrt(G*mass_p/cur_sep**2),dt_f_acc,dt_pp_acc,dt_c_acc,dt_max_v)
-          dt = min(0.05/sqrt(G*mass_p/cur_sep**2),dt_f_acc,dt_pp_acc,dt_c_acc)
+          dt = min(0.05/sqrt(G*mass_p/cur_sep**2),dt_f_acc,dt_vmax,dt_pp_acc,dt_c_acc)
         else
 #ifdef PP_EXT
-           dt = min(1.0,dt_f_acc,dt_pp_acc,dt_pp_ext_acc,dt_c_acc)
+           dt = min(1.0,dt_f_acc,dt_vmax,dt_pp_acc,dt_pp_ext_acc,dt_c_acc)
 #else
-           dt = min(1.0,dt_f_acc,dt_pp_acc,dt_c_acc)
+           dt = min(1.0,dt_f_acc,dt_vmax,dt_pp_acc,dt_c_acc)
 #endif
         endif
 #else
-        dt = min(1.0,dt_f_acc,dt_c_acc)
+        dt = min(1.0,dt_f_acc,dt_vmax,dt_c_acc)
 #endif
         if (pairwise_ic) dt=1.0
         if (shake_test_ic) dt=1.0
         t = t + dt
-        if (rank == 0) write(*,*) 'nts=',nts,'t=',t,'dt=',dt,dt_f_acc,dt_pp_acc, dt_pp_ext_acc,dt_c_acc,dt_max_v,0.1/sqrt(G*mass_p/cur_sep**2)
+        if (rank == 0) write(*,*) 'nts=',nts,'t=',t,'dt=',dt,dt_f_acc,dt_vmax,dt_pp_acc, dt_pp_ext_acc,dt_c_acc,dt_max_v,0.1/sqrt(G*mass_p/cur_sep**2)
   
       endif
 

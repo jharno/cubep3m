@@ -17,7 +17,7 @@ logical, dimension(cores) :: firstfftw2
 ! :: simulation variables
 
 integer(4) :: wc_counter, count_i,count_f,count_r,nts, np_local
-real(4) :: a, a_mid, t, tau, dt, dt_old, dt_gas, mass_p, dt_f_acc, da, dt_c_acc, freeze
+real(4) :: a, a_mid, t, tau, dt, dt_old, dt_gas, mass_p, dt_f_acc, dt_vmax, da, dt_c_acc, freeze
 real(4) :: shake_offset(3), cur_sep, dt_pp_acc,dt_pp_ext_acc, dt_max_v, kill_time
 
 ! :: checkpoint and projection variables
@@ -163,7 +163,7 @@ common / ivar / slab_rank, num_projections, num_checkpoints, &
                 
 common / rvar / a, a_mid, t, tau, dt, dt_old, dt_gas, mass_p, mass_p_nudm_fac, kern_f, &
                 kern_c, slab, f_force_max, pp_force_max, &
-                dt_f_acc, dt_pp_acc, dt_pp_ext_acc, da, dt_c_acc, a_projection, z_projection, a_checkpoint, &
+                dt_f_acc, dt_vmax, dt_pp_acc, dt_pp_ext_acc, da, dt_c_acc, a_projection, z_projection, a_checkpoint, &
                 z_checkpoint, a_halofind, z_halofind, kill_time, ps_c, ps_c_sum, freeze, &
                 den_peak, rdist, cmplx_rho_c, &
                 shake_offset, cur_sep, dt_max_v, pp_force_accum, &
