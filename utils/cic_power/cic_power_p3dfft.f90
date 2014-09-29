@@ -348,9 +348,9 @@ end subroutine read_shake_offsets_list
     rank_string=adjustl(rank_string)
 
     if(z_write .eq. z_i) then
-       check_name=ic_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//'xv'//rank_string(1:len_trim(rank_string))//'.ic'
+       check_name=ic_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//'xv'//rank_string(1:len_trim(rank_string))//'.ic'
     else
-       check_name=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_string(1:len_trim(z_string))//'xv'// &
+       check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'xv'// &
                rank_string(1:len_trim(rank_string))//'.dat'
     endif
 
