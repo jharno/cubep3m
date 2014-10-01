@@ -27,6 +27,8 @@
 !!   -Dwrite_poisson: Writes the gridded Poisson field to binary files.
 !!   -DGROUPS: Instead of using PoissinNoise subroutine, remove noise by splitting each population into two groups.
 !!   -DHALOMASS: Use individual halo masses in computation of halo density fields (otherwise all halos are treated as single particles)
+!!   -DSPLITHALOS: Splits halos according to some mass condition and computes the cross spectrum between them.
+!!                 Only works if -DGROUPS is used.
 !!   -DPLPLOT: Plots power spectra at end.
 !!   -DDEBUG: Output useful debugging information.
 
@@ -114,7 +116,7 @@ program cic_power_dmnu
   !! Dark matter arrays
   real, dimension(3,max_np) :: xvp
   real, dimension(3,max_np_dm) :: xvp_dm
-#ifdef HALOMASS
+#if defined(HALOMASS) || defined(SPLITHALOS)
   real, dimension(4,max_np_h)  :: xvmp_h
   real, dimension(4,np_buffer) :: xp_buf
   real, dimension(4*np_buffer) :: send_buf, recv_buf
@@ -277,6 +279,18 @@ program cic_power_dmnu
         call powerspectrum(slab,slab,pkdm)
 #endif
         if (rank == 0) call writepowerspectra(2)
+
+#if defined(SPLITHALOS) && defined(GROUPS)
+        ! ---------------------------------------------------------------------------------------------------
+        ! HALO AUTO POWER BASED ON LOW AND HIGH MASS POPULATIONS
+        ! ---------------------------------------------------------------------------------------------------
+        call assign_groups(-1)
+        call darkmatter(2, 0, -1)
+        call swap_slab12
+        call darkmatter(2, 1, -1)
+        call powerspectrum(slab,slab2,pkdm)
+        if (rank == 0) call writepowerspectra(-1)
+#endif
 
         ! ---------------------------------------------------------------------------------------------------
         ! NEUTRINO-DARK MATTER CROSS SPECTRA
@@ -591,7 +605,7 @@ contains
         mh_total_local = 0.
         do j=1, np_local_h
             read(21) xvmp_h(1:3, j)
-#ifdef HALOMASS
+#if defined(HALOMASS) || defined(SPLITHALOS)
             read(21) xvmp_h(4, j)
             read(21) garbage3 !! m (x1) + r(x2)
             mh_total_local = mh_total_local + xvmp_h(4, j)
@@ -1057,6 +1071,8 @@ end subroutine cp_fftw
         fn=output_path//z_write(1:len_trim(z_write))//prefix//'_nuha.dat'
     else if (command == 5) then !! Dark matter-halo cross spectra
         fn=output_path//z_write(1:len_trim(z_write))//prefix//'_dmha.dat'
+    else if (command == -1) then !! Halo power spectra from two mass populations
+        fn=output_path//z_write(1:len_trim(z_write))//prefix//'_hahapop.dat'
     endif
 
     write(*,*) 'Writing ',fn
@@ -1131,7 +1147,7 @@ subroutine darkmatter(command)
     real, dimension(3) :: dis
     character(len=7) :: z_string
     character(len=4) :: rank_string
-    character(len=100) :: check_name
+    character(len=200) :: check_name
     integer :: command
 #ifdef GROUPS
     integer(4) :: glook, canwrite
@@ -1161,7 +1177,7 @@ subroutine darkmatter(command)
 #ifdef GROUPS
     if (canwrite == 1) then
 #endif
-    !! generate checkpoint names on each node
+        !! generate checkpoint names on each node
         if (rank==0) then
            z_write = z_checkpoint(cur_checkpoint)
            print *,'Wrinting density to file for z = ',z_write
@@ -1185,7 +1201,7 @@ subroutine darkmatter(command)
                    rank_string(1:len_trim(rank_string))//'_h.bin'
         endif
 
-    !! open and write density file   
+        !! open and write density file   
         open(unit=21,file=check_name,status="replace",iostat=fstat,access="stream")
 
         if (fstat /= 0) then
@@ -1195,6 +1211,41 @@ subroutine darkmatter(command)
         endif
 
         write(21) cube
+#ifdef SPLITHALOS
+    else if (canwrite == -1) then
+
+        !! generate checkpoint names on each node
+        if (rank==0) then
+           z_write = z_checkpoint(cur_checkpoint)
+           print *,'Wrinting density to file for z = ',z_write
+        endif
+
+        call mpi_bcast(z_write,1,mpi_real,0,mpi_comm_world,ierr)
+
+        write(z_string,'(f7.3)') z_write
+        z_string=adjustl(z_string)
+        write(rank_string,'(i4)') rank
+        rank_string=adjustl(rank_string)
+
+        if (glook == 0) then
+            check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'den'//&
+                   rank_string(1:len_trim(rank_string))//'_h_low.bin'
+        else
+            check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'den'//&
+                   rank_string(1:len_trim(rank_string))//'_h_high.bin'
+        endif
+
+        !! open and write density file   
+        open(unit=21,file=check_name,status="replace",iostat=fstat,access="stream")
+
+        if (fstat /= 0) then
+          write(*,*) 'error opening density file'
+          write(*,*) 'rank',rank,'file:',check_name
+          call mpi_abort(mpi_comm_world,ierr,ierr)
+        endif
+
+        write(21) cube
+#endif
 #ifdef GROUPS
     endif
 #endif
@@ -1417,7 +1468,7 @@ subroutine pass_particles(command)
     integer(8) :: np_final
     real(8) :: mh_final_local, mh_final
     real lb,ub
-#ifdef HALOMASS
+#if defined(HALOMASS) || defined(SPLITHALOS)
     real(4) :: x(4)
     integer(4) :: nume = 4
 #else
@@ -1926,7 +1977,7 @@ subroutine pass_particles(command)
           mpi_comm_world,ierr)
      mh_final_local = 0.
      do i = 1, np_local_h
-#ifdef HALOMASS
+#if defined(HALOMASS) || defined(SPLITHALOS)
         mh_final_local = mh_final_local + xvmp_h(4,i) 
 #else
         mh_final_local = mh_final_local + 1.
@@ -2052,36 +2103,120 @@ subroutine assign_groups(command)
     implicit none
 
     integer(4) :: command
-    integer :: k, np_tot, np0, np1
+    integer(4) :: k, np_tot, np0, np1
     integer(8) :: np1_tot, np2_tot, npa_tot
     real(4) :: r
     integer(1) :: g
+#ifdef SPLITHALOS
+    real(4), allocatable :: mhalo_local(:), mhalo(:)
+    integer(4), allocatable :: isort(:)
+    integer(4) :: nn
+    real(4) :: mm
+#endif
 
-    if (command == 0) then
-        np_tot = np_local
-    else if (command == 1) then
-        np_tot = np_local_dm
-    else
-        np_tot = np_local_h
-    endif
+#ifdef SPLITHALOS
+    if (command == -1) then
 
-    np0 = 0
-    np1 = 0
+        !! Determine maximum number of halos on one node
+        call mpi_allreduce(np_local_h, np0, 1, mpi_integer, mpi_max, mpi_comm_world, ierr) 
 
-    do k = 1, np_tot
+        if (np0 > 0) then !! Only contiue if there are actually halos
 
-        call random_number(r)
-        g = int(r+0.5)
+            !! Allocate halo mass arays
+            allocate(mhalo_local(np0))
+            allocate(mhalo(np0*nodes))
+            allocate(isort(np0*nodes))
 
-        if (g == 0) then
-            np0 = np0 + 1
-        else if (g == 1) then
-            np1 = np1 + 1
+            !! Fill up local halo masses
+            mhalo_local(:) = -1.
+            do k = 1, np_local_h
+                mhalo_local(k) = xvmp_h(4,k) 
+            enddo
+
+            !! Send maximum number of halos from each node
+            call mpi_gather(mhalo_local, np0, mpi_real, mhalo, np0, mpi_real, 0, mpi_comm_world, ierr) 
+
+            if (rank == 0) then
+                !! Move invalid entries to the end of the array
+                nn = np0*nodes
+                k  = 1
+                do 
+                    if (k > nn) exit
+                    if (mhalo(k) <= 0.) then
+                        r = mhalo(nn)
+                        mhalo(nn) = mhalo(k)
+                        mhalo(k)  = r
+                        nn = nn - 1
+                    else
+                        k = k + 1
+                    endif
+
+                enddo
+
+                !! Sort the array in ascending order
+                isort(1:nn) = (/ (k, k=1, nn) /)
+                call indexedsort(nn, mhalo, isort)
+
+                !! Get the median value
+                mm = mhalo((nn+1)/2)
+            endif
+
+            !! Broadcast median value to all nodes
+            call mpi_bcast(mm, 1, mpi_real, 0, mpi_comm_world, ierr)
+
+            !! Print some info to screen
+            if (rank == 0) write(*,*) "Global halo stats: ", mhalo(1), mhalo(nn), mm
+
+            !! Clear up memory
+            deallocate(mhalo_local)
+            deallocate(mhalo)
+            deallocate(isort)
+
         endif
 
-        GID(k) = g
+        !! Now sort the halos into two populations based on the median mass
+        np0 = 0
+        np1 = 0
+        do k = 1, np_local_h
+            if (xvmp_h(4,k) <= mm) then
+                GID(k) = 0
+                np0 = np0 + 1
+            else
+                GID(k) = 1
+                np1 = np1 + 1
+            endif
+        enddo
 
-    enddo
+    else
+#endif
+        if (command == 0) then
+            np_tot = np_local
+        else if (command == 1) then
+            np_tot = np_local_dm
+        else
+            np_tot = np_local_h
+        endif
+
+        np0 = 0
+        np1 = 0
+
+        do k = 1, np_tot
+
+            call random_number(r)
+            g = int(r+0.5)
+
+            if (g == 0) then
+                np0 = np0 + 1
+            else if (g == 1) then
+                np1 = np1 + 1
+            endif
+
+            GID(k) = g
+
+        enddo
+#ifdef SPLITHALOS
+    endif
+#endif
 
     call mpi_allreduce(int(np_tot,kind=8), npa_tot, 1, mpi_integer8, mpi_sum, mpi_comm_world, ierr)
     call mpi_allreduce(int(np0,kind=8), np1_tot, 1, mpi_integer8, mpi_sum, mpi_comm_world, ierr)
@@ -2541,7 +2676,7 @@ subroutine mesh_buffer
     den(nc_node_dim,:,:)=den(nc_node_dim,:,:)+den_buf(:,:)
 
 !! send to node in +x
-   
+  
       den_buf(:,:)=den(nc_node_dim+1,:,:)
       call mpi_sendrecv_replace(den_buf,buffer_size,mpi_real, &
                               cart_neighbor(6),tag,cart_neighbor(5), &
