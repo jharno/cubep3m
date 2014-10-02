@@ -1731,8 +1731,10 @@ end function linear_interpolate
     integer(4) :: thread
     integer(4), parameter :: xsize1 = 4*3*np_node_dim**2 
     integer(4), parameter :: xsize2 = 2*xsize1
+#ifdef NEUTRINOS
     real(4), parameter :: mfac = 180.8892437/mass_neutrino/scalefactor/3.0**0.5
     real(4), parameter :: ffac = 50.2476/mass_neutrino/scalefactor !ckT/m =50.25
+#endif
 
 #ifdef VELTRANSFER
     integer :: COMMAND
