@@ -16,8 +16,8 @@
 #ifdef MHD
     real(4) :: cfl,amax,cmax,D1,D2,dta,dtc
 #endif
-
     real(4) :: vmax, vmax_local
+    real(4) :: Dx
 
     nts = nts + 1
     if (nts /= 1) dt_old = dt
@@ -29,10 +29,15 @@
     enddo 
     call mpi_allreduce(vmax_local, vmax, 1, mpi_real, mpi_max, mpi_comm_world, ierr)
 #ifdef DISP_MESH
-    dt_vmax = 2.*(nf_buf-4*mesh_scale)/vmax - dt_old 
+    Dx = real(nf_buf)-4.*mesh_scale
 #else
-    dt_vmax = 2.*nf_buf/vmax - dt_old
+    Dx = real(nf_buf)
 #endif
+    !! fbuf is the fraction of the buffer that the fastest particle is allowed to move. 
+    !! As long as the maximum velocity increases no more than zeta = 2/fbuf - 1 compared 
+    !! to the previous time step then this method will work.
+    dt_vmax = fbuf * Dx / vmax
+
     if (rank == 0) write(*,*) 'vmax and maximum timestep from vmax=',vmax,dt_vmax
 
 #ifdef MHD
