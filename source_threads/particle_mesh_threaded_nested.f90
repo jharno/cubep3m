@@ -59,8 +59,9 @@
 !! particles must not have advanced past hoc_nc_l:hoc_nc_h
 
     call link_list
-
+    call mpi_barrier(mpi_comm_world, ierr)
     call particle_pass
+    call mpi_barrier(mpi_comm_world, ierr)
 
 #ifdef MHD
     nerr=0
@@ -824,7 +825,9 @@
    enddo
    !$omp end do
    !$omp end parallel
-   
+  
+    call mpi_barrier(mpi_comm_world, ierr) 
+
 #ifdef MHD
     cmaxl=cmax
     nerrl=nerr
@@ -914,7 +917,7 @@
 #endif    
 
 !! delete all particles outside (1:nc_node_dim]
-
+    
     call delete_particles
 
     if (pairwise_ic.or.pair_infall) then
