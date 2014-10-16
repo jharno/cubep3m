@@ -873,10 +873,10 @@ end subroutine cp_fftw
     rank_string=adjustl(rank_string)
 
 #ifdef KAISER
-    check_name=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_string(1:len_trim(z_string))//'den'// &
+    check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'den'// &
                rank_string(1:len_trim(rank_string))//'-rsd.dat'
 #else 
-    check_name=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_string(1:len_trim(z_string))//'den'// &
+    check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'den'// &
                rank_string(1:len_trim(rank_string))//'.dat'
 #endif
 
@@ -994,10 +994,10 @@ end subroutine cp_fftw
     rank_string=adjustl(rank_string)
 
 #ifdef KAISER
-    check_name=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_string(1:len_trim(z_string))//'den-poisson'// &
+    check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'den-poisson'// &
                rank_string(1:len_trim(rank_string))//'-rsd.dat'
 #else 
-    check_name=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_string(1:len_trim(z_string))//'den-poisson'// &
+    check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'den-poisson'// &
                rank_string(1:len_trim(rank_string))//'.dat'
 #endif
 
