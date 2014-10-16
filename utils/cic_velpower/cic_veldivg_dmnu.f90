@@ -34,7 +34,7 @@ program cic_crossvel
   include 'mpif.h'
   include '../../parameters'
 
-  character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints'
+  character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints_nu'
 
   !! Threading
   integer(4), parameter :: nt = 8
@@ -56,7 +56,7 @@ program cic_crossvel
   real, parameter    :: npr=np
 
 #ifdef LOGBIN
-  integer, parameter :: numbins = 16!hc / 48 
+  integer, parameter :: numbins = 32 
 #endif
 
   !! internals

@@ -3,11 +3,11 @@ import numpy
 # ----------------------- parameters -----------------------
 
 # Parameters that we need
-nodes_dim      = 4
-tiles_node_dim = 4
-nf_tile        = 176 
-density_buffer = 2.0
-ratio_nudm_dim = 1
+nodes_dim      = 2
+tiles_node_dim = 6
+nf_tile        = 240 
+density_buffer = 1.5
+ratio_nudm_dim = 2
 max_np_h       = 1000000 
 
 # Set this ture if using GROUPS algorithm
@@ -128,6 +128,25 @@ else: GID = 0
 recv_buf = send_buf
 den_buf = 4 * (nc_node_dim+2)**2
 
-print "Total memory used by large arrays [GB]: ", (maxeq1 + maxeq2 + maxeq3 + xvp + xvp_dm + xvp_h + recv_buf + GID + den_buf) / 1024.**3 
+#
+# Determine memory usage of large P3DFFT arrays if applicable
+#
+
+bytes_p3dfft = 0
+
+if pencil:
+
+    if nodes_dim == 1:
+        nm = int(nc_node_dim * nc_node_dim * (nc_node_dim+2) / 2)
+    else:
+        nm = int(nc_node_dim * (nc_node_dim + nodes_dim) * (nc_node_dim + 2./nodes_dim) / 2.)
+
+    buf1 = 4 * 2 * nm
+    buf2 = 4 * 2 * nm
+    R    = 4 * 2 * nm
+    bytes_p3dfft = buf1 + buf2 + R
+
+print "Total memory used by large arrays [GB]: ", (maxeq1 + maxeq2 + maxeq3 + xvp + xvp_dm + xvp_h + recv_buf + GID + den_buf + bytes_p3dfft) / 1024.**3 
+if pencil: print "Total memory of large P3DFFT arrays [GB]: ", bytes_p3dfft / 1024.**3
 print
 

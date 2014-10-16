@@ -3,12 +3,12 @@ import numpy
 # ----------------------- parameters -----------------------
 
 # Parameters that we need
-nodes_dim      = 1
-tiles_node_dim = 4
-nf_tile        = 176 
-density_buffer = 3.0
-ratio_nudm_dim = 1
-nfine_buf      = 16
+nodes_dim      = 2
+tiles_node_dim = 6
+nf_tile        = 240 
+density_buffer = 1.5
+ratio_nudm_dim = 2
+nfine_buf      = 16 
 nfine_buf_h    = 128
 mesh_scale     = 4
 mesh_scale_h   = 8
@@ -19,7 +19,7 @@ max_np_h       = 1000000
 pencil = True
 
 # Set this true if you are using curl
-curl = False 
+curl = True#False 
 
 # Usually won't need to change these
 nf_cutoff   = 16
@@ -153,6 +153,24 @@ slab_work = slab
 if pencil: slab_work = 0
 slab2 = slab
 
+#
+# Determine memory usage of large P3DFFT arrays if applicable
+#
+
+bytes_p3dfft = 0
+
+if pencil:
+
+    if nodes_dim == 1:
+        nm = int(nc_node_dim * nc_node_dim * (nc_node_dim+2) / 2)
+    else:
+        nm = int(nc_node_dim * (nc_node_dim + nodes_dim) * (nc_node_dim + 2./nodes_dim) / 2.)
+
+    buf1 = 4 * 2 * nm
+    buf2 = 4 * 2 * nm
+    R    = 4 * 2 * nm
+    bytes_p3dfft = buf1 + buf2 + R
+
 xvp = 4 * (6 * max_np)
 xvp_dm = xvp / ratio_nudm_dim**3
 xvp_h  = 4 * 6 * max_np_h 
@@ -162,6 +180,7 @@ velden_recv_buff = velden_send_buff
 
 t1 = maxeq1 + maxeq2 + maxeq3 + maxeq4 + maxeq5
 t2 = slab_work + slab2 + xvp + xvp_dm + xvp_h + veldivg + velden_send_buff + velden_recv_buff
-print "Total memory used by large arrays [GB]: ", (t1 + t2) / 1024.**3
+print "Total memory used by large arrays [GB]: ", (t1 + t2 + bytes_p3dfft) / 1024.**3
+if pencil: print "Total memory of large P3DFFT arrays [GB]: ", bytes_p3dfft / 1024.**3
 print
 
