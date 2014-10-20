@@ -6,7 +6,7 @@ import numpy
 nodes_dim      = 2
 tiles_node_dim = 6
 nf_tile        = 240 
-density_buffer = 1.5
+density_buffer = 1.6
 ratio_nudm_dim = 2
 nfine_buf      = 16 
 nfine_buf_h    = 128
@@ -19,7 +19,11 @@ max_np_h       = 1000000
 pencil = True
 
 # Set this true if you are using curl
-curl = True#False 
+curl = True
+
+# Set this true if using -DCOARSE_HACK and choose appropriate value of coarsen_factor
+coarse_hack = False
+coarsen_factor = 2
 
 # Usually won't need to change these
 nf_cutoff   = 16
@@ -32,6 +36,7 @@ nf_buf      = nf_cutoff + 8
 #
 
 nc = (nf_tile - 2 * nf_buf) * tiles_node_dim * nodes_dim
+if coarse_hack: nc /= coarsen_factor
 nodes = nodes_dim**3
 nc_node_dim = nc / nodes_dim
 nc_pen = nc_node_dim / nodes_dim
@@ -50,6 +55,23 @@ num_ngbhs   = (2*nc_buf+1)**3
 num_ngbhs_h = (2*nc_buf_h+1)**3
 nm_node_dim   = nc_node_dim / mesh_scale
 nm_node_dim_h = nc_node_dim / mesh_scale_h
+
+#
+# Make sure domain decomposition is valid
+#
+
+if pencil:
+    if nc_node_dim%nodes_dim != 0:
+        print "\nERROR: nc_node_dim, nodes_dim, nc_pen = ", nc_node_dim, nodes_dim, nc_pen
+        exit()
+else:
+    if nc_dim%nodes != 0:
+        print "\nERROR: nc_dim, nodes, nc_slab = ", nc_dim, nodes, nc_slab
+        exit()
+
+#
+# Print some info to screen
+#
 
 print
 print "Sizes of various variables:"

@@ -19,6 +19,10 @@ halomass = False
 # Set this true if using P3DFFT for pencil decomposition
 pencil = True 
 
+# Set this true if using -DCOARSE_HACK and choose appropriate value of coarsen_factor
+coarse_hack = False 
+coarsen_factor = 2
+
 # Usually won't need to change these
 nf_cutoff   = 16
 nf_buf      = nf_cutoff + 8
@@ -30,6 +34,7 @@ nf_buf      = nf_cutoff + 8
 #
 
 nc = (nf_tile - 2 * nf_buf) * tiles_node_dim * nodes_dim
+if coarse_hack: nc /= coarsen_factor
 nodes = nodes_dim**3
 nc_node_dim = nc / nodes_dim
 nc_pen = nc_node_dim / nodes_dim
@@ -41,6 +46,23 @@ max_np  = int(density_buffer * (((nf_tile - 2 * nf_buf) * tiles_node_dim / 2)**3
     (8 * nf_buf**3 + 6 * nf_buf * (((nf_tile - 2 * nf_buf) * tiles_node_dim)**2) + \
     12 * (nf_buf**2) * ((nf_tile - 2 * nf_buf) * tiles_node_dim)) / 8.))
 np_buffer = int(2.*max_np/3.)
+
+#
+# Make sure domain decomposition is valid
+#
+
+if pencil:
+    if nc_node_dim%nodes_dim != 0:
+        print "\nERROR: nc_node_dim, nodes_dim, nc_pen = ", nc_node_dim, nodes_dim, nc_pen
+        exit()
+else:
+    if nc_dim%nodes != 0:
+        print "\nERROR: nc_dim, nodes, nc_slab = ", nc_dim, nodes, nc_slab
+        exit()
+
+#
+# Print some info to screen
+#
 
 print
 print "Sizes of various variables:"

@@ -19,6 +19,8 @@
 !! * Optional flags:
 !!   -DNGP: Uses NGP interpolation for binning of the power spectrum. 
 !!   -DSLAB: Alternatively run with FFTW slab decomposition instead of P3DFFT pencil decomposition.
+!!   -DCOARSE_HACK: Enables a hack to coarsen the grid for which the particles are interpolated to.
+!!                  Must be used in conjunction to a change made in the parameters file (see below).
 !!   -DKAISER: Adjusts for redshift space distortions.
 !!   -DDEBUG: Output useful debugging information.
 !!   -DCURL: Enable the computation of the curl component of absolute fields (not relative fields). 
@@ -32,7 +34,16 @@ program cic_crossvel
   implicit none
 
   include 'mpif.h'
+#ifndef COARSE_HACK
   include '../../parameters'
+#else
+  !! parameters_hack should have the following line changed from:
+  !! integer(4),   parameter :: nc = (nf_tile-2*nf_buf)*tiles_node_dim*nodes_dim 
+  !! to something like:
+  !! integer, parameter :: coarsen_factor = 4
+  !! integer(4),   parameter :: nc = (nf_tile-2*nf_buf)*tiles_node_dim*nodes_dim / coarsen_factor
+  include '../../parameters_hack'
+#endif
 
   character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints_nu'
 
@@ -52,7 +63,11 @@ program cic_crossvel
 
   !! np is the number of particles
   !! np should be set to nc (1:1), hc (1:2), or qc (1:4)
+#ifndef COARSE_HACK
   integer, parameter :: np=hc
+#else
+  integer, parameter :: np=hc*coarsen_factor
+#endif
   real, parameter    :: npr=np
 
 #ifdef LOGBIN
@@ -1283,6 +1298,22 @@ subroutine read_particles(command)
     endif
 
     close(21)
+
+#ifdef COARSE_HACK
+    if (command == 0) then
+        do j=1, np_local
+            xvp(1:3,j) = xvp(1:3,j)/coarsen_factor
+        enddo
+    else if (command == 1) then
+        do j=1, np_local_dm
+            xvp_dm(1:3,j) = xvp_dm(1:3,j)/coarsen_factor
+        enddo
+    else
+        do j=1, np_local_h
+            xvmp_h(1:3,j) = xvmp_h(1:3,j)/coarsen_factor
+        enddo
+    endif
+#endif
  
 #ifdef KAISER
 
