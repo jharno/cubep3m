@@ -1302,15 +1302,15 @@ subroutine read_particles(command)
 #ifdef COARSE_HACK
     if (command == 0) then
         do j=1, np_local
-            xvp(1:3,j) = xvp(1:3,j)/coarsen_factor
+            xvp(1:6,j) = xvp(1:6,j)/coarsen_factor
         enddo
     else if (command == 1) then
         do j=1, np_local_dm
-            xvp_dm(1:3,j) = xvp_dm(1:3,j)/coarsen_factor
+            xvp_dm(1:6,j) = xvp_dm(1:6,j)/coarsen_factor
         enddo
     else
         do j=1, np_local_h
-            xvmp_h(1:3,j) = xvmp_h(1:3,j)/coarsen_factor
+            xvmp_h(1:6,j) = xvmp_h(1:6,j)/coarsen_factor
         enddo
     endif
 #endif
