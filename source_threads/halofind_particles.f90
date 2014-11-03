@@ -514,7 +514,7 @@ subroutine find_halo_particles(HODC, HMASS, HPOS, RODC, ITOT, DOVIR)
 
     real :: odci, odcj, r1, r2, d1, d2, w1, w2
 
-    integer, parameter :: search_ratio = 2
+    integer, parameter :: search_ratio = 4
     integer, parameter :: refine_ratio = 5
 
     !

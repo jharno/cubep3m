@@ -46,7 +46,7 @@ nested_threads = 2
 
 mesh_scale  = 4
 part_ratio  = 2
-nc_halo_max = 64
+nc_halo_max = 128
 max_llf     = 100000
 ngrid_max   = 240
 nf_cutoff   = 16
