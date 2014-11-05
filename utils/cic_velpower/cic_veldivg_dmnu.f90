@@ -46,7 +46,8 @@ program cic_crossvel
 #endif
 
   character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints_nu'
-
+  logical, parameter :: turn_off_halos = .false.  !! Can set this True if halo portion is slow
+    
   !! Threading
   integer(4), parameter :: nt = 8
 
@@ -286,15 +287,17 @@ program cic_crossvel
     ! Read, pass, and sort halo particles into two separate groups
     ! --------------------------------------------------------------------------------
 
-    if (rank == 0) write(*,*) "Reading, passing, and sorting halo particles ... "
-    call read_particles(2)
-    call pass_particles(2)
-    call order_xvp_groups(2)
-    call buffer_particles_groups(2, g0)
-    call buffer_particles_groups(2, g1)
-    call order_xvp_ll(2, g0)
-    call order_xvp_ll(2, g1)
-    if (rank == 0) write(*,*)
+    if (.not. turn_off_halos) then
+        if (rank == 0) write(*,*) "Reading, passing, and sorting halo particles ... "
+        call read_particles(2)
+        call pass_particles(2)
+        call order_xvp_groups(2)
+        call buffer_particles_groups(2, g0)
+        call buffer_particles_groups(2, g1)
+        call order_xvp_ll(2, g0)
+        call order_xvp_ll(2, g1)
+        if (rank == 0) write(*,*)
+    endif
 
     ! --------------------------------------------------------------------------------
     ! Compute total velocity power spectra for each of the three different species 
@@ -348,20 +351,22 @@ program cic_crossvel
         ! HALOS
         ! --------------------------------------------------------------------------------
 
-        if (rank == 0) write(*,*) "Computing halo total velocity for dim = ", cur_dimension
-        call velocity_density(cur_dimension, 2, g0, N_closest_h)
+        if (.not. turn_off_halos) then
+            if (rank == 0) write(*,*) "Computing halo total velocity for dim = ", cur_dimension
+            call velocity_density(cur_dimension, 2, g0, N_closest_h)
 #ifdef write_vel
-        call writevelocityfield(2, g0)
+            call writevelocityfield(2, g0)
 #endif
-        call darkmatter(0)
-        call swap_slab12(0)
-        call velocity_density(cur_dimension, 2, g1, N_closest_h)
+            call darkmatter(0)
+            call swap_slab12(0)
+            call velocity_density(cur_dimension, 2, g1, N_closest_h)
 #ifdef write_vel
-        call writevelocityfield(2, g1)
+            call writevelocityfield(2, g1)
 #endif
-        call darkmatter(0)
-        call powerspectrum(slab, slab2, pkvel(cur_dimension,:,:,3), 0)
-        if (rank == 0) write(*,*)
+            call darkmatter(0)
+            call powerspectrum(slab, slab2, pkvel(cur_dimension,:,:,3), 0)
+            if (rank == 0) write(*,*)
+        endif
 
         ! --------------------------------------------------------------------------------                                                            
         ! NEUTRINO-DARK MATTER RELATIVE FIELD
@@ -382,43 +387,45 @@ program cic_crossvel
         call powerspectrum(slab, slab2, pkvel(cur_dimension,:,:,4), 0)
         if (rank == 0) write(*,*)
 
-        ! --------------------------------------------------------------------------------                                                            
-        ! NEUTRINO-HALO RELATIVE FIELD
-        ! --------------------------------------------------------------------------------
+        if (.not. turn_off_halos) then
+            ! --------------------------------------------------------------------------------                                                            
+            ! NEUTRINO-HALO RELATIVE FIELD
+            ! --------------------------------------------------------------------------------
 
-        if (rank == 0) write(*,*) "Computing nu-halo total velocity for dim = ", cur_dimension
-        call velocity_density(cur_dimension, 0, g0, N_closest_nu)
-        call swap_velden12(0)
-        call velocity_density(cur_dimension, 2, g0, N_closest_h)
-        call relative_velocity
-        call darkmatter(0)
-        call swap_slab12(0)
-        call velocity_density(cur_dimension, 0, g1, N_closest_nu)
-        call swap_velden12(0)
-        call velocity_density(cur_dimension, 2, g1, N_closest_h)
-        call relative_velocity
-        call darkmatter(0)
-        call powerspectrum(slab, slab2, pkvel(cur_dimension,:,:,5), 0)
-        if (rank == 0) write(*,*)
+            if (rank == 0) write(*,*) "Computing nu-halo total velocity for dim = ", cur_dimension
+            call velocity_density(cur_dimension, 0, g0, N_closest_nu)
+            call swap_velden12(0)
+            call velocity_density(cur_dimension, 2, g0, N_closest_h)
+            call relative_velocity
+            call darkmatter(0)
+            call swap_slab12(0)
+            call velocity_density(cur_dimension, 0, g1, N_closest_nu)
+            call swap_velden12(0)
+            call velocity_density(cur_dimension, 2, g1, N_closest_h)
+            call relative_velocity
+            call darkmatter(0)
+            call powerspectrum(slab, slab2, pkvel(cur_dimension,:,:,5), 0)
+            if (rank == 0) write(*,*)
 
-        ! --------------------------------------------------------------------------------                                                            
-        ! DARK MATTER-HALO RELATIVE FIELD
-        ! --------------------------------------------------------------------------------
+            ! --------------------------------------------------------------------------------                                                            
+            ! DARK MATTER-HALO RELATIVE FIELD
+            ! --------------------------------------------------------------------------------
 
-        if (rank == 0) write(*,*) "Computing dm-halo total velocity for dim = ", cur_dimension
-        call velocity_density(cur_dimension, 1, g0, N_closest_dm)
-        call swap_velden12(0)
-        call velocity_density(cur_dimension, 2, g0, N_closest_h)
-        call relative_velocity
-        call darkmatter(0)
-        call swap_slab12(0)
-        call velocity_density(cur_dimension, 1, g1, N_closest_dm)
-        call swap_velden12(0)
-        call velocity_density(cur_dimension, 2, g1, N_closest_h)
-        call relative_velocity
-        call darkmatter(0)
-        call powerspectrum(slab, slab2, pkvel(cur_dimension,:,:,6), 0)
-        if (rank == 0) write(*,*)
+            if (rank == 0) write(*,*) "Computing dm-halo total velocity for dim = ", cur_dimension
+            call velocity_density(cur_dimension, 1, g0, N_closest_dm)
+            call swap_velden12(0)
+            call velocity_density(cur_dimension, 2, g0, N_closest_h)
+            call relative_velocity
+            call darkmatter(0)
+            call swap_slab12(0)
+            call velocity_density(cur_dimension, 1, g1, N_closest_dm)
+            call swap_velden12(0)
+            call velocity_density(cur_dimension, 2, g1, N_closest_h)
+            call relative_velocity
+            call darkmatter(0)
+            call powerspectrum(slab, slab2, pkvel(cur_dimension,:,:,6), 0)
+            if (rank == 0) write(*,*)
+        endif
 
     enddo
 
@@ -427,9 +434,15 @@ program cic_crossvel
     ! --------------------------------------------------------------------------------
 
     if (rank == 0) then
-        do kt = 1, 6 
-            call writepowerspectra(0, kt)
-        enddo
+        if (.not. turn_off_halos) then
+            do kt = 1, 6 
+                call writepowerspectra(0, kt)
+            enddo
+        else
+            call writepowerspectra(0, 1)
+            call writepowerspectra(0, 2)
+            call writepowerspectra(0, 4)
+        endif
     endif
 
     ! --------------------------------------------------------------------------------
@@ -486,23 +499,25 @@ program cic_crossvel
     ! HALOS
     ! --------------------------------------------------------------------------------
 
-    if (rank == 0) write(*,*) "Computing halo velocity divergence"
-    do cur_dimension = 1, 3
-        call velocity_density(cur_dimension, 2, g0, N_closest_h)
-        call pass_veldensity
-        call velocity_divergence
-    enddo
-    call darkmatter(1)
-    call swap_slab12(0)
-    do cur_dimension = 1, 3
-        call velocity_density(cur_dimension, 2, g1, N_closest_h)
-        call pass_veldensity
-        call velocity_divergence
-    enddo
-    call darkmatter(1)
-    call powerspectrum(slab, slab2, pkdivg(:,:,3), 1)
-    if (rank == 0) call writepowerspectra(1, 3)
-    if (rank == 0) write(*,*)
+    if (.not. turn_off_halos) then
+        if (rank == 0) write(*,*) "Computing halo velocity divergence"
+        do cur_dimension = 1, 3
+            call velocity_density(cur_dimension, 2, g0, N_closest_h)
+            call pass_veldensity
+            call velocity_divergence
+        enddo
+        call darkmatter(1)
+        call swap_slab12(0)
+        do cur_dimension = 1, 3
+            call velocity_density(cur_dimension, 2, g1, N_closest_h)
+            call pass_veldensity
+            call velocity_divergence
+        enddo
+        call darkmatter(1)
+        call powerspectrum(slab, slab2, pkdivg(:,:,3), 1)
+        if (rank == 0) call writepowerspectra(1, 3)
+        if (rank == 0) write(*,*)
+    endif
 
     ! --------------------------------------------------------------------------------                                                            
     ! NEUTRINO-DARK MATTER RELATIVE FIELD
@@ -532,61 +547,63 @@ program cic_crossvel
     if (rank == 0) call writepowerspectra(1, 4)
     if (rank == 0) write(*,*)
 
-    ! --------------------------------------------------------------------------------                                                            
-    ! NEUTRINO-HALO RELATIVE FIELD
-    ! --------------------------------------------------------------------------------
+    if (.not. turn_off_halos) then
+        ! --------------------------------------------------------------------------------                                                            
+        ! NEUTRINO-HALO RELATIVE FIELD
+        ! --------------------------------------------------------------------------------
 
-    if (rank == 0) write(*,*) "Computing nu-halo velocity divergence"
-    do cur_dimension = 1, 3
-        call velocity_density(cur_dimension, 0, g0, N_closest_nu)
-        call swap_velden12(0)
-        call velocity_density(cur_dimension, 2, g0, N_closest_h)
-        call relative_velocity
-        call pass_veldensity
-        call velocity_divergence
-    enddo
-    call darkmatter(1)
-    call swap_slab12(0)
-    do cur_dimension = 1, 3
-        call velocity_density(cur_dimension, 0, g1, N_closest_nu)
-        call swap_velden12(0)
-        call velocity_density(cur_dimension, 2, g1, N_closest_h)
-        call relative_velocity
-        call pass_veldensity
-        call velocity_divergence
-    enddo
-    call darkmatter(1)
-    call powerspectrum(slab, slab2, pkdivg(:,:,5), 1)
-    if (rank == 0) call writepowerspectra(1, 5)
-    if (rank == 0) write(*,*)
+        if (rank == 0) write(*,*) "Computing nu-halo velocity divergence"
+        do cur_dimension = 1, 3
+            call velocity_density(cur_dimension, 0, g0, N_closest_nu)
+            call swap_velden12(0)
+            call velocity_density(cur_dimension, 2, g0, N_closest_h)
+            call relative_velocity
+            call pass_veldensity
+            call velocity_divergence
+        enddo
+        call darkmatter(1)
+        call swap_slab12(0)
+        do cur_dimension = 1, 3
+            call velocity_density(cur_dimension, 0, g1, N_closest_nu)
+            call swap_velden12(0)
+            call velocity_density(cur_dimension, 2, g1, N_closest_h)
+            call relative_velocity
+            call pass_veldensity
+            call velocity_divergence
+        enddo
+        call darkmatter(1)
+        call powerspectrum(slab, slab2, pkdivg(:,:,5), 1)
+        if (rank == 0) call writepowerspectra(1, 5)
+        if (rank == 0) write(*,*)
 
-    ! --------------------------------------------------------------------------------                                                            
-    ! DARK MATTER-HALO RELATIVE FIELD
-    ! --------------------------------------------------------------------------------
+        ! --------------------------------------------------------------------------------                                                            
+        ! DARK MATTER-HALO RELATIVE FIELD
+        ! --------------------------------------------------------------------------------
 
-    if (rank == 0) write(*,*) "Computing dm-halo velocity divergence"
-    do cur_dimension = 1, 3
-        call velocity_density(cur_dimension, 1, g0, N_closest_dm)
-        call swap_velden12(0)
-        call velocity_density(cur_dimension, 2, g0, N_closest_h)
-        call relative_velocity
-        call pass_veldensity
-        call velocity_divergence
-    enddo
-    call darkmatter(1)
-    call swap_slab12(0)
-    do cur_dimension = 1, 3
-        call velocity_density(cur_dimension, 1, g1, N_closest_dm)
-        call swap_velden12(0)
-        call velocity_density(cur_dimension, 2, g1, N_closest_h)
-        call relative_velocity
-        call pass_veldensity
-        call velocity_divergence
-    enddo
-    call darkmatter(1)
-    call powerspectrum(slab, slab2, pkdivg(:,:,6), 1)
-    if (rank == 0) call writepowerspectra(1, 6)
-    if (rank == 0) write(*,*)
+        if (rank == 0) write(*,*) "Computing dm-halo velocity divergence"
+        do cur_dimension = 1, 3
+            call velocity_density(cur_dimension, 1, g0, N_closest_dm)
+            call swap_velden12(0)
+            call velocity_density(cur_dimension, 2, g0, N_closest_h)
+            call relative_velocity
+            call pass_veldensity
+            call velocity_divergence
+        enddo
+        call darkmatter(1)
+        call swap_slab12(0)
+        do cur_dimension = 1, 3
+            call velocity_density(cur_dimension, 1, g1, N_closest_dm)
+            call swap_velden12(0)
+            call velocity_density(cur_dimension, 2, g1, N_closest_h)
+            call relative_velocity
+            call pass_veldensity
+            call velocity_divergence
+        enddo
+        call darkmatter(1)
+        call powerspectrum(slab, slab2, pkdivg(:,:,6), 1)
+        if (rank == 0) call writepowerspectra(1, 6)
+        if (rank == 0) write(*,*)
+    endif
 
 #ifdef CURL
     ! --------------------------------------------------------------------------------
@@ -647,24 +664,26 @@ program cic_crossvel
         ! HALOS
         ! --------------------------------------------------------------------------------
 
-        if (rank == 0) write(*,*) "Computing halo curl velocity for dim = ", cur_dimension
-        call velocity_density(curlcom(cur_dimension,1), 2, g0, N_closest_h)
-        call pass_veldensity
-        call swap_velden13(0)
-        call velocity_density(curlcom(cur_dimension,2), 2, g0, N_closest_h)
-        call pass_veldensity
-        call velocity_curl
-        call darkmatter(1)
-        call swap_slab12(0)
-        call velocity_density(curlcom(cur_dimension,1), 2, g1, N_closest_h)
-        call pass_veldensity
-        call swap_velden13(0)
-        call velocity_density(curlcom(cur_dimension,2), 2, g1, N_closest_h)
-        call pass_veldensity
-        call velocity_curl
-        call darkmatter(1)
-        call powerspectrum(slab, slab2, pkcurl(cur_dimension,:,:,3), 1)
-        if (rank == 0) write(*,*)
+        if (.not. turn_off_halos) then
+            if (rank == 0) write(*,*) "Computing halo curl velocity for dim = ", cur_dimension
+            call velocity_density(curlcom(cur_dimension,1), 2, g0, N_closest_h)
+            call pass_veldensity
+            call swap_velden13(0)
+            call velocity_density(curlcom(cur_dimension,2), 2, g0, N_closest_h)
+            call pass_veldensity
+            call velocity_curl
+            call darkmatter(1)
+            call swap_slab12(0)
+            call velocity_density(curlcom(cur_dimension,1), 2, g1, N_closest_h)
+            call pass_veldensity
+            call swap_velden13(0)
+            call velocity_density(curlcom(cur_dimension,2), 2, g1, N_closest_h)
+            call pass_veldensity
+            call velocity_curl
+            call darkmatter(1)
+            call powerspectrum(slab, slab2, pkcurl(cur_dimension,:,:,3), 1)
+            if (rank == 0) write(*,*)
+        endif
 
         ! --------------------------------------------------------------------------------                                                            
         ! NEUTRINO-DARK MATTER RELATIVE FIELD
@@ -705,83 +724,85 @@ program cic_crossvel
         call powerspectrum(slab, slab2, pkcurl(cur_dimension,:,:,4), 1)
         if (rank == 0) write(*,*)
 
-        ! --------------------------------------------------------------------------------                                                            
-        ! NEUTRINO-HALO RELATIVE FIELD
-        ! --------------------------------------------------------------------------------
+        if (.not. turn_off_halos) then
+            ! --------------------------------------------------------------------------------                                                            
+            ! NEUTRINO-HALO RELATIVE FIELD
+            ! --------------------------------------------------------------------------------
 
-        if (rank == 0) write(*,*) "Computing nu-halo curl velocity for dim = ", cur_dimension
-        call velocity_density(curlcom(cur_dimension,1), 0, g0, N_closest_nu)
-        call pass_veldensity
-        call swap_velden12(0)
-        call velocity_density(curlcom(cur_dimension,1), 2, g0, N_closest_h)
-        call pass_veldensity
-        call relative_velocity
-        call swap_velden13(0)
-        call velocity_density(curlcom(cur_dimension,2), 0, g0, N_closest_nu)
-        call pass_veldensity
-        call swap_velden12(0)
-        call velocity_density(curlcom(cur_dimension,2), 2, g0, N_closest_h)
-        call pass_veldensity
-        call relative_velocity
-        call velocity_curl
-        call darkmatter(1)
-        call swap_slab12(0)
-        call velocity_density(curlcom(cur_dimension,1), 0, g1, N_closest_nu)
-        call pass_veldensity
-        call swap_velden12(0)
-        call velocity_density(curlcom(cur_dimension,1), 2, g1, N_closest_h)
-        call pass_veldensity
-        call relative_velocity
-        call swap_velden13(0)
-        call velocity_density(curlcom(cur_dimension,2), 0, g1, N_closest_nu)
-        call pass_veldensity
-        call swap_velden12(0)
-        call velocity_density(curlcom(cur_dimension,2), 2, g1, N_closest_h)
-        call pass_veldensity
-        call relative_velocity
-        call velocity_curl
-        call darkmatter(1)
-        call powerspectrum(slab, slab2, pkcurl(cur_dimension,:,:,5), 1)
-        if (rank == 0) write(*,*)
+            if (rank == 0) write(*,*) "Computing nu-halo curl velocity for dim = ", cur_dimension
+            call velocity_density(curlcom(cur_dimension,1), 0, g0, N_closest_nu)
+            call pass_veldensity
+            call swap_velden12(0)
+            call velocity_density(curlcom(cur_dimension,1), 2, g0, N_closest_h)
+            call pass_veldensity
+            call relative_velocity
+            call swap_velden13(0)
+            call velocity_density(curlcom(cur_dimension,2), 0, g0, N_closest_nu)
+            call pass_veldensity
+            call swap_velden12(0)
+            call velocity_density(curlcom(cur_dimension,2), 2, g0, N_closest_h)
+            call pass_veldensity
+            call relative_velocity
+            call velocity_curl
+            call darkmatter(1)
+            call swap_slab12(0)
+            call velocity_density(curlcom(cur_dimension,1), 0, g1, N_closest_nu)
+            call pass_veldensity
+            call swap_velden12(0)
+            call velocity_density(curlcom(cur_dimension,1), 2, g1, N_closest_h)
+            call pass_veldensity
+            call relative_velocity
+            call swap_velden13(0)
+            call velocity_density(curlcom(cur_dimension,2), 0, g1, N_closest_nu)
+            call pass_veldensity
+            call swap_velden12(0)
+            call velocity_density(curlcom(cur_dimension,2), 2, g1, N_closest_h)
+            call pass_veldensity
+            call relative_velocity
+            call velocity_curl
+            call darkmatter(1)
+            call powerspectrum(slab, slab2, pkcurl(cur_dimension,:,:,5), 1)
+            if (rank == 0) write(*,*)
 
-        ! --------------------------------------------------------------------------------                                                            
-        ! DARK MATTER-HALO RELATIVE FIELD
-        ! --------------------------------------------------------------------------------
+            ! --------------------------------------------------------------------------------                                                            
+            ! DARK MATTER-HALO RELATIVE FIELD
+            ! --------------------------------------------------------------------------------
 
-        if (rank == 0) write(*,*) "Computing dm-halo curl velocity for dim = ", cur_dimension
-        call velocity_density(curlcom(cur_dimension,1), 1, g0, N_closest_dm)
-        call pass_veldensity
-        call swap_velden12(0)
-        call velocity_density(curlcom(cur_dimension,1), 2, g0, N_closest_h)
-        call pass_veldensity
-        call relative_velocity
-        call swap_velden13(0)
-        call velocity_density(curlcom(cur_dimension,2), 1, g0, N_closest_dm)
-        call pass_veldensity
-        call swap_velden12(0)
-        call velocity_density(curlcom(cur_dimension,2), 2, g0, N_closest_h)
-        call pass_veldensity
-        call relative_velocity
-        call velocity_curl
-        call darkmatter(1)
-        call swap_slab12(0)
-        call velocity_density(curlcom(cur_dimension,1), 1, g1, N_closest_dm)
-        call pass_veldensity
-        call swap_velden12(0)
-        call velocity_density(curlcom(cur_dimension,1), 2, g1, N_closest_h)
-        call pass_veldensity
-        call relative_velocity
-        call swap_velden13(0)
-        call velocity_density(curlcom(cur_dimension,2), 1, g1, N_closest_dm)
-        call pass_veldensity
-        call swap_velden12(0)
-        call velocity_density(curlcom(cur_dimension,2), 2, g1, N_closest_h)
-        call pass_veldensity
-        call relative_velocity
-        call velocity_curl
-        call darkmatter(1)
-        call powerspectrum(slab, slab2, pkcurl(cur_dimension,:,:,6), 1)
-        if (rank == 0) write(*,*)
+            if (rank == 0) write(*,*) "Computing dm-halo curl velocity for dim = ", cur_dimension
+            call velocity_density(curlcom(cur_dimension,1), 1, g0, N_closest_dm)
+            call pass_veldensity
+            call swap_velden12(0)
+            call velocity_density(curlcom(cur_dimension,1), 2, g0, N_closest_h)
+            call pass_veldensity
+            call relative_velocity
+            call swap_velden13(0)
+            call velocity_density(curlcom(cur_dimension,2), 1, g0, N_closest_dm)
+            call pass_veldensity
+            call swap_velden12(0)
+            call velocity_density(curlcom(cur_dimension,2), 2, g0, N_closest_h)
+            call pass_veldensity
+            call relative_velocity
+            call velocity_curl
+            call darkmatter(1)
+            call swap_slab12(0)
+            call velocity_density(curlcom(cur_dimension,1), 1, g1, N_closest_dm)
+            call pass_veldensity
+            call swap_velden12(0)
+            call velocity_density(curlcom(cur_dimension,1), 2, g1, N_closest_h)
+            call pass_veldensity
+            call relative_velocity
+            call swap_velden13(0)
+            call velocity_density(curlcom(cur_dimension,2), 1, g1, N_closest_dm)
+            call pass_veldensity
+            call swap_velden12(0)
+            call velocity_density(curlcom(cur_dimension,2), 2, g1, N_closest_h)
+            call pass_veldensity
+            call relative_velocity
+            call velocity_curl
+            call darkmatter(1)
+            call powerspectrum(slab, slab2, pkcurl(cur_dimension,:,:,6), 1)
+            if (rank == 0) write(*,*)
+        endif
 
     enddo
 
@@ -790,9 +811,15 @@ program cic_crossvel
     ! --------------------------------------------------------------------------------
 
     if (rank == 0) then 
-        do kt = 1, 6
-            call writepowerspectra(2, kt)
-        enddo
+        if (.not. turn_off_halos) then
+            do kt = 1, 6
+                call writepowerspectra(2, kt)
+            enddo
+        else
+            call writepowerspectra(2, 1)
+            call writepowerspectra(2, 2)
+            call writepowerspectra(2, 4)
+        endif
     endif
 #endif
 
