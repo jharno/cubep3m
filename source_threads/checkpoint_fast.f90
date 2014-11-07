@@ -10,14 +10,12 @@ character (len=7) :: z_s
 integer(kind=4) :: i,j,k,l,fstat,blocksize,num_writes,nplow,nphigh
 integer(kind=4) :: cur_proj,cur_halo
 real(kind=4) :: z_write
-integer(1) :: rho_c_dm_int1, rho_c_nu_int1, x_int1(3)
-integer(4) :: rho_c_dm_int4, rho_c_nu_int4
-integer(1), parameter :: nmax_int1=127
+integer(4) :: v_resolution=16384
+integer(4) :: rho_c_dm_int4
 real(4) :: vmax, vmax_local, v_r2i
-integer(2) :: v_res_int2=16384, v_int2(3)
 
 #ifdef NEUTRINOS
-    integer(4) :: np_dm, np_nu, ind_check1, ind_check2
+    integer(4) :: np_dm, np_nu, ind_check1, ind_check2, rho_c_nu_int4
     character (len=max_path) :: ofile_nu,ofile_rho_c_nu,ofile_rho_c_nu_e
 #endif
 
@@ -27,7 +25,7 @@ call mpi_bcast(z_write,1,mpi_real,0,mpi_comm_world,ierr)
 vmax_local = maxval(abs(xv(4:6,:)))
 call mpi_allreduce(vmax_local, vmax, 1, mpi_real, mpi_max, mpi_comm_world, ierr)
 
-v_r2i = real(v_res_int2)/vmax
+v_r2i = v_resolution/vmax
 
 !! most linux systems choke when writing more than 2GB of data
 !! in one write statement, so break up into blocks < 2GB 
@@ -81,56 +79,49 @@ do k=1,nc_node_dim
 do j=1,nc_node_dim
 do i=1,nc_node_dim
 
-  rho_c_dm_int1=-127; rho_c_nu_int1=-127 ! [-127,128] ! reset coarse density
   rho_c_dm_int4=0; rho_c_nu_int4=0
   l=hoc(i,j,k) ! set tail particle
 
   do while (l>0) ! iterate over all particles
 #   ifdef NEUTRINOS
-      x_int1(:) = int(fraction( xv(1:3,l)/mesh_scale ) * 256 - 128, kind=1) ! [-128,127]
-      v_int2(:) = int(xv(4:6,l) * v_r2i, kind=2) ! [-16384,16384], note that int2:= [-32768,32767]
       if PID(l)=1 then ! dm
         rho_c_dm_int4=rho_c_dm_int4+1 ! increment of density
-        write(12) x_int1(:) ! write x
-        write(12) v_int2(:) ! write v
+        write(12) int( fraction( xv(1:3,l)/mesh_scale ) * 256 ,kind=1) ! write x
+        write(12) int( xv(4:6,l) * v_r2i ,kind=2) ! write v
       else ! nu
         rho_c_nu_int4=rho_c_nu_int4+1
-        write(22) x_int1(:)
-        write(22) v_int2(:)
+        write(22) int( fraction( xv(1:3,l)/mesh_scale ) * 256 ,kind=1)
+        write(22) int( xv(4:6,l) * v_r2i ,kind=2)
       endif
 #   else
       rho_c_dm_int4=rho_c_dm_int4+1 ! dm only
-      x_int1(:) = int(fraction( xv(1:3,l)/mesh_scale ) * 256 - 128, kind=1)
-      v_int2(:) = int(xv(4:6,l) * v_r2i, kind=2)
-      write(12) x_int1(:)
-      write(12) v_int2(:)
+      write(12) int( fraction( xv(1:3,l)/mesh_scale ) * 256 ,kind=1)
+      write(12) int( xv(4:6,l) * v_r2i ,kind=2)
 #   endif
     l=ll(l) ! prev particle
   enddo ! while
 
 !! write dm coarse density field to files
   if (rho_c_dm_int4<255) then
-    rho_c_dm_int1=rho_c_dm_int4-128 ! [-128,126]
-    write(13) rho_c_dm_int1 ! write density in int1
+    write(13) int(rho_c_dm_int4,kind=1) ! write density in int1
   else
-    write(13) nmax_int1 ! 127
-    write(14) rho_c_dm_int4 ! [255,+infty]
+    write(13) int(255,kind=1)
+    write(14) rho_c_dm_int4 ! [255,]
   endif
 
 # ifdef NEUTRINOS
 !! write also neutrino density field
   if (rho_c_nu_int4<255) then
-    rho_c_nu_int1=rho_c_nu_int4-128
-    write(23) rho_c_nu_int1
+    write(23) int(rho_c_nu_int4,kind=1)
   else
-    write(23) nmax_int1
+    write(23) int(255,kind=1)
     write(24) rho_c_nu_int4
   endif
 #endif
 
-enddo ! i
-enddo ! j
-enddo ! k
+enddo
+enddo
+enddo
 
 close(12); close(13); close(14)
 #ifdef NEUTRINOS
