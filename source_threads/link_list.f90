@@ -6,7 +6,7 @@
     include 'mpif.h'
 #    include "cubepm.fh"
 
-    integer(4) :: i,j,k,pp,pc
+    integer(4) :: i,j,k,pp,pc,ierr
     integer(4) :: omp_get_thread_num,omp_get_num_threads
     external omp_get_thread_num,omp_get_num_threads
 
@@ -29,8 +29,10 @@
        if (i < hoc_nc_l .or. i > hoc_nc_h .or. &
            j < hoc_nc_l .or. j > hoc_nc_h .or. &
            k < hoc_nc_l .or. k > hoc_nc_h) then
-         write (*,*) 'PARTICLE DELETED',xv(:,pp) 
-         xv(:,pp)=xv(:,np_local)
+         print*, 'link_list: particle moved out of buffer!',xv(:,pp)
+         print*, 'check timestep & update_position!'
+         call mpi_abort(mpi_comm_world,ierr,ierr)
+         !xv(:,pp)=xv(:,np_local)
 
 #ifdef PID_FLAG
          PID(pp)=PID(np_local)
