@@ -54,11 +54,19 @@ implicit none
 #endif
 
        call random_number(offset)
-       offset=(offset-0.5)*mesh_scale*4.0  - shake_offset
-       shake_offset=shake_offset+offset
-       print *,'current shake offset:',shake_offset
-    endif
+#  ifdef NEUTRINOS
+     offset=(offset-0.5)*mesh_scale ! no shake offset
+#  else
+     offset=(offset-0.5)*mesh_scale*4.0  - shake_offset
+     shake_offset=shake_offset+offset
+     print*,'current shake offset:',shake_offset
+#  endif
+  endif
+
+
+
     if (pair_infall_no_shake.and.pair_infall .or. pp_test) offset=0.0
+
     call mpi_bcast(offset,3,MPI_REAL,0,MPI_COMM_WORLD,ierr)
     call mpi_bcast(shake_offset,3,MPI_REAL,0,MPI_COMM_WORLD,ierr)
 #endif

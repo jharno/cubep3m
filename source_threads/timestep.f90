@@ -29,7 +29,12 @@
     enddo 
     call mpi_allreduce(vmax_local, vmax, 1, mpi_real, mpi_max, mpi_comm_world, ierr)
 #ifdef DISP_MESH
-    Dx = real(nf_buf)-4.*mesh_scale
+
+#   ifdef NEUTRINOS
+      Dx=real(nf_buf)-0.5*mesh_scale ! 5.5 coarse grids
+#   else
+      Dx = real(nf_buf)-4.*mesh_scale ! 2.0 coarse grids
+#   endif
 #else
     Dx = real(nf_buf)
 #endif

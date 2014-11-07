@@ -149,7 +149,7 @@ integer(4), parameter   :: max_halo_np = (nc_halo_max+1)**3*5
 
 !! parameters for timestep constained by fastest moving particle
 
-real(4), parameter :: fbuf = 0.9    !! Fraction of buffer fastest particle can move
+real(4), parameter :: fbuf = 0.999    !! Fraction of buffer fastest particle can move
 
 !! physical constants
 
