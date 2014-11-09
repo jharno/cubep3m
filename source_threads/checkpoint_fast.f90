@@ -4,19 +4,19 @@ implicit none
 include 'mpif.h'
 #include "cubepm.fh"
 
-character (len=max_path) :: ofile_dm,ofile_rho_c_dm,ofile_rho_c_dm_e
+character (len=max_path) :: fdm_zip1,fdm_zip2,fdm_zip3
 character (len=4) :: rank_s
 character (len=7) :: z_s  
 integer(kind=4) :: i,j,k,l,fstat,blocksize,num_writes,nplow,nphigh
 integer(kind=4) :: cur_proj,cur_halo
 real(kind=4) :: z_write
 integer(4) :: v_resolution=16384
-integer(4) :: rho_c_dm_int4
+integer(4) :: rhoc_dm_i4
 real(4) :: vmax, vmax_local, v_r2i
 
 #ifdef NEUTRINOS
-    integer(4) :: np_dm, np_nu, ind_check1, ind_check2, rho_c_nu_int4
-    character (len=max_path) :: ofile_nu,ofile_rho_c_nu,ofile_rho_c_nu_e
+    integer(4) :: np_dm, np_nu, ind_check1, ind_check2, rhoc_nu_i4
+    character (len=max_path) :: fnu_zip1,fnu_zip2,fnu_zip3
 #endif
 
 if (rank == 0) z_write=z_checkpoint(cur_checkpoint)
@@ -39,22 +39,22 @@ rank_s=adjustl(rank_s)
 write(z_s,'(f7.3)') z_write
 z_s=adjustl(z_s)
 
-ofile_dm=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'xv'//rank_s(1:len_trim(rank_s))//'.dat'
-ofile_rho_c_dm=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'rhoc'//rank_s(1:len_trim(rank_s))//'.dat'
-ofile_rho_c_dm_e=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'rhoce'//rank_s(1:len_trim(rank_s))//'.dat'
+fdm_zip1=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip1_'//rank_s(1:len_trim(rank_s))//'.dat'
+fdm_zip2=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip2_'//rank_s(1:len_trim(rank_s))//'.dat'
+fdm_zip3=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip3_'//rank_s(1:len_trim(rank_s))//'.dat'
 #ifdef NEUTRINOS
-ofile_nu=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'xv'//rank_s(1:len_trim(rank_s))//'_nu.dat'
-ofile_rho_c_nu=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'rhoc'//rank_s(1:len_trim(rank_s))//'_nu.dat'
-ofile_rho_c_nu_e=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'rhoce'//rank_s(1:len_trim(rank_s))//'_nu.dat'
+fnu_zip1=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip1_'//rank_s(1:len_trim(rank_s))//'_nu.dat'
+fnu_zip2=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip2_'//rank_s(1:len_trim(rank_s))//'_nu.dat'
+fnu_zip3=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip3_'//rank_s(1:len_trim(rank_s))//'_nu.dat'
 #endif
 
-open(unit=12, file=ofile_dm, status="replace", iostat=fstat, access="stream")
-open(unit=13, file=ofile_rho_c_dm, status="replace", iostat=fstat, access="stream")
-open(unit=14, file=ofile_rho_c_dm_e, status="replace", iostat=fstat, access="stream")
+open(unit=12, file=fdm_zip1, status="replace", iostat=fstat, access="stream")
+open(unit=13, file=fdm_zip2, status="replace", iostat=fstat, access="stream")
+open(unit=14, file=fdm_zip3, status="replace", iostat=fstat, access="stream")
 #ifdef NEUTRINOS
-open(unit=22, file=ofile_nu, status="replace", iostat=fstat, access="stream")
-open(unit=23, file=ofile_rho_c_nu, status="replace", iostat=fstat, access="stream")
-open(unit=24, file=ofile_rho_c_nu_e, status="replace", iostat=fstat, access="stream")
+open(unit=22, file=fnu_zip1, status="replace", iostat=fstat, access="stream")
+open(unit=23, file=fnu_zip2, status="replace", iostat=fstat, access="stream")
+open(unit=24, file=fnu_zip3, status="replace", iostat=fstat, access="stream")
 #endif
 
 cur_checkpoint=cur_checkpoint+1
@@ -79,22 +79,25 @@ do k=1,nc_node_dim
 do j=1,nc_node_dim
 do i=1,nc_node_dim
 
-  rho_c_dm_int4=0; rho_c_nu_int4=0
+  rhoc_dm_i4=0
+# ifdef NEUTRINOS
+    rhoc_nu_i4=0
+# endif
   l=hoc(i,j,k) ! set tail particle
 
   do while (l>0) ! iterate over all particles
 #   ifdef NEUTRINOS
-      if PID(l)=1 then ! dm
-        rho_c_dm_int4=rho_c_dm_int4+1 ! increment of density
+      if (PID(l)==1) then ! dm
+        rhoc_dm_i4=rhoc_dm_i4+1 ! increment of density
         write(12) int( fraction( xv(1:3,l)/mesh_scale ) * 256 ,kind=1) ! write x
         write(12) int( xv(4:6,l) * v_r2i ,kind=2) ! write v
       else ! nu
-        rho_c_nu_int4=rho_c_nu_int4+1
+        rhoc_nu_i4=rhoc_nu_i4+1
         write(22) int( fraction( xv(1:3,l)/mesh_scale ) * 256 ,kind=1)
         write(22) int( xv(4:6,l) * v_r2i ,kind=2)
       endif
 #   else
-      rho_c_dm_int4=rho_c_dm_int4+1 ! dm only
+      rhoc_dm_i4=rhoc_dm_i4+1 ! dm only
       write(12) int( fraction( xv(1:3,l)/mesh_scale ) * 256 ,kind=1)
       write(12) int( xv(4:6,l) * v_r2i ,kind=2)
 #   endif
@@ -102,20 +105,20 @@ do i=1,nc_node_dim
   enddo ! while
 
 !! write dm coarse density field to files
-  if (rho_c_dm_int4<255) then
-    write(13) int(rho_c_dm_int4,kind=1) ! write density in int1
+  if (rhoc_dm_i4<255) then
+    write(13) int(rhoc_dm_i4,kind=1) ! write density in int1
   else
     write(13) int(255,kind=1)
-    write(14) rho_c_dm_int4 ! [255,]
+    write(14) rhoc_dm_i4 ! [255,]
   endif
 
 # ifdef NEUTRINOS
 !! write also neutrino density field
-  if (rho_c_nu_int4<255) then
-    write(23) int(rho_c_nu_int4,kind=1)
+  if (rhoc_nu_i4<255) then
+    write(23) int(rhoc_nu_i4,kind=1)
   else
     write(23) int(255,kind=1)
-    write(24) rho_c_nu_int4
+    write(24) rhoc_nu_i4
   endif
 #endif
 
