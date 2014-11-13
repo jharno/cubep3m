@@ -132,20 +132,69 @@
 
 #endif
 
+
+#ifndef SLOWXV
+
+#  ifdef DISP_MESH                                                                                                           
+   xv(1:3,:) = xv(1:3,:) + spread(shake_offset,dim=2,ncopies=np_local) 
+#  endif
+
+#  ifdef NEUTRINOS
+  ind_check1 = 0
+  ind_check2 = 0
+do i=1,num_writes
+  nplow=(i-1)*blocksize+1
+  nphigh=min(i*blocksize,np_local)
+  write(12) pack(xv(:,nplow:nphigh),spread(PID(nplow:nphigh)==1,dim=1,ncopies=6))
+  ind_check1 = ind_check1 + count(PID(nplow:nphigh)==1)
+  write(22) pack(xv(:,nplow:nphigh),spread(PID(nplow:nphigh)/=1,dim=1,ncopies=6))
+  ind_check2 = ind_check2 + count(PID(nplow:nphigh)/=1)
+#  ifdef NUPID
+  write(23) PID(j)
+#  endif
+enddo
+close(12); close(22)
+#  ifdef NUPID
+close(23)
+#  endif 
+if (ind_check1 .ne. np_dm .or. ind_check2 .ne. np_nu) then
+    write(*,*) "Dark Matter checkpoint error: ind_checks ", ind_check1, np_dm, ind_check2, np_nu
+    call mpi_abort(mpi_comm_world,ierr,ierr)
+endif
+
+#  else
+! NEUTRINOS
+
+do i=1,num_writes
+  nplow=(i-1)*blocksize+1
+  nphigh=min(i*blocksize,np_local)
+  write(12) xv(:,nplow:nphigh)
+enddo
+close(12)
+#  endif
+! NEUTRINOS
+
+#  ifdef DISP_MESH
+       xv(1:3,:) = xv(1:3,:) - spread(shake_offset,dim=2,ncopies=np_local)
+#  endif
+
+#else
+! SLOWXV
 #ifdef NEUTRINOS
 
     ind_check1 = 0
     ind_check2 = 0
-
     do i=1,num_writes
       nplow=(i-1)*blocksize+1
       nphigh=min(i*blocksize,np_local)
       do j=nplow,nphigh
-#ifdef NUPID
+
+#ifdef NUPID   !!! DARK MATTER
         if (PID(j) == 0) then
 #else
         if (PID(j) == 1) then
 #endif
+
 #ifdef DISP_MESH
             write(12) xv(1:3,j) - shake_offset
             write(12) xv(4:6,j)
@@ -153,16 +202,16 @@
             write(12) xv(:,j)
 #endif
             ind_check1 = ind_check1 + 1
-        else
+        else  !!! NEUTRINOS
 #ifdef DISP_MESH
             write(22) xv(1:3,j) - shake_offset
             write(22) xv(4:6,j)
 #else
             write(22) xv(:,j)
 #endif
-#ifdef NUPID
+#  ifdef NUPID
             write(23) PID(j)
-#endif
+#  endif
             ind_check2 = ind_check2 + 1
         endif
       enddo
@@ -170,9 +219,9 @@
 
     close(12)
     close(22)
-#ifdef NUPID
+#  ifdef NUPID
     close(23)
-#endif
+#  endif
 
     !! Consistency check
     if (ind_check1 .ne. np_dm .or. ind_check2 .ne. np_nu) then
@@ -190,22 +239,24 @@
 ! the intel compiler puts arrays on the stack to write to disk
 ! this causes memory problems
 !    write(12) xv(:,:np_local)
+
     do i=1,num_writes
       nplow=(i-1)*blocksize+1
       nphigh=min(i*blocksize,np_local)
 !!      print *,rank,nplow,nphigh,np_local
       do j=nplow,nphigh
-#ifdef DISP_MESH
+# ifdef DISP_MESH
         write(12) xv(1:3,j) - shake_offset
         write(12) xv(4:6,j)
-#else
+# else
         write(12) xv(:,j)
-#endif
+# endif
       enddo
     enddo
 
     close(12)
 
+#endif
 #endif
 
 !! Open PID file
