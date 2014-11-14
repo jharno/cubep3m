@@ -377,12 +377,18 @@ program cic_crossvel
         call swap_velden12(0)
         call velocity_density(cur_dimension, 1, g0, N_closest_dm)
         call relative_velocity
+#ifdef write_vel
+        call writevelocityfield(3, g0)
+#endif
         call darkmatter(0)
         call swap_slab12(0)
         call velocity_density(cur_dimension, 0, g1, N_closest_nu)
         call swap_velden12(0)
         call velocity_density(cur_dimension, 1, g1, N_closest_dm)
         call relative_velocity
+#ifdef write_vel
+        call writevelocityfield(3, g1)
+#endif
         call darkmatter(0)
         call powerspectrum(slab, slab2, pkvel(cur_dimension,:,:,4), 0)
         if (rank == 0) write(*,*)
@@ -397,12 +403,18 @@ program cic_crossvel
             call swap_velden12(0)
             call velocity_density(cur_dimension, 2, g0, N_closest_h)
             call relative_velocity
+#ifdef write_vel
+            call writevelocityfield(4, g0)
+#endif
             call darkmatter(0)
             call swap_slab12(0)
             call velocity_density(cur_dimension, 0, g1, N_closest_nu)
             call swap_velden12(0)
             call velocity_density(cur_dimension, 2, g1, N_closest_h)
             call relative_velocity
+#ifdef write_vel
+            call writevelocityfield(4, g1)
+#endif
             call darkmatter(0)
             call powerspectrum(slab, slab2, pkvel(cur_dimension,:,:,5), 0)
             if (rank == 0) write(*,*)
@@ -416,12 +428,18 @@ program cic_crossvel
             call swap_velden12(0)
             call velocity_density(cur_dimension, 2, g0, N_closest_h)
             call relative_velocity
+#ifdef write_vel
+            call writevelocityfield(5, g0)
+#endif
             call darkmatter(0)
             call swap_slab12(0)
             call velocity_density(cur_dimension, 1, g1, N_closest_dm)
             call swap_velden12(0)
             call velocity_density(cur_dimension, 2, g1, N_closest_h)
             call relative_velocity
+#ifdef write_vel
+            call writevelocityfield(5, g1)
+#endif
             call darkmatter(0)
             call powerspectrum(slab, slab2, pkvel(cur_dimension,:,:,6), 0)
             if (rank == 0) write(*,*)
@@ -4576,6 +4594,15 @@ subroutine writevelocityfield(command, glook)
     else if (command == 2) then
         fn = output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_write(1:len_trim(z_write))//&
              "vel"//dim_string//rank_string(1:len_trim(rank_string))//"_halo"//g_string//".bin"
+    else if (command == 3) then
+        fn = output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_write(1:len_trim(z_write))//&
+             "vel"//dim_string//rank_string(1:len_trim(rank_string))//"_nu-dm"//g_string//".bin"
+    else if (command == 4) then
+        fn = output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_write(1:len_trim(z_write))//&
+             "vel"//dim_string//rank_string(1:len_trim(rank_string))//"_nu-ha"//g_string//".bin"
+    else if (command == 5) then
+        fn = output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_write(1:len_trim(z_write))//&
+             "vel"//dim_string//rank_string(1:len_trim(rank_string))//"_dm-ha"//g_string//".bin"
     endif
 
     open(unit=11, file=fn, status="replace", iostat=fstat, access="stream") 
