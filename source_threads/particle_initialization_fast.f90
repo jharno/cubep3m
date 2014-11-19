@@ -35,7 +35,7 @@ read(11) np_dm,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_projec
 do k=1,nc_node_dim
 do j=1,nc_node_dim
 do i=1,nc_node_dim
-  rhoc_i4=0 ! clean up, very imortant.
+  rhoc_i4=0; xi4=0 ! clean up, very imortant.
   read(12) rhoc_i1(1) ! get number of particles in the coarse grid
   if (rhoc_i4==255) read(13) rhoc_i4
   do l=1,rhoc_i4
@@ -60,7 +60,7 @@ close(11);close(12);close(13)
   do k=1,nc_node_dim
   do j=1,nc_node_dim
   do i=1,nc_node_dim
-    rhoc_i4=0 ! clean up, very imortant.
+    rhoc_i4=0; xi4=0 ! clean up, very imortant.
     read(22) rhoc_i1(1)
     if (rhoc_i4==255) read(23) rhoc_i4
     do l=1,rhoc_i4
