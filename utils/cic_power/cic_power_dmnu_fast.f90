@@ -487,9 +487,9 @@ contains
     character(len=200) :: check_name,f_zip1,f_zip2,f_zip3
     integer :: command
     real(8) :: mh_total_local
-real(4) :: a,t,tau,dt_f_acc,dt_c_acc,dt_pp_acc,mass_p,v_r2i
+real(4) :: a,t,tau,dt_f_acc,dt_c_acc,dt_pp_acc,mass_p,v_r2i, shake_offset(3)
 integer(4) :: nts,sim_checkpoint,sim_projection,sim_halofind
-integer(1) :: xi1(4,3), rhoc_i1(4)
+integer(1) :: xi1(4,3), rhoc_i1(4), test_i1
 integer(4) :: xi4(3), rhoc_i4, np_uzip, np_dm, np_nu, ii,jj,kk,l
 integer(2) :: vi2(3)
 equivalence(xi1,xi4)
@@ -533,8 +533,10 @@ else
   endif
 endif
 !! read in checkpoint header data
-if (command < 2) then
-  read(11) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint,sim_projection,sim_halofind,mass_p,v_r2i
+if (command == 0) then
+  read(11) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint,sim_projection,sim_halofind,mass_p,v_r2i,shake_offset
+elseif ( command == 1 ) then
+  read(11) np_local_dm,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint,sim_projection,sim_halofind,mass_p,v_r2i,shake_offset
 else
   read(21) np_local_h,t, tau
 endif
@@ -546,7 +548,6 @@ if (command == 0) then
     call mpi_abort(mpi_comm_world, ierr, ierr)
   endif
 else if (command == 1) then
-  np_local_dm = np_local
   if (np_local_dm > max_np_dm) then
     write(*,*) 'ERROR: Too many dm particles to store in memory!'
     write(*,*) 'rank', rank, 'np_local_dm', np_local_dm, 'max_np_dm', max_np_dm
@@ -589,9 +590,18 @@ if (command == 1) then ! dark matter
   enddo
   enddo
   enddo! kk
-  close(11);close(12);close(13)
+  read(11,end=701) test_i1
+  print*,'ERROR: rank',rank,': file not ending:',f_zip1
+  call mpi_abort(mpi_comm_world,ierr,ierr)
+  701 close(11);close(12);close(13)
   print*,'Unzip dm done:'
-  print*,'np_local, np_uzip  =', np_local_dm, np_uzip
+  print*,'np_local_dm, np_uzip  =', np_local_dm, np_uzip
+  print*, 'initialized dm particles:'
+  print*,'min max x  =', minval(xvp(1,1:np_local_dm)),maxval(xvp(1,1:np_local_dm))
+  print*,'min max y  =', minval(xvp(2,1:np_local_dm)),maxval(xvp(2,1:np_local_dm))
+  print*,'min max z  =', minval(xvp(3,1:np_local_dm)),maxval(xvp(3,1:np_local_dm))
+  print*, xvp(3,np_local_dm)
+  pause
 elseif (command == 0) then ! neutrinos
   np_uzip=0
   do kk=1,ncoarse_node_dim
@@ -613,6 +623,11 @@ elseif (command == 0) then ! neutrinos
   close(21); close(22); close(23)
   print*,'Unzip neutrinos done:'
   print*,'np_local, np_uzip  =', np_local, np_uzip
+  print*, 'initialized nu particles:'
+  print*,'min max x  =', minval(xvp(1,1:np_local)), maxval(xvp(1,1:np_local))
+  print*,'min max y  =', minval(xvp(2,1:np_local)), maxval(xvp(2,1:np_local))
+  print*,'min max z  =', minval(xvp(3,1:np_local)), maxval(xvp(3,1:np_local))
+  pause
 else !! Read halo global coordinates and velocities
   mh_total_local = 0.
   do j=1, np_local_h
