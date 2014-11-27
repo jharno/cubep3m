@@ -1,5 +1,5 @@
 ! write checkpoints to disk, using integers, 9 bytes per particle, instead of 24.                                                                                                            
-subroutine checkpoint
+subroutine checkpoint_fast
 implicit none
 include 'mpif.h'
 #include "cubepm.fh"
@@ -19,6 +19,7 @@ real(4) :: vmax, vmax_local, v_r2i
 #endif
 
 if (rank == 0) z_write=z_checkpoint(cur_checkpoint)
+print*,'checkpoint_fast =', cur_checkpoint, z_write
 call mpi_bcast(z_write,1,mpi_real,0,mpi_comm_world,ierr)
 vmax_local = maxval(abs(xv(4:6,1:np_local)))
 call mpi_allreduce(vmax_local, vmax, 1, mpi_real, mpi_max, mpi_comm_world, ierr)
@@ -50,15 +51,27 @@ cur_halo = cur_halofind
 if (projection_step) cur_proj = cur_proj + 1
 if (halofind_step) cur_halo = cur_halo + 1
 
-write(11) np_dm,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_proj,cur_halo,mass_p,v_r2i
+write(11) np_dm,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_proj,cur_halo,mass_p,v_r2i,shake_offset
+print*,'checkpoint_fast: headers =',np_dm,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_proj,cur_halo,mass_p,v_r2i,shake_offset
+
 #ifdef NEUTRINOS
-  write(21) np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_proj,cur_halo,mass_p, v_r2i
+  shake_offset=0
+  write(21) np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_proj,cur_halo,mass_p, v_r2i,shake_offset
+  print*,'checkpoint_fast: headers_nu =',np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_proj,cur_halo,mass_p,v_r2i,shake_offset
 #endif
 if (rank == 0) then
   print*, "checkpoint_fast: np_dm, np_nu =", np_dm, np_nu
   print*, "checkpoint_fast: vmax =", vmax
   print*, "v_r2i =",v_r2i
 endif
+
+print*, 'will do checkpoint_fast:'
+print*,'min max x  =', minval(xv(1,1:np_local)), maxval(xv(1,1:np_local))
+print*,'min max y  =', minval(xv(2,1:np_local)), maxval(xv(2,1:np_local))
+print*,'min max z  =', minval(xv(3,1:np_local)), maxval(xv(3,1:np_local))
+print*,'min max vx =', minval(xv(4,1:np_local)), maxval(xv(4,1:np_local))
+print*,'min max vy =', minval(xv(5,1:np_local)), maxval(xv(5,1:np_local))
+print*,'min max vz =', minval(xv(6,1:np_local)), maxval(xv(6,1:np_local))
 
 !!!!!!!!!!!!!!!! Loop over physical coarse grids !!!!!!!!!!!!!!!!
 do k=1,nc_node_dim
@@ -125,4 +138,4 @@ endif
 
     checkpoint_step=.false.
 
-  end subroutine checkpoint
+  end subroutine checkpoint_fast
