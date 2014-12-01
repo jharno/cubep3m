@@ -6,6 +6,9 @@
 #    include "cubepm.fh"
 
     integer(4) :: i,fstat
+#ifdef BOXDUMP
+    integer(4) :: k,j,r,ind
+#endif
 
     ierr=-1
     fstat=0
@@ -226,6 +229,21 @@
     !! Determine factors that must be multiplied to mass_p for dark matter and nuetrinos
     mass_p_nudm_fac(1) = 1. - ratio_omega_nudm        !! Dark matter
     mass_p_nudm_fac(2) = ratio_omega_nudm/ratio_nudm  !! Neutrino
+#endif
+
+#ifdef BOXDUMP
+    !! Initialize array containing ranks that need to write data
+    nsubcuberanks(:) = -1
+    ind = 1
+    do k = 1, nsubcubez
+        do j = 1, nsubcubey
+            do i = 1, nsubcubex
+                r = (k-1)*nodes_dim**2 + (j-1)*nodes_dim + (i-1)
+                if (r < nodes_dim**3) nsubcuberanks(ind) = r
+                ind = ind + 1
+            enddo
+        enddo
+    enddo
 #endif
 
     ! NEW TRICK BY JHD TO REMOVE MEMORY RACING CONDITION ON THREADED PLAN
