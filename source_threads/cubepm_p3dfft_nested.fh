@@ -24,6 +24,9 @@ real(4) :: shake_offset(3), cur_sep, dt_pp_acc,dt_pp_ext_acc, dt_max_v, kill_tim
 #ifdef NEUTRINOS
 integer(4) :: nuPIDmap
 #endif
+#ifdef BOXDUMP
+integer(4), dimension(nsubcubex*nsubcubey*nsubcubez) :: nsubcuberanks
+#endif
 
 ! :: checkpoint and projection variables
 
@@ -162,6 +165,10 @@ common / divarp / PID, send_buf_PID, recv_buf_PID
 common / drvar / f_mesh_mass
 #else
 common / drvar / rho_pxy, rho_pxz, rho_pyz, rp_buf, f_mesh_mass
+#endif
+
+#ifdef BOXDUMP
+common / bdvar / nsubcuberanks
 #endif
 
 common / lvar / min_den_buf

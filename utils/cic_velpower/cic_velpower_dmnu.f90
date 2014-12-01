@@ -1,12 +1,14 @@
 !!
 !! cic_velpower_dmnu.f90
 !!
-!! Program to compute the velocity power spectra of both dark matter and neutrinos as well as their 
-!! cross velocity power spectra. This is to be used in conjunction with particle checkpoint files
+!! Program to compute velocity power spectra and linear velocity power spectra
+!! for dark matter, neutrinos and dark matter halos.
+!!  
+!! This is to be used in conjunction with particle checkpoint files
 !! produced by a -DNEUTRINOS cubep3m simulation.
 !!
 !! * Using FFTW on the SciNet GPC compile with:
-!!   mpif90 -shared-intel -fpp -g -O3 -DNGP -DGAUSSIAN_SMOOTH -mt_mpi cic_velpower_dmnu.f90 -I$SCINET_FFTW_INC 
+!!   mpif90 -shared-intel -fpp -g -O3 -openmp -mcmodel=medium -mt_mpi indexedsort.f90 cic_velpower_dmnu.f90 -I$SCINET_FFTW_INC 
 !!        -I$P3DFFT_INC -o ngp_velpower_dmnu -L$SCINET_FFTW_LIB -L$P3DFFT_LIB -lp3dfft -lfftw3f
 !!
 !! * Using MKL on the SciNet GPC compile with:
@@ -20,42 +22,43 @@
 !! * Optional flags:
 !!   -DNGP: Uses NGP interpolation for binning of the power spectrum. 
 !!   -DSLAB: Alternatively run with FFTW slab decomposition instead of P3DFFT pencil decomposition.
-!!   -DMOMENTUM: Uses the approach of computing the velocity field by dividing the momentum density
-!!               field by the density field. If this flag is not used then the velocity field is computed
-!!               by taking the average velocity of the nearest particles to each grid centre.
-!!   -DGAUSSIAN_SMOOTH: Smooths the density field with a Gaussian filter to avoid division by empty 
-!!                      cells when converting from momentum density to velocity. 
-!!   -Dwrite_vel: Writes gridded velocity fields to binary files. 
+!!           => THIS DOES NOT WORK
 !!   -DKAISER: Adjusts for redshift space distortions.
 !!   -DDEBUG: Output useful debugging information.
-
-program cic_velpower 
-#ifndef MOMENTUM
+!!   -DDEBUG_LOW: idem
+!!   -DLOGBIN
+!!   -DNPLINLOGMAX: Uses the algotithm in indexedsort.f90 to search for the nearest particle
+!!   -DNP_FAST: Uses an array to speed up the algorithm searching for the nearest particle
+!!   -DCATCH_SEED: Catches the random number generator seed from file
+!!   -DWRITE_SEED: Writes the seed to a file
+!!   -DRADIUS: save the distance to the nearest particle instead of the velocity
+!!             useful to make a plot... do not forget to activate write_vel
+!!   -Dwrite_vel: Writes gridded velocity fields to binary files. 
+!!   -Dwrite_den: Writes gridded density fields to binary files. 
+!!   -DUCCFD: Uses Coarse Cells For Density (see subroutine densityfield)
+!!   -Dcompute_denPS: Computes density power spectra
+ 
+program cic_velpower_halo
   use omp_lib
-#endif
 
   implicit none
 
   include 'mpif.h'
   include '../../parameters'
 
-  character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints_nu'
+  character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints'
 
-#ifndef MOMENTUM
   !! Threading
   integer(4), parameter :: nt = 8
 
   !! Number of nearest particles from grid centre to determine average velocity
-  integer, parameter :: N_closest_nu = 30
-  integer, parameter :: N_closest_dm = 4
-  integer, parameter :: N_closest_auto = 1
-#endif
-
-#ifdef GAUSSIAN_SMOOTH
-  !! Gaussian smoothing parameters (to go from momentum density field to velocity field)
-  real, parameter :: cell_smooth = 1.0
-  real, parameter :: R_smooth = box / nc * cell_smooth
-#endif
+  integer, parameter :: N_closest_nu = 1
+  integer, parameter :: N_closest_dm = 1 
+  integer, parameter :: N_closest_h = 1
+  integer, parameter :: N_closest_auto_nu = 1
+  integer, parameter :: N_closest_auto_dm = 1
+  integer, parameter :: N_closest_auto_h = 1
+  integer, parameter :: max_N_closest = 1
 
   !! nc is the number of cells per box length
   integer, parameter :: hc=nc/2
@@ -68,10 +71,10 @@ program cic_velpower
   real, parameter    :: npr=np
 
 #ifdef LOGBIN
-  integer, parameter :: numbins = hc / 48 
+  integer, parameter :: numbins = 16 !hc / 48 
 #endif
 
-  !! internals
+  !! checkpoints parameters
   integer, parameter :: max_checkpoints=100
   real, dimension(max_checkpoints) :: z_checkpoint
   integer num_checkpoints, cur_checkpoint
@@ -87,15 +90,16 @@ program cic_velpower
   integer(4), parameter :: nodes_slab = nodes_dim * nodes_dim
   integer(4), parameter :: nc_slab = nc / nodes
 
-  !! For storage of dark matter particles (usually small since r_n_1_3 generally > 1)
+  !! For storage of dark matter particles and halos (usually small since ratio_nudm_dim generally > 1)
   integer(4), parameter :: max_np_dm = max_np / ratio_nudm_dim**3
+  integer(4), parameter :: max_np_h = 1000000
 
   !! parallelization variables
   integer(4), dimension(6) :: cart_neighbor
   integer(4), dimension(3) :: slab_coord, cart_coords
   integer(4) :: slab_rank, mpi_comm_cart, cart_rank, rank, ierr
 
-  integer(4) :: np_local,np_local_dm
+  integer(4) :: np_local,np_local_dm,np_local_h,np_h
   integer(8) :: plan, iplan
   logical :: firstfftw
 
@@ -104,19 +108,18 @@ program cic_velpower
 
   !! Other parameters
   real, parameter :: pi=3.14159
-
-  !! Dark matter arrays
+  
+  !! Particles arrays
   real, dimension(6,max_np) :: xvp
   real, dimension(6,max_np_dm) :: xvp_dm
+  real, dimension(6,max_np_h)  :: xvmp_h
   real, dimension(6,np_buffer) :: xp_buf
   real, dimension(6*np_buffer) :: send_buf, recv_buf
 
   !! Power spectrum arrays
-  real, dimension(3, 3, nc) :: pkmomdim
-  real, dimension(3, 3, nc) :: pkmomdim_dm
-  real, dimension(3, 3, nc) :: pkmomdim_dmnu
-  real, dimension(3, 3, nc) :: pkmomdim_rel
+  real, dimension(3, 3, nc, 0:34) :: pk_all 
   real, dimension(3, nc) :: pkdm
+  logical, dimension(0:34) :: computePS
 
   !! For pencils decomposition:
 #ifdef SLAB
@@ -141,14 +144,8 @@ program cic_velpower
   real, dimension(nc_node_dim, nc_node_dim, nc_pen, 0:nodes_pen-1) :: recv_cube
 #endif
 
-#ifdef MOMENTUM
-  !! Array containing the matter density field
-  real, dimension(0:nc_node_dim+1, 0:nc_node_dim+1, 0:nc_node_dim+1) :: massden
-  real, dimension(0:nc_node_dim+1, 0:nc_node_dim+1) :: massden_send_buff
-  real, dimension(0:nc_node_dim+1, 0:nc_node_dim+1) :: massden_recv_buff
-#else
-  !! Parameters for linked list
-  integer(4), parameter :: nfine_buf = 32
+  !! Parameters for the coarse grid
+  integer(4), parameter :: nfine_buf = 16
   integer(4), parameter :: mesh_scale = 4
   integer(4), parameter :: nc_buf = nfine_buf / mesh_scale
   integer(4), parameter :: nm_node_dim = nc_node_dim / mesh_scale
@@ -157,28 +154,87 @@ program cic_velpower
   integer(4), parameter :: hoc_pass_depth = 2*nc_buf
   real(4), parameter    :: rnf_buf = real(nfine_buf)
   integer(4), parameter :: num_ngbhs = (2*nc_buf+1)**3
-  integer(4), parameter :: max_npart_search = int(num_ngbhs*real(max_np)/real(nc_node_dim)**2)
 
-  !! Linked list and head-of-chain arrays
-  integer(4), dimension(max_np) :: ll
-  integer(4), dimension(max_np_dm) :: ll_dm
+  integer(4), parameter :: nfine_buf_h = 256
+  integer(4), parameter :: mesh_scale_h = 32
+  integer(4), parameter :: nc_buf_h = nfine_buf_h / mesh_scale_h
+  integer(4), parameter :: nm_node_dim_h = nc_node_dim / mesh_scale_h
+  integer(4), parameter :: hoc_nc_l_h = 1 - nc_buf_h
+  integer(4), parameter :: hoc_nc_h_h = nm_node_dim_h + nc_buf_h
+  integer(4), parameter :: hoc_pass_depth_h = 2*nc_buf_h
+  real(4), parameter    :: rnf_buf_h = real(nfine_buf_h)
+  integer(4), parameter :: num_ngbhs_h = (2*nc_buf_h+1)**3
+
+  !! To order cell_search
+  integer(4) :: cell_search_work(3, num_ngbhs)
+  integer(4) :: cell_search_work_h(3, num_ngbhs_h)
+#ifdef NP_LINLOGMAX
+  integer(4) :: cell_search_r_max_work(num_ngbhs)
+  integer(4) :: cell_search_r_max_work_h(num_ngbhs_h)
+#endif
+  integer(4) :: sorted_indexes(num_ngbhs)
+  integer(4) :: sorted_indexes_h(num_ngbhs_h)
+
+  !! hoc array (see remake_hoc)
   integer(4) :: hoc(hoc_nc_l:hoc_nc_h, hoc_nc_l:hoc_nc_h, hoc_nc_l:hoc_nc_h)
   integer(4) :: hoc_dm(hoc_nc_l:hoc_nc_h, hoc_nc_l:hoc_nc_h, hoc_nc_l:hoc_nc_h)
-  integer(4) :: ipos(nt, max_npart_search)
-  real(4) :: rpos(nt, 2, max_npart_search)
-  integer(4) :: cell_search(num_ngbhs, 3)
-  logical :: done_shell(num_ngbhs)
+  integer(4) :: hoc_h(hoc_nc_l_h:hoc_nc_h_h, hoc_nc_l_h:hoc_nc_h_h, hoc_nc_l_h:hoc_nc_h_h)
 
-  !! Array storing what group each particle belongs to (for autocorrelation break each species 
-  !! into two groups and then cross-correlate to remove shot noise)
-  integer(1) :: GID(max_np), GID_dm(max_np_dm)
-  integer(1) :: GID_buf(np_buffer), GID_send_buf(np_buffer), GID_recv_buf(np_buffer)
+  !! Array to search the nearest particle
+#ifdef NP_FAST
+  integer(4), parameter :: max_npart_cell_search = int(real(max_np)/real(nm_node_dim)**2)
+  integer(4), parameter :: max_npart_cell_search_h = int(real(max_np_h)/real(nm_node_dim)**2)
+  real(4) :: xvp_cell(6, max_npart_cell_search, nt)
+  real(4) :: xvp_cell_h(6, max_npart_cell_search_h, nt)
+#endif
+
+#ifdef NP_LINLOGMAX
+  integer(4), parameter :: max_npart_search = int(num_ngbhs*real(max_np)/real(nc_node_dim)**2)
+  integer(4), parameter :: max_npart_search_h = int(num_ngbhs_h*real(max_np_h)/real(nc_node_dim)**2)
+
+  integer(4) :: ipos(max_npart_search, nt)
+  real(4)    :: rpos(2, max_npart_search, nt)
+  integer(4) :: ipos_h(max_npart_search_h, nt)
+  real(4)    :: rpos_h(2, max_npart_search_h, nt)
+
+  real(4)    :: cell_search_r_max(num_ngbhs)
+  real(4)    :: cell_search_r_max_h(num_ngbhs_h)
+#else
+  real(4)    :: rpos(2, max_N_closest, nt)
+  real(4)    :: rpos_h(2, max_N_closest, nt)
+#endif
+  integer(4) :: cell_search(3, num_ngbhs)
+  real(4)    :: cell_search_r(num_ngbhs)
+
+  integer(4) :: cell_search_h(3, num_ngbhs_h)
+  real(4)    :: cell_search_r_h(num_ngbhs_h)
+
+  !! Number of particles in each group / in the buffer arrea
+  integer(4) :: np_groups(0:1), np_groups_dm(0:1), np_groups_h(0:1)
+  integer(4) :: np_buf_groups(0:1), np_buf_groups_dm(0:1), np_buf_groups_h(0:1)
+  integer(4) :: np_groups_tot(0:1), np_groups_tot_dm(0:1), np_groups_tot_h(0:1)
 
   integer(1), parameter :: g0 = 0
   integer(1), parameter :: g1 = 1
+
+  !! Random number generator parameters
+#ifdef CATCH_SEED
+  logical, parameter :: generate_seed = .false. !! determine if the program should catch the seed from a file
+#else
+  logical, parameter :: generate_seed = .true. !! determine if the program should catch the seed from a file
 #endif
 
-  !! Only work with one component of the velocity field at a time 
+#ifdef WRITE_SEED
+  logical, parameter :: write_seed = .true. !! determine if the program should write the seed into a file                                   
+#else
+  logical, parameter :: write_seed = .false. !! determine if the program should write the seed into a file                                   
+#endif
+
+  integer(4), allocatable, dimension(:) :: randomseed
+  integer :: randomseedsize
+
+  !! Array storing the velocity fields
+  !! (only work with one component of the velocity field at a time) 
   real, dimension(0:nc_node_dim+1, 0:nc_node_dim+1, 0:nc_node_dim+1) :: momden
   real, dimension(0:nc_node_dim+1, 0:nc_node_dim+1) :: momden_send_buff
   real, dimension(0:nc_node_dim+1, 0:nc_node_dim+1) :: momden_recv_buff
@@ -191,46 +247,30 @@ program cic_velpower
   integer, parameter :: kt_stop = nc_pen+2
 #endif
 
-  !! Equivalence arrays to save memory
-  !! Must make sure that ONLY the largest array in each equivalence statement is on the common block. 
-  !! Fill in check_equivalence.py with simulation parameters and run if unsure.
-  equivalence(recv_cube, xp_buf) !! May sometimes need to be changed (see check_equivalence.py)
-  equivalence(momden, send_buf) !! May sometimes need to be changed (see check_equivalence.py)
-#ifdef SLAB
-  equivalence(slab_work, recv_buf) !! May sometimes need to be changed (see check_equivalence.py)
-#endif
-  equivalence(slab, cube) !! Slab will always be larger than cube
-#ifdef MOMENTUM
-  equivalence(massden_send_buff, momden_send_buff) !! These are the same size
-  equivalence(massden_recv_buff, momden_recv_buff) !! These are the same size
-#endif
+  !! For timing
+  real(8) time1, time2, timeStart, timeCheckpoint
 
-  !! Common block
-#ifdef SLAB
-#ifdef MOMENTUM
-  common xvp, xvp_dm, massden, recv_cube, momden, slab_work, slab, slab2, slab3, massden_send_buff, massden_recv_buff, pkmomdim, pkmomdim_dm, pkmomdim_dmnu, pkmomdim_rel, pkdm
-#else
-  common xvp, xvp_dm, hoc, hoc_dm, ll, ll_dm, ipos, rpos, cell_search, done_shell, recv_cube, momden, slab_work, slab, slab2, slab3, momden_send_buff, momden_recv_buff, pkmomdim, pkmomdim_dm, pkmomdim_dmnu, pkmomdim_rel, pkdm
-  common /gvar/ GID, GID_dm, GID_buf, GID_send_buf, GID_recv_buf 
-#endif
-#else
-#ifdef MOMENTUM
-  common xvp, xvp_dm, massden, recv_cube, momden, recv_buf, slab, slab2, slab3, massden_send_buff, massden_recv_buff, pkmomdim, pkmomdim_dm, pkmomdim_dmnu, pkmomdim_rel, pkdm
-#else
-  common xvp, xvp_dm, hoc, hoc_dm, ll, ll_dm, ipos, rpos, cell_search, done_shell, recv_cube, momden, recv_buf, slab, slab2, slab3, momden_send_buff, momden_recv_buff, pkmomdim, pkmomdim_dm, pkmomdim_dmnu, pkmomdim_rel, pkdm
-  common /gvar/ GID, GID_dm, GID_buf, GID_send_buf, GID_recv_buf
-#endif
-#endif
+!-------------------------------------------------------------------------------------------------------
+! Equivalence statement. Place here the code returned by the python script. 
+!-------------------------------------------------------------------------------------------------------
 
-! -------------------------------------------------------------------------------------------------------
+equivalence (xp_buf, slab, cube, hoc, hoc_dm, hoc_h)
+equivalence (send_buf, slab3)
+equivalence (recv_buf, momden, recv_cube)
+equivalence (cell_search_work_h, cell_search_work)
+equivalence (sorted_indexes_h, sorted_indexes)
+
+common xvp, recv_buf, send_buf, xp_buf, slab2, xvp_dm, xvmp_h, momden_recv_buff, momden_send_buff, pk_all, cell_search_h, cell_search_work_h, cell_search_r_h, sorted_indexes_h, cell_search, cell_search_r, rpos_h, rpos
+
+!-------------------------------------------------------------------------------------------------------
 ! MAIN
-! -------------------------------------------------------------------------------------------------------
+!-------------------------------------------------------------------------------------------------------
 
   call mpi_initialize
-#ifndef MOMENTUM
   call omp_set_num_threads(nt)
   call initialize_random_number
-#endif
+
+  timeStart = mpi_wtime(ierr)
 
   if (rank == 0) call writeparams
 
@@ -240,209 +280,165 @@ program cic_velpower
 
   do cur_checkpoint = 1, num_checkpoints
 
-    call initvar
+     if (rank == 0) then
+        timeCheckpoint = mpi_wtime(ierr)
+        write(*,*) '****************************************************'
+        write(*,*) 'TIME = ', timeCheckpoint - timeStart
+        write(*,*) '****************************************************'
+        write(*,*) 'STARTING CHECKPOINT : ',cur_checkpoint
+        write(*,*) 'z = ', z_checkpoint(cur_checkpoint)
+        write(*,*) '****************************************************'
+     endif
 
-    !! Read and pass neutrino particles
-    call read_particles(0)
-    call pass_particles(0)
-#ifndef MOMENTUM
-    call assign_groups(0)
-    call link_list(0)
-    call buffer_particles(0)
+     !--------------------------------------------------------------------------------                                                            
+     ! INPUT
+     !--------------------------------------------------------------------------------
+
+     computePS(0)  = .true.  ! nu
+     computePS(1)  = .true.  ! dm
+     computePS(2)  = .true.  ! dm x nu
+     computePS(3)  = .true.  ! rel
+     computePS(4)  = .true.  ! halo
+     computePS(5)  = .true.  ! nulin grad
+     computePS(6)  = .true.  ! dmlin grad
+     computePS(7)  = .true.  ! halolin grad
+     computePS(8)  = .true.  ! nuh grad
+     computePS(9)  = .true.  ! nudm grad
+     computePS(10) = .true.  ! dm x halo
+     computePS(11) = .true.  ! halo x halo lin
+     computePS(12) = .true.  ! dm x halo lin
+     computePS(13) = .true.  ! dm x dm lin
+     computePS(14) = .true.  ! nu x nuh
+     computePS(15) = .true.  ! nu x nudm
+     computePS(16) = .true.  ! relh grad
+     computePS(17) = .true.  ! reldm grad
+     computePS(18) = .true.  ! rel x relh
+     computePS(19) = .true.  ! rel x reldm
+     computePS(20) = .true.  ! rel2
+     computePS(21) = .true.  ! rel2 x relh
+     computePS(22) = .true.  ! halo x nu
+     computePS(23) = .true.  ! nulin vtf
+     computePS(24) = .true.  ! dmlin vtf
+     computePS(25) = .true.  ! dmlin x nulin vtf
+     computePS(26) = .true.  ! halolin vtf
+     computePS(27) = .true.  ! dmlin x halolin vtf
+     computePS(28) = .true.  ! nudm vtf
+     computePS(29) = .true.  ! reldm vtf
+     computePS(30) = .true.  ! nuh vtf
+     computePS(31) = .true.  ! relh vtf 
+     computePS(32) = .true.  ! halolin x nu
+     computePS(33) = .true.  ! dm x nuh
+     computePS(34) = .true.  ! halolin x nuh grad
+
+     !--------------------------------------------------------------------------------                                                            
+     ! Initialize variables and read particles files                                                                                      
+     !--------------------------------------------------------------------------------
+     
+     call initvar
+     call init_cell_search(0)
+     call init_cell_search(2)
+
+     if (rank == 0) then
+        timeCheckpoint = mpi_wtime(ierr)
+        write(*,*) '****************************************************'
+        write(*,*) 'TIME = ', timeCheckpoint - timeStart
+        write(*,*) '****************************************************'
+        write(*,*) 'STARTING READING PARTICLES ...'
+        write(*,*) '****************************************************'
+     endif
+
+     call read_particles_files
+
+     !-------------------------------------------------------------------                                                                            
+     ! Auto power spectra loop                                                                                                          
+     !-------------------------------------------------------------------
+     ! Compute auto-spectra by dividing the particles into two groups and
+     ! computing the cross spectrum of the two groups.
+     ! This is done to remove shot noise which does not correlate 
+     ! between the two groups.
+     !
+     ! Compute one dimension at a time.
+     !-------------------------------------------------------------------                                                                           
+     
+     if (rank == 0) then
+        timeCheckpoint = mpi_wtime(ierr)
+        write(*,*) '****************************************************'
+        write(*,*) 'TIME = ', timeCheckpoint - timeStart
+        write(*,*) '****************************************************'
+        write(*,*) 'ENTERING AUTO-POWER SPECTRA LOOP ...'
+        write(*,*) '****************************************************'
+     endif
+
+     call emptyPSArray
+     do cur_dimension = 1, 3
+        call auto_power_loop(cur_dimension)
+     enddo
+
+     !-------------------------------------------------------------------                                                                            
+     ! VTF Auto power spectra loop                                                                                                          
+     !-------------------------------------------------------------------                                                                           
+     ! Compute linear velocity spectra without the gradient method
+     ! (this does not produce a velocity field)
+     !-------------------------------------------------------------------
+
+     if (rank == 0) then
+        timeCheckpoint = mpi_wtime(ierr)
+        write(*,*) '****************************************************'
+        write(*,*) 'TIME = ', timeCheckpoint - timeStart
+        write(*,*) '****************************************************'
+        write(*,*) 'ENTERING VTF AUTO-POWER SPECTRA LOOP ...'
+        write(*,*) '****************************************************'
+     endif
+
+     call emptyPSArray
+     call auto_power_vtf
+
+     !-------------------------------------------------------------------                                                                            
+     ! Put all particles into group 0 for cross-power                                                                         
+     !-------------------------------------------------------------------                                                                            
+
+     call clear_groups
+     call order_xvp_ll(0, g0, .false.)
+     call order_xvp_ll(1, g0, .false.)
+     call order_xvp_ll(2, g0, .false.)
+
+#ifdef compute_denPS
+     call emptyPSArray
+     call cross_power_density
 #endif
 
-    !! Read and pass dark matter particles (stored in xvp_dm)
-    call read_particles(1)
-    call pass_particles(1)
-#ifndef MOMENTUM
-    call assign_groups(1)
-    call link_list(1)
-    call buffer_particles(1)
-#endif
+     !-------------------------------------------------------------------                                                                            
+     ! Cross power spectra loop                                                                                                          
+     !-------------------------------------------------------------------                                                                           
+     
+     if (rank == 0) then
+        timeCheckpoint = mpi_wtime(ierr)
+        write(*,*) '****************************************************'
+        write(*,*) 'TIME = ', timeCheckpoint - timeStart
+        write(*,*) '****************************************************'
+        write(*,*) 'ENTERING CROSS-POWER SPECTRA LOOP ...'
+        write(*,*) '****************************************************'
+     endif
 
-#ifndef MOMENTUM
-    !
-    ! Compute power spectra for both neutrinos and dark matter by separting each
-    ! species into two groups and computing the cross-spectrum of the groups.
-    ! This is done to remove shot noise which does not correlate between groups.
-    ! At the same time also compute the auto-power of the relative velocity field.
-    ! This also has to be done with the cross of two separate groups to remove noise.
-    !
-
-    do cur_dimension = 1, 3 !! Each x, y, z dimension
-
-        !! --------------------------------------------------------------------------------
-        !! NEUTRINOS
-        !! --------------------------------------------------------------------------------
-
-        !! Determine cur_dimension component of neutrino velocity for group 0
-        call velocity_density(0, g0, N_closest_auto)
-        call buffer_momdensity
-
-        !! Fourier transform velocity field for neutrino group 0 and store in slab2
-        call darkmatter
-        !$omp parallel do num_threads(nt) default(shared) private(kt)
-        do kt = 1, kt_stop
-            slab2(:,:,kt) = slab(:,:,kt)
-        enddo
-        !$omp end parallel do 
-
-        !! Determine cur_dimension component of neutrino velocity for group 1
-        call velocity_density(0, g1, N_closest_auto)
-        call buffer_momdensity
-
-        !! Fourier transform velocity field for neutrino group 1 and compute cross-correlation with group 0
-        call darkmatter
-        call powerspectrum(slab, slab2, pkmomdim(cur_dimension,:,:))
-
-        !! --------------------------------------------------------------------------------
-        !! DARK MATTER
-        !! --------------------------------------------------------------------------------
-
-        !! Determine cur_dimension component of dark matter velocity for group 0 
-        call velocity_density(1, g0, N_closest_auto)
-        call buffer_momdensity
-
-        !! Fourier transform velocity field for dark matter group 0 
-        call darkmatter
-    
-        !! slab3 now stores the relative velocity difference for group 0 (dark matter - neutrino)
-        !$omp parallel do num_threads(nt) default(shared) private(kt)
-        do kt = 1, kt_stop
-            slab3(:,:,kt) = slab(:,:,kt) - slab2(:,:,kt)
-        enddo
-        !$omp end parallel do 
-
-        !! Now store dark matter group 0 in slab2 (overwrites neutrino group 0)
-        !$omp parallel do num_threads(nt) default(shared) private(kt)
-        do kt = 1, kt_stop
-            slab2(:,:,kt) = slab(:,:,kt)
-        enddo
-        !$omp end parallel do 
-
-        !! Determine cur_dimension component of dark matter velocity for group 1
-        call velocity_density(1, g1, N_closest_auto)
-        call buffer_momdensity
-
-        !! Fourier transform velocity field for group 1 and compute cross-correlation with group 0
-        call darkmatter
-        call powerspectrum(slab, slab2, pkmomdim_dm(cur_dimension,:,:))
-
-        !! --------------------------------------------------------------------------------
-        !! DARK MATTER - NEUTRINO RELATIVE VELOCITY
-        !! --------------------------------------------------------------------------------
-
-        !! Store dark matter group 1 in slab2
-        !$omp parallel do num_threads(nt) default(shared) private(kt)
-        do kt = 1, kt_stop
-            slab2(:,:,kt) = slab(:,:,kt)
-        enddo
-        !$omp end parallel do 
-        
-        !! Recompute cur_dimension component of neutrino velocity for group 1
-        call velocity_density(0, g1, N_closest_auto)
-        call buffer_momdensity
-
-        !! Fourier transform velocity field for neutrino group 1
-        call darkmatter 
-
-        !! Now slab2 will store the relative velocity difference for group 1 (dark matter - neutrino)
-        !$omp parallel do num_threads(nt) default(shared) private(kt)
-        do kt = 1, kt_stop
-            slab2(:,:,kt) = slab2(:,:,kt) - slab(:,:,kt)
-        enddo
-        !$omp end parallel do
-
-        !! Compute relative velocity power spectra
-        call powerspectrum(slab2, slab3, pkmomdim_rel(cur_dimension,:,:))
-
-    enddo
-
-    !! Put all particles into group 0 for neutrino-dark matter cross-power
-    call clear_groups
-
-#endif
-
-    do cur_dimension = 1, 3 !! Each x, y, z dimension
-
-#ifdef MOMENTUM
-        !! Compute momentum density field for this dimension
-        call momentum_density(0)
-        call buffer_momdensity
-
-        !! Convert momentum field into velocity field
-        call mass_density(0)
-        call buffer_massdensity
-        call momentum2velocity
-#else
-        !! Determine cur_dimension component of velocity for all particles (all in group 0 now)
-        call velocity_density(0, g0, N_closest_nu)
-        call buffer_momdensity
-#endif
-
-#ifdef write_vel
-        call writevelocityfield(0)
-#endif
-
-        !! Fourier transform velocity field and compute power spectrum
-        call darkmatter
-#ifdef MOMENTUM
-        call powerspectrum(slab, slab, pkmomdim(cur_dimension,:,:))
-#endif
-
-        !! Store neutrino Fourier field in slab 2 for cross spectra later
-        !$omp parallel do num_threads(nt) default(shared) private(kt)
-        do kt = 1, kt_stop
-            slab2(:,:,kt) = slab(:,:,kt)
-        enddo
-        !$omp end parallel do 
-
-#ifdef MOMENTUM
-        !! Compute dark matter momentum density field for this dimension
-        call momentum_density(1)
-        call buffer_momdensity
-
-        !! Convert dark matter momentum field into velocity field
-        call mass_density(0)
-        call buffer_massdensity
-        call momentum2velocity
-#else
-        !! Determine cur_dimension component of velocity for all particles (all in group 0 now)
-        call velocity_density(1, g0, N_closest_dm)
-        call buffer_momdensity
-#endif
-
-#ifdef write_vel
-        call writevelocityfield(1)
-#endif
-
-        !! Fourier transform velocity field and compute power spectrum
-        call darkmatter
-#ifdef MOMENTUM
-        call powerspectrum(slab, slab, pkmomdim_dm(cur_dimension,:,:))
-#endif
-
-        !! Compute cross power spectra
-        call powerspectrum(slab, slab2, pkmomdim_dmnu(cur_dimension,:,:))        
-
-    enddo
-
-    !! Write out the power spectra
-    if (rank == 0) then
-        call writepowerspectra(0)
-        call writepowerspectra(1)
-        call writepowerspectra(2)
-        call writepowerspectra(3)
-    endif
-
+     call emptyPSArray
+     do cur_dimension = 1, 3
+        call cross_power_loop(cur_dimension)
+     enddo
   enddo
+
+  if (rank == 0) then
+     timeCheckpoint = mpi_wtime(ierr)
+     write(*,*) '****************************************************'
+     write(*,*) 'TIME = ', timeCheckpoint - timeStart
+     write(*,*) '****************************************************'
+  endif
 
   call cp_fftw(0)
   call mpi_finalize(ierr)
 
-! -------------------------------------------------------------------------------------------------------
+!--------------------------------------------------------------------------------------------------------
 ! SUBROUTINES
-! -------------------------------------------------------------------------------------------------------
+!--------------------------------------------------------------------------------------------------------
 
 contains
 
@@ -584,251 +580,518 @@ end subroutine read_checkpoint_list
 ! -------------------------------------------------------------------------------------------------------
 
 subroutine initvar
-    !
-    ! Initialize data arrays
-    !
+  !
+  ! Initialize data arrays
+  !
 
-    implicit none
+  implicit none
 
-    integer :: k, j, i
-    integer :: ind, ibuf
-
-    !! Particle positions and velocities
-    do k = 1, max_np
-       xvp(:, k) = 0.
-    enddo
-
-    !! Momentum and matter density arrays
-    do k = 0, nc_node_dim + 1
-#ifdef MOMENTUM
-        massden(:, :, k) = 0.
-        massden_send_buff(:, k) = 0.
-        massden_recv_buff(:, k) = 0.
-#else
-        momden_send_buff(:, k) = 0.
-        momden_recv_buff(:, k) = 0.
-#endif
-        momden(:, :, k) = 0.
-    enddo
-
-    !! Fourier transform arrays
+  integer :: k
+  
+  !! Particle positions and velocities
+  do k = 1, max_np
+     xvp(:, k) = 0.0
+  enddo
+  do k = 1, max_np_dm
+     xvp_dm(:,k) = 0.0
+  enddo
+  do k = 1, max_np_h
+     xvmp_h(:,k) = 0.0
+  enddo
+  
+  !! Momentum and matter density arrays
+  do k = 0, nc_node_dim + 1
+     momden_send_buff(:, k) = 0.
+     momden_recv_buff(:, k) = 0.
+     momden(:, :, k) = 0.
+  enddo
+  
+  !! Fourier transform arrays
 #ifdef SLAB
-    do k = 1, nc_slab
-       slab_work(:, :, k)=0
-    enddo
+  do k = 1, nc_slab
+     slab_work(:, :, k)=0.0
+  enddo
 #endif
-
-    do k = 1, nc_node_dim
-       cube(:, :, k) = 0
-    enddo
-
+  
+  do k = 1, nc_node_dim
+     cube(:, :, k) = 0.0
+  enddo
+  
+  do k = 1, kt_stop
+     slab(:, :, k) = 0.0
+     slab2(:, :, k) = 0.0
+     slab3(:, :, k) = 0.0
+  enddo
+  
+  do k = 1, np_buffer
+     xp_buf(:, k) = 0.0
+  enddo
+  
+  do k = 1, 6*np_buffer
+     send_buf(k) = 0.
+     recv_buf(k) = 0.
+  enddo
+  
 #ifdef SLAB
-    do k = 1, nc_slab
+  do k = 0, nodes_slab-1
 #else
-    do k = 1, nc_pen+2
+  do k = 0, nodes_pen-1
 #endif
-       slab(:, :, k) = 0
-    enddo
+     recv_cube(:, :, :, k) = 0.
+  enddo
+     
+  !! Power spectrum arrays
+  do k = 1, nc
+     pkdm(:, k) = 0.
+  enddo
+  do k = 0, 34
+     pk_all(:, :, :, k) = 0.0
+  enddo
+  
+  !! Arrays to search the nearest particle
+  do k = 1, num_ngbhs
+     cell_search_work(:,k) = 0
+#ifdef NP_LINLIGMAX
+     cell_search_r_max_work(k) = 0
+#endif
+     sorted_indexes(k) = 0
+  enddo
 
-    do k = 1, np_buffer
-       xp_buf(:, k) = 0
-    enddo
+  do k = 1, num_ngbhs_h
+     cell_search_work_h(:,k) = 0
+#ifdef NP_LINLIGMAX
+     cell_search_r_max_work_h(k) = 0
+#endif
+     sorted_indexes_h(k) = 0
+  enddo
 
-    do k = 1, 6*np_buffer
-        send_buf(k) = 0.
-        recv_buf(k) = 0.
-    enddo
+  do k = hoc_nc_l, hoc_nc_h
+     hoc(:,:,k) = 0
+     hoc_dm(:,:,k) = 0
+  enddo
 
-    do k = 1, 3 * np_buffer
-       recv_buf(k) = 0
-    enddo
+  do k = hoc_nc_l_h, hoc_nc_h_h
+     hoc_h(:,:,k) = 0
+  enddo
 
-#ifdef SLAB
-    do k = 0, nodes_slab-1
+#ifdef NP_FAST
+
+  do k = 1, nt
+     xvp_cell(:,:,k) = 0.0
+     xvp_cell_h(:,:,k) = 0.0
+  enddo
+
+#endif
+
+#ifdef NP_LINLOGMAX
+
+  do k = 1, nt
+     ipos(:,k) = 0
+     rpos(:,:,k) = 0.0
+     ipos_h(:,k) = 0
+     rpos_h(:,:,k) = 0.0
+  enddo
+
+  do k = 1, num_ngbhs
+     cell_search_r_max(k) = 0.0
+  enddo
+  do k = 1, num_ngbhs_h
+     cell_search_r_max_h(k) = 0.0
+  enddo
+
 #else
-    do k = 0, nodes_pen-1
-#endif
-        recv_cube(:, :, :, k) = 0.
-    enddo
 
-    !! Power spectrum arrays
-    do k = 1, nc
-        pkmomdim(:, :, k) = 0.
-        pkmomdim_dm(:, :, k) = 0.
-        pkmomdim_dmnu(:, :, k) = 0.
-        pkmomdim_rel(:, :, k) = 0.
-        pkdm(:, k) = 0.
-    enddo
+  do k = 1, nt
+     rpos(:,:,k) = 0.0
+     rpos_h(:,:,k) = 0.0
+  enddo
 
-#ifndef MOMENTUM
-    !! Array to store the order to search the relative index of neighbouring
-    !cells
-    ind = 1
-    do ibuf = 0, nc_buf
-        do k = -ibuf, ibuf
-            do j = -ibuf, ibuf
-                do i = -ibuf, ibuf
-                    if (.not. (abs(i) < ibuf .and. abs(j) < ibuf .and. abs(k) < ibuf)) then
-                        cell_search(ind, 1) = i
-                        cell_search(ind, 2) = j
-                        cell_search(ind, 3) = k
-                        done_shell(ind) = .false.
-                        ind = ind + 1
-                    endif
-                enddo
-            enddo
-        enddo
-        done_shell(ind-1) = .true.
-    enddo
 #endif
 
-    return
+  do k = 1, num_ngbhs
+     cell_search(:,k) = 0
+     cell_search_r(k) = 0.0
+  enddo
 
+  do k = 1, num_ngbhs_h
+     cell_search_h(:,k) = 0
+     cell_search_r_h(k) = 0.0
+  enddo
+
+  np_groups(:) = 0
+  np_groups_dm(:) = 0
+  np_groups_h(:) = 0
+  np_buf_groups(:) = 0
+  np_buf_groups_dm(:) = 0
+  np_buf_groups_h(:) = 0
+  np_groups_tot(:) = 0
+  np_groups_tot_dm(:) = 0
+  np_groups_tot_h(:) = 0
+
+  return
 end subroutine initvar
 
 ! -------------------------------------------------------------------------------------------------------
 
+subroutine emptyPSArray
+  !
+  ! Reinitialize power spectra arrays
+  !
+  implicit none
+  integer k
+
+  do k = 1, nc
+     pkdm(:, k) = 0.
+  enddo
+  do k = 0, 34
+     pk_all(:, :, :, k) = 0.0
+  enddo
+
+end subroutine emptyPSArray
+
+! -------------------------------------------------------------------------------------------------------
+
+subroutine init_cell_search(command)
+  !
+  ! Initialize cell_search (for command == 0/1) or cell_search_h (for command == 2)
+  ! and also cell_search_r or cell_search_r_h
+  !
+  ! cell_search contains the index of the neighbour cells to one cell
+  ! these indexes are relative to this cell : (0,0,0) represents this cell
+  ! they are ordered by their minimal distance to the cell (stored in cell_search_r), closest first
+  !
+
+  implicit none
+  integer command
+
+  integer :: k, j, i
+  integer :: k1,j1,i1, kc,jc,ic
+  real    :: dmin,dmax
+  integer :: ind, ibuf
+
+  if (command == 0 .or. command == 1) then
+     ind = 1
+     do ibuf = 0, nc_buf
+        do k = -ibuf, ibuf
+           do j = -ibuf, ibuf
+              do i = -ibuf, ibuf
+                 if (.not. (abs(i) < ibuf .and. abs(j) < ibuf .and. abs(k) < ibuf)) then
+                    cell_search_work(1, ind) = i
+                    cell_search_work(2, ind) = j
+                    cell_search_work(3, ind) = k
+                    dmin = sqrt(real(i)**2+ real(j)**2+real(k)**2)
+#ifdef NP_LINLOGMAX
+                    dmax = dmin
+#endif
+                    do k1 = -1,1
+                       do j1 = -1,1
+                          do i1 = -1,1
+                             do kc = -1, 1
+                                do jc = -1, 1
+                                   do ic = -1, 1
+                                      dmin = min(dmin, sqrt(real(i+0.5*(i1-ic))**2 + real(j+0.5*(j1-jc))**2 + real(k+0.5*(k1-kc))**2))
+#ifdef NP_LINLOGMAX
+                                      dmax = max(dmax, sqrt(real(i+0.5*(i1-ic))**2 + real(j+0.5*(j1-jc))**2 + real(k+0.5*(k1-kc))**2))
+#endif
+                                   enddo
+                                enddo
+                             enddo
+                          enddo
+                       enddo
+                    enddo
+                    cell_search_r(ind) = dmin * mesh_scale
+#ifdef NP_LINLOGMAX
+                    cell_search_r_max_work(ind) = dmax * mesh_scale
+#endif
+                    sorted_indexes(ind) = ind
+                    ind = ind + 1
+                 endif
+              enddo
+           enddo
+        enddo
+     enddo
+
+     cell_search_r(0) = 0.0
+     call indexedsort(num_ngbhs, cell_search_r(:num_ngbhs), sorted_indexes(:num_ngbhs))
+
+     do ind = 1, num_ngbhs
+        cell_search(:,ind) = cell_search_work(:,sorted_indexes(ind))
+#ifdef NP_LINLOGMAX
+        cell_search_r_max(ind) = cell_search_r_max_work(sorted_indexes(ind))
+#endif
+     enddo
+
+  else if (command == 2) then
+
+     ind = 1
+     do ibuf = 0, nc_buf_h
+        do k = -ibuf, ibuf
+           do j = -ibuf, ibuf
+              do i = -ibuf, ibuf
+                 if (.not. (abs(i) < ibuf .and. abs(j) < ibuf .and. abs(k) < ibuf)) then
+                    cell_search_work_h(1, ind) = i
+                    cell_search_work_h(2, ind) = j
+                    cell_search_work_h(3, ind) = k
+                    dmin = sqrt(real(i)**2+ real(j)**2+real(k)**2)
+#ifdef NP_LINLOGMAX
+                    dmax = dmin
+#endif
+                    do k1 = -1,1
+                       do j1 = -1,1
+                          do i1 = -1,1
+                             do kc = -1,1
+                                do jc = -1,1
+                                   do ic = -1,1
+                                      dmin = min(dmin, sqrt(real(i+0.5*(i1-ic))**2 + real(j+0.5*(j1-jc))**2 + real(k+0.5*(k1-kc))**2))
+#ifdef NP_LINLOGMAX
+                                      dmax = max(dmax, sqrt(real(i+0.5*(i1-ic))**2 + real(j+0.5*(j1-jc))**2 + real(k+0.5*(k1-kc))**2))
+#endif
+                                   enddo
+                                enddo
+                             enddo
+                          enddo
+                       enddo
+                    enddo
+                    cell_search_r_h(ind) = dmin * mesh_scale_h
+#ifdef NP_LINLOGMAX
+                    cell_search_r_max_work_h(ind) = dmax * mesh_scale_h
+#endif
+                    sorted_indexes_h(ind) = ind
+                    ind = ind + 1
+                 endif
+              enddo
+           enddo
+        enddo
+     enddo
+
+     cell_search_r_h(0) = 0.0
+     call indexedsort(num_ngbhs_h, cell_search_r_h(:num_ngbhs_h), sorted_indexes_h(:num_ngbhs))
+
+     do ind = 1, num_ngbhs_h
+        cell_search_h(:,ind) = cell_search_work_h(:,sorted_indexes_h(ind))
+#ifdef NP_LINLOGMAX
+        cell_search_r_max_h(ind) = cell_search_r_max_work_h(sorted_indexes_h(ind))
+#endif
+    enddo
+ endif
+
+end subroutine init_cell_search
+
+! -------------------------------------------------------------------------------------------------------
+
 subroutine read_particles(command)
-    !
-    ! Read x, y, z positions and velocities and store in xvp
-    !
+  !
+  ! Read xv file and store position and velocity in the xvp arrays
+  ! 
 
-    implicit none
+  implicit none
     
-    real z_write, np_total
-    integer j, fstat
-    character(len=7) :: z_string
-    character(len=4) :: rank_string
-    character(len=100) :: check_name
-    integer(4) :: command
+  real z_write, np_total
+  integer j, fstat
+  character(len=7) :: z_string
+  character(len=4) :: rank_string
+  character(len=100) :: check_name
+  integer(4) :: command
 
-    !! These are unnecessary headers from the checkpoint
-    real(4) :: a, t, tau, dt_f_acc, dt_c_acc, dt_pp_acc, mass_p
-    integer(4) :: nts, sim_checkpoint, sim_projection, sim_halofind
+  !! These are unnecessary headers from the checkpoint
+  real(4) :: a, t, tau, dt_f_acc, dt_c_acc, dt_pp_acc, mass_p, z_current
+  integer(4) :: nts, sim_checkpoint, sim_projection, sim_halofind
+  
+  !! unnecessary data for halos
+  real(4)                :: garbage1
+  real(4), dimension(3)  :: garbage3
+  real(4), dimension(4)  :: garbage4
+  real(4), dimension(15) :: garbage15
 
-    real(8) time1, time2
-    time1 = mpi_wtime(ierr)
+  time1 = mpi_wtime(ierr)
 
-    !! Generate checkpoint names on each node
-    if (rank==0) then
-      z_write = z_checkpoint(cur_checkpoint)
-      print *,'Calculating spectrum for z = ',z_write
-    endif
+  z_current = z_checkpoint(cur_checkpoint)
 
-    call mpi_bcast(z_write, 1, mpi_real, 0, mpi_comm_world, ierr)
+  if (rank == 0) then
+     z_write = z_checkpoint(cur_checkpoint)
+     write(*,*) 'Starting read_particles ...'
+  endif
 
-    !! Determine the file name
-    write(z_string,'(f7.3)') z_write
-    z_string=adjustl(z_string)
+  call mpi_bcast(z_write, 1, mpi_real, 0, mpi_comm_world, ierr)
 
-    write(rank_string,'(i4)') rank
-    rank_string=adjustl(rank_string)
+  !-----------------------------------------------------------
+  ! Determine file name
+  !-----------------------------------------------------------
 
-    if (command == 0) then
-        if(z_write .eq. z_i) then
-           check_name=ic_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'xv'// &
-                   rank_string(1:len_trim(rank_string))//'_nu.dat'
-        else
-           check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'xv'// &
-                   rank_string(1:len_trim(rank_string))//'_nu.dat'
-        endif
-    else
-        if(z_write .eq. z_i) then
-           check_name=ic_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'xv'// &
-                   rank_string(1:len_trim(rank_string))//'.dat'
-        else
-           check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'xv'// &
-                   rank_string(1:len_trim(rank_string))//'.dat'
-        endif
-    endif
+  write(z_string,'(f7.3)') z_write
+  z_string=adjustl(z_string)
+  
+  write(rank_string,'(i4)') rank
+  rank_string=adjustl(rank_string)
 
-    !! Open the file    
+  check_name = '.dat'
 
-    open(unit=21,file=check_name,status="old",iostat=fstat,access="stream")
+  if (command == 0) then
+     check_name = '_nu'//check_name
+  endif
 
-    !! Check for opening error
-    if (fstat /= 0) then
-      write(*,*) 'ERROR: Cannot open checkpoint position file'
-      write(*,*) 'rank', rank, ' file: ',check_name
-      call mpi_abort(mpi_comm_world, ierr, ierr)
-    endif
+  check_name = rank_string(1:len_trim(rank_string))//check_name
+  
+  if (command == 0 .or. command == 1) then
+     check_name = 'xv'//check_name
+  else if (command == 2) then
+     check_name = 'halo'//check_name
+  endif
 
-    !! Read in checkpoint header data
-    if (command == 0) then
-        read(21) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint, &
-                   sim_projection,sim_halofind,mass_p
-    else
-        read(21) np_local_dm,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint, &
-                   sim_projection,sim_halofind,mass_p
-    endif
+  check_name = 'node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//check_name
+  
+  if (command == 0 .and. z_write == z_i_nu) then
+     check_name = ic_path//check_name
+  else if (command == 1 .and. z_write == z_i) then
+     check_name = ic_path//check_name
+  else
+     check_name = output_path//check_name
+  endif
 
-    !! Check for memory problems
-    if (command == 0) then
-        if (np_local > max_np) then
-          write(*,*) 'ERROR: Too many particles to store in memory!'
-          write(*,*) 'rank', rank, 'np_local', np_local, 'max_np', max_np
-          call mpi_abort(mpi_comm_world, ierr, ierr)
-        endif
-    else
-        if (np_local_dm > max_np_dm) then
-          write(*,*) 'ERROR: Too many particles to store in memory!'
-          write(*,*) 'rank', rank, 'np_local', np_local, 'max_np', max_np
-          call mpi_abort(mpi_comm_world, ierr, ierr)
-        endif
-    endif
+  !-----------------------------------------------------------
+  ! Open file
+  !-----------------------------------------------------------
+  
+  open(unit=21,file=check_name,status="old",iostat=fstat,access="stream")
 
-    !! Tally up total number of particles
-    if (command == 0) then
-        call mpi_reduce(real(np_local, kind=4), np_total, 1, mpi_real, &
-                         mpi_sum, 0, mpi_comm_world, ierr)
-    else
-        call mpi_reduce(real(np_local_dm, kind=4), np_total, 1, mpi_real, &
-                         mpi_sum, 0, mpi_comm_world, ierr)
+  if (fstat /= 0) then
+     write(*,*) 'ERROR: Cannot open particle file'
+     write(*,*) 'rank', rank, ' file: ',check_name
+     call mpi_abort(mpi_comm_world, ierr, ierr)
+  endif
 
-    endif    
+  !-----------------------------------------------------------
+  ! Read header data
+  !-----------------------------------------------------------
 
-    if (rank == 0) write(*,*) 'Total number of particles = ', int(np_total,8)
+  if (command == 0) then
+     read(21) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint, &
+          sim_projection,sim_halofind,mass_p
+  else if (command == 1) then
+     read(21) np_local_dm,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint, &
+          sim_projection,sim_halofind,mass_p
+  else
+     read(21) np_local_h,t, tau
+  endif
 
-    if (command == 0) then
-        do j=1, np_local
-            read(21) xvp(:,j)
-        enddo
-    else
-        do j=1, np_local_dm
-            read(21) xvp_dm(:,j)
-        enddo
-    endif
+  !-----------------------------------------------------------
+  ! Check for memory problems
+  !-----------------------------------------------------------
 
-    close(21)
+  if (command == 0) then
+     if (np_local > max_np) then
+        write(*,*) 'ERROR: Too many neutrinos to store in memory!'
+        write(*,*) 'rank', rank, 'np_local', np_local, 'max_np', max_np
+        call mpi_abort(mpi_comm_world, ierr, ierr)
+     endif
+  else if (command == 1) then
+     if (np_local_dm > max_np_dm) then
+        write(*,*) 'ERROR: Too many dm particles to store in memory!'
+        write(*,*) 'rank', rank, 'np_local_dm', np_local_dm, 'max_np_dm', max_np_dm
+        call mpi_abort(mpi_comm_world, ierr, ierr)
+     endif
+  else
+     if (np_local_h > max_np_h) then
+        write(*,*) 'ERROR: Too many halos to store in memory!'
+        write(*,*) 'rank', rank, 'np_local_h', np_local_h, 'max_np_h', max_np_h
+        call mpi_abort(mpi_comm_world, ierr, ierr)
+     endif
+  endif
+
+  !-----------------------------------------------------------
+  ! Tally up total number of particles
+  !-----------------------------------------------------------
+
+  if (command == 0) then
+     call mpi_reduce(real(np_local, kind=4), np_total, 1, mpi_real, &
+          mpi_sum, 0, mpi_comm_world, ierr)
+  else if (command == 1) then
+     call mpi_reduce(real(np_local_dm, kind=4), np_total, 1, mpi_real, &
+          mpi_sum, 0, mpi_comm_world, ierr)
+  else
+     call mpi_reduce(real(np_local_h, kind=4), np_total, 1, mpi_real, &
+          mpi_sum, 0, mpi_comm_world, ierr)
+     np_h = np_local_h
+     call mpi_allreduce(np_local_h,np_h,1,mpi_integer,mpi_sum,mpi_comm_world,ierr)
+  endif
+
+  if (command == 0) then
+     do j=1, np_local
+        read(21) xvp(:,j)
+     enddo
+  else if (command == 1) then
+     do j=1, np_local_dm
+        read(21) xvp_dm(:,j)
+     enddo
+  else
+     do j=1, np_local_h
+        read(21) xvmp_h(1:3,j)
+        read(21) garbage4 !! m (x2) + r (x2) 
+        read(21) garbage3 !! xbar (x3)
+        read(21) xvmp_h(4:6,j)
+        read(21) garbage3 !! angular momentum
+        read(21) garbage3 !! var in vel
+        read(21) garbage3 !! var in pos
+        read(21) garbage3 !! moment of inertia
+        read(21) garbage3 !! moment of inertia
+        read(21) garbage3 !! xbar nu
+        read(21) garbage3 !! vbar nu
+        read(21) garbage1 !! nbr nu
+     enddo
+  endif
+
+  close(21)
+
+  !-----------------------------------------------------------
+  ! Get halo local coordinates
+  !-----------------------------------------------------------
+
+  if (command == 2) then
+     do j=1, np_local_h
+        xvmp_h(1:3,j) = xvmp_h(1:3, j) - slab_coord(:)*nc_node_dim
+     enddo
+  endif
  
 #ifdef KAISER
+  !-----------------------------------------------------------
+  ! Include Kaiser effect
+  !-----------------------------------------------------------
+  ! Red Shift Distortion: x_z -> x_z +  v_z/H(Z)   
+  ! Converting seconds into simulation time units
+  ! cancels the H0...
+  !-----------------------------------------------------------
 
-    !Red Shift Distortion: x_z -> x_z +  v_z/H(Z)   
-    !Converting seconds into simulation time units
-    !cancels the H0...
+  if (command == 0) then
+     xvp(3,:) = xvp(3,:) + xvp(6,:)*1.5/sqrt(a*(1+a*(1-omega_m-omega_l)/omega_m + omega_l/omega_m*a**3))
+  else if (command == 1) then
+     xvp_dm(3,:) = xvp_dm(3,:) + xvp_dm(6,:)*1.5/sqrt(a*(1+a*(1-omega_m-omega_l)/omega_m + omega_l/omega_m*a**3))
+  else
+     xvmp_h(3,:) = xvmp_h(3,:) + xvmp_h(6,:)*1.5/sqrt(a*(1+a*(1-omega_m-omega_l)/omega_m + omega_l/omega_m*a**3))
+  endif
 
-    if (command == 0) then
-        xvp(3,:)=xvp(3,:) + xvp(6,:)*1.5/sqrt(a*(1+a*(1-omega_m-omega_l)/omega_m + omega_l/omega_m*a**3))
-    else
-        xvp_dm(3,:)=xvp_dm(3,:) + xvp_dm(6,:)*1.5/sqrt(a*(1+a*(1-omega_m-omega_l)/omega_m + omega_l/omega_m*a**3))
-    endif
+  call pass_particles(command)
 
-    call pass_particles(command)
-
-    if(rank==0) then
-       write(*,*) '**********************'
-       write(*,*) 'Included Kaiser Effect'
-       write(*,*) 'Omega_m =', omega_m, 'a =', a
-       !write(*,*) '1/H(z) =', 1.5*sqrt(omegam/cubepm_a)
-       write(*,*) '1/H(z) =', 1.5/sqrt(a*(1+a*(1-omega_m-omega_l)/omega_m + omega_l/omega_m*a**3))
-       write(*,*) '**********************'
-    endif
+  if(rank==0) then
+     write(*,*) '**********************'
+     write(*,*) 'Included Kaiser Effect'
+     write(*,*) 'Omega_m =', omega_m, 'a =', a
+     !write(*,*) '1/H(z) =', 1.5*sqrt(omegam/cubepm_a)
+     write(*,*) '1/H(z) =', 1.5/sqrt(a*(1+a*(1-omega_m-omega_l)/omega_m + omega_l/omega_m*a**3))
+     write(*,*) '**********************'
+  endif
 #endif
 
-    time2 = mpi_wtime(ierr)
-    if (rank == 0) write(*, *) "Finished read_particles ... elapsed time = ", time2-time1
-
-    return
+  time2 = mpi_wtime(ierr)
+  if (rank == 0) then
+     write(*,*) 'Finished read_particles ... '
+     if (command == 0) write(*,*) 'particles read : neutrinos'
+     if (command == 1) write(*,*) 'particles read : dark matter'
+     if (command == 2) write(*,*) 'particles read : halos'
+     write(*,*) 'Total number of particles = ', int(np_total,8)
+     write(*,*) 'Time elapsed = ', time2-time1
+     write(*,*) '--------------------------'
+  endif
+  return
     
 end subroutine read_particles
 
@@ -1190,2575 +1453,3818 @@ end subroutine cp_fftw
 
 ! -------------------------------------------------------------------------------------------------------
 
-  subroutine writeparams
-    implicit none
+subroutine writeparams
+  implicit none
 
-    write(*,*) 'nodes   ', nodes
-    write(*,*) 'nc      ', nc
-    write(*,*) 'np      ', np
-    write(*,*)
-    write(*,*) 'box      ',box
-    write(*,*)
+  write(*,*) '****************************************************'
+  write(*,*) 'cic_velpower_halo running ...'
+  write(*,*) '****************************************************'
+  write(*,*) 'nodes   :', nodes
+  write(*,*) 'nc      :', nc
+  write(*,*) 'np      :', np
+  write(*,*) 'box     :',box
+  write(*,*) '****************************************************'
 
-    return
-  end subroutine writeparams
+  return
+end subroutine writeparams
 
 ! -------------------------------------------------------------------------------------------------------
 
-subroutine writepowerspectra(command)
-    !
-    ! Writes the dimensionless power spectrum for the curl/divergence of the momentum density field
-    !    
+subroutine writepowerspectra(command, convert)
+  !
+  ! Writes the dimensionless power spectrum for the curl/divergence of the momentum density field
+  !    
 
-    implicit none
-    
-    integer      :: i, j, k
-    character*180 :: fn
-    character*6  :: prefix
-    character*7  :: z_write
-    real    :: vsim2phys, zcur
-    integer(4) :: command
+  implicit none
+  
+  integer      :: i, j, k
+  character*180 :: fn
+  character*6  :: prefix
+  character*7  :: z_write
+  real    :: vsim2phys, zcur
+  integer(4) :: command, convert
 
-    !! Determine conversion factor for sim velocity to physical
-    zcur      = z_checkpoint(cur_checkpoint)
-    vsim2phys = 300. * sqrt(omega_m) * box * (1. + zcur) / 2. / nc
+  !-----------------------------------------------------------
+  ! Determine conversion factor for sim velocity to physical
+  !-----------------------------------------------------------
 
-    if (rank == 0) write(*, *) "---> vsim2phys = ", vsim2phys
+  zcur      = z_checkpoint(cur_checkpoint)
+  vsim2phys = 300. * sqrt(omega_m) * box * (1. + zcur) / 2. / nc
 
-    !
-    ! Determine name of output file
-    !
-
-    write(z_write,'(f7.3)') z_checkpoint(cur_checkpoint)
-    z_write=adjustl(z_write)
+  !-----------------------------------------------------------
+  ! Determine name of output file
+  !-----------------------------------------------------------
+  
+  write(z_write,'(f7.3)') z_checkpoint(cur_checkpoint)
+  z_write=adjustl(z_write)
     
 #ifdef NGP 
-    prefix = 'ngpvps'
+  prefix = 'ngpvps'
 #else
-    prefix = 'cicvps'
+  prefix = 'cicvps'
 #endif
+
+  if (command == 0) then
+     fn = '_nu.dat'
+  else if (command == 1) then
+     fn = '_dm.dat'
+  else if (command == 2) then
+     fn = '_dmnu.dat'
+  else if (command == 3) then
+     fn = '_rel.dat'
+  else if (command == 4) then
+     fn = '_halo.dat'
+  else if (command == 5) then
+     fn = '_nulin_grad.dat'
+  else if (command == 6) then
+     fn = '_dmlin_grad.dat'
+  else if (command == 7) then
+     fn = '_halolin_grad.dat'
+  else if (command == 8) then
+     fn = '_nuhalo_grad.dat'
+  else if (command == 9) then
+     fn = '_nudm_grad.dat'
+  else if (command == 10) then
+     fn = '_dmhalo.dat'
+  else if (command == 11) then
+     fn = '_halohalolin.dat'
+  else if (command == 12) then
+     fn = '_dmhalolin.dat'
+  else if (command == 13) then
+     fn = '_dmdmlin.dat'
+  else if (command == 14) then
+     fn = '_nunuh.dat'
+  else if (command == 15) then
+     fn = '_nunudm.dat'
+  else if (command == 16) then
+     fn = '_relh_grad.dat'
+  else if (command == 17) then
+     fn = '_reldm_grad.dat'
+  else if (command == 18) then
+     fn = '_relrelh.dat'
+  else if (command == 19) then
+     fn = '_relreldm.dat'
+  else if (command == 20) then
+     fn = '_rel2.dat'
+  else if (command == 21) then
+     fn = '_rel2relh.dat'
+  else if (command == 22) then
+     fn = '_halonu.dat'
+  else if (command == 23) then
+     fn = '_nulin_vtf.dat'
+  else if (command == 24) then
+     fn = '_dmlin_vtf.dat'
+  else if (command == 25) then
+     fn = '_dmlinnulin_vtf.dat'
+  else if (command == 26) then
+     fn = '_halolin_vtf.dat'
+  else if (command == 27) then
+     fn = '_dmlinhalolin_vtf.dat'
+  else if (command == 28) then
+     fn = '_nudm_vtf.dat'
+  else if (command == 29) then
+     fn = '_reldm_vtf.dat'
+  else if (command == 30) then
+     fn = '_nuhalo_vtf.dat'
+  else if (command == 31) then
+     fn = '_relh_vtf.dat'
+  else if (command == 32) then
+     fn = '_halolinnu.dat'
+  else if (command == 33) then
+     fn = '_dmnuhalo.dat'
+  else if (command == 34) then
+     fn = '_halolinnuh_grad.dat'
+  else
+     fn = '.dat'
+  endif
 
 #ifdef KAISER
-   if (command == 0) then !! Neutrino power spectra
-       fn=output_path//z_write(1:len_trim(z_write))//prefix//'-RSD_nu.dat' 
-   else if (command == 1) then !! Dark matter power spectra
-       fn=output_path//z_write(1:len_trim(z_write))//prefix//'-RSD.dat'
-   else if (command == 2) then !! Dark matter-neutrino cross spectra
-       fn=output_path//z_write(1:len_trim(z_write))//prefix//'-RSD_dmnu.dat'
-   else if (command == 3) then !! Dark matter-neutrino relative spectra
-       fn=output_path//z_write(1:len_trim(z_write))//prefix//'-RSD_rel.dat'
-   endif
-#else
-   if (command == 0) then !! Neutrino power spectra
-       fn=output_path//z_write(1:len_trim(z_write))//prefix//'_nu.dat'
-   else if (command == 1) then !! Dark matter power spectra
-       fn=output_path//z_write(1:len_trim(z_write))//prefix//'.dat'
-   else if (command == 2) then !! Dark matter-neutrino cross spectra
-       fn=output_path//z_write(1:len_trim(z_write))//prefix//'_dmnu.dat'
-   else if (command == 3) then !! Dark matter-neutrino relative spectra
-       fn=output_path//z_write(1:len_trim(z_write))//prefix//'_rel.dat'
-   endif
+  fn = '-RSD_'//fn
 #endif
+  fn = output_path//z_write(1:len_trim(z_write))//prefix//fn
 
-    !
-    ! Asign data to be written
-    !
+  !-----------------------------------------------------------
+  ! Asign data to be written
+  !-----------------------------------------------------------
 
-    do i = 1, nc
-        pkdm(:, i) = 0.
-    enddo
+  do i = 1, nc
+     pkdm(:, i) = 0.
+  enddo
 
-    if (command == 0) then
+  do i = 1, nc
+     do j = 1, 3
+        pkdm(1, i) = pkdm(1, i) + pk_all(j, 1, i, command)
+        pkdm(2, i) = pkdm(2, i) + pk_all(j, 2, i, command)
+     enddo
+     pkdm(3, i) = pk_all(1, 3, i, command)
+  enddo
 
-        !! Sum over all three dimensions 
-        do i = 1, nc
-            do j = 1, 3
-                pkdm(1, i) = pkdm(1, i) + pkmomdim(j, 1, i)
-                pkdm(2, i) = pkdm(2, i) + pkmomdim(j, 2, i)
-            enddo
-            pkdm(3, i) = pkmomdim(1, 3, i)
-        enddo
-
-    else if (command == 1) then
-
-        !! Sum over all three dimensions 
-        do i = 1, nc
-            do j = 1, 3
-                pkdm(1, i) = pkdm(1, i) + pkmomdim_dm(j, 1, i)
-                pkdm(2, i) = pkdm(2, i) + pkmomdim_dm(j, 2, i)
-            enddo
-            pkdm(3, i) = pkmomdim_dm(1, 3, i)
-        enddo
-
-    else if (command == 2) then
-
-        !! Sum over all three dimensions 
-        do i = 1, nc
-            do j = 1, 3
-                pkdm(1, i) = pkdm(1, i) + pkmomdim_dmnu(j, 1, i)
-                pkdm(2, i) = pkdm(2, i) + pkmomdim_dmnu(j, 2, i)
-            enddo
-            pkdm(3, i) = pkmomdim_dmnu(1, 3, i)
-        enddo
-
-    else if (command == 3) then
-
-        !! Sum over all three dimensions 
-        do i = 1, nc
-            do j = 1, 3
-                pkdm(1, i) = pkdm(1, i) + pkmomdim_rel(j, 1, i)
-                pkdm(2, i) = pkdm(2, i) + pkmomdim_rel(j, 2, i)
-            enddo
-            pkdm(3, i) = pkmomdim_rel(1, 3, i)
-        enddo
-
-    endif
-
-    !
-    ! Convert to physical units in km/s
-    !
-
-    do i = 1, nc
-
+  !-----------------------------------------------------------
+  ! Convert to physical units in km/s if needed
+  !-----------------------------------------------------------
+ 
+  if (convert == 1) then 
+     do i = 1, nc
         pkdm(1, i) = vsim2phys**2 * pkdm(1, i)
         pkdm(2, i) = vsim2phys**2 * pkdm(2, i) 
+     enddo
+  endif
 
-    enddo
+  !-----------------------------------------------------------
+  ! Write to output file with column ordering [k, p(k), sigma(k)]
+  !-----------------------------------------------------------
 
-    !
-    ! Write to output file with column ordering [k, p(k), sigma(k)]
-    !
+  write(*,*) 'Writing power spectrum to file ...'
+  write(*,*) 'file :', fn
+  write(*,*) '--------------------------'
 
-    write(*,*) 'Writing ', fn
-    open(11, file=fn, recl=500)
+  open(11, file=fn, recl=500)
 
 #ifdef LOGBIN
-    do k = 2, numbins + 1
+  do k = 2, numbins + 1
 #else
-    do k = 2, hc + 1
+  do k = 2, hc + 1
 #endif
 
 #ifdef NGP
-       write(11,*) pkdm(3,k-1), pkdm(1:2,k-1)
+     write(11,*) pkdm(3,k-1), pkdm(1:2,k-1)
 #else
-       write(11,*) pkdm(3,k), pkdm(1:2,k)
+     write(11,*) pkdm(3,k), pkdm(1:2,k)
 #endif
 
-    enddo
-    close(11)
+  enddo
+  close(11)
 
-    return
+  return
 
 end subroutine writepowerspectra
 
 ! -------------------------------------------------------------------------------------------------------
 
+subroutine writedenpowerspectra(command)
+  !
+  ! Writes the dimensionless power spectrum
+  !    
+
+  implicit none
+  
+  integer      :: i, j, k
+  character*180 :: fn
+  character*5  :: prefix
+  character*7  :: z_write
+  real    :: zcur
+  integer(4) :: command
+
+  !-----------------------------------------------------------
+  ! Determine current redshift
+  !-----------------------------------------------------------
+
+  zcur = z_checkpoint(cur_checkpoint)
+  
+  !-----------------------------------------------------------
+  ! Determine name of output file
+  !-----------------------------------------------------------
+  
+  write(z_write,'(f7.3)') z_checkpoint(cur_checkpoint)
+  z_write=adjustl(z_write)
+    
+#ifdef NGP 
+  prefix = 'ngpps'
+#else
+  prefix = 'cicps'
+#endif
+
+  if (command == 0) then
+     fn = '_nu.dat'
+  else if (command == 1) then
+     fn = '_dm.dat'
+  else if (command == 2) then
+     fn = '_dmnu.dat'
+  else if (command == 3) then
+     fn = '_rel.dat'
+  else if (command == 4) then
+     fn = '_halo.dat'
+  else if (command == 5) then
+     fn = '_nu.dat'
+  else if (command == 6) then
+     fn = '_dm.dat'
+  else if (command == 7) then
+     fn = '_halo.dat'
+  else if (command == 8) then
+     fn = '_nuhalo_grad.dat'
+  else if (command == 9) then
+     fn = '_nudm_grad.dat'
+  else if (command == 10) then
+     fn = '_dmhalo.dat'
+  else if (command == 11) then
+     fn = '_halohalolin.dat'
+  else if (command == 12) then
+     fn = '_dmhalolin.dat'
+  else if (command == 13) then
+     fn = '_dmdmlin.dat'
+  else if (command == 14) then
+     fn = '_nunuh.dat'
+  else if (command == 15) then
+     fn = '_nunudm.dat'
+  else if (command == 16) then
+     fn = '_relh_grad.dat'
+  else if (command == 17) then
+     fn = '_reldm_grad.dat'
+  else if (command == 18) then
+     fn = '_relrelh.dat'
+  else if (command == 19) then
+     fn = '_relreldm.dat'
+  else if (command == 20) then
+     fn = '_rel2.dat'
+  else if (command == 21) then
+     fn = '_rel2relh.dat'
+  else if (command == 22) then
+     fn = '_halonu.dat'
+  else if (command == 23) then
+     fn = '_nulin_vtf.dat'
+  else if (command == 24) then
+     fn = '_dmlin_vtf.dat'
+  else if (command == 25) then
+     fn = '_dmlinnulin_vtf.dat'
+  else if (command == 26) then
+     fn = '_halolin_vtf.dat'
+  else if (command == 27) then
+     fn = '_dmlinhalolin_vtf.dat'
+  else if (command == 28) then
+     fn = '_nudm_vtf.dat'
+  else if (command == 29) then
+     fn = '_reldm_vtf.dat'
+  else if (command == 30) then
+     fn = '_nuhalo_vtf.dat'
+  else if (command == 31) then
+     fn = '_relh_vtf.dat'
+  else if (command == 32) then
+     fn = '_halolinnu.dat'
+  else if (command == 33) then
+     fn = '_dmnuhalo.dat'
+  else if (command == 34) then
+     fn = '_halolinnuh_grad.dat'
+  else
+     fn = '.dat'
+  endif
+
+#ifdef KAISER
+  fn = '-RSD_'//fn
+#endif
+  fn = output_path//z_write(1:len_trim(z_write))//prefix//fn
+
+  !-----------------------------------------------------------
+  ! Asign data to be written
+  !-----------------------------------------------------------
+
+  do i = 1, nc
+     pkdm(:, i) = 0.
+  enddo
+
+  do i = 1, nc
+     do j = 1, 3
+        pkdm(1, i) = pkdm(1, i) + pk_all(j, 1, i, command)
+        pkdm(2, i) = pkdm(2, i) + pk_all(j, 2, i, command)
+     enddo
+     pkdm(3, i) = pk_all(1, 3, i, command)
+  enddo
+
+  !-----------------------------------------------------------
+  ! Write to output file with column ordering [k, p(k), sigma(k)]
+  !-----------------------------------------------------------
+
+  write(*,*) 'Writing density power spectrum to file ...'
+  write(*,*) 'file :', fn
+  write(*,*) '--------------------------'
+
+  open(11, file=fn, recl=500)
+
+#ifdef LOGBIN
+  do k = 2, numbins + 1
+#else
+  do k = 2, hc + 1
+#endif
+
+#ifdef NGP
+     write(11,*) pkdm(3,k-1), pkdm(1:2,k-1)
+#else
+     write(11,*) pkdm(3,k), pkdm(1:2,k)
+#endif
+
+  enddo
+  close(11)
+
+  return
+
+end subroutine writedenpowerspectra
+
+! -------------------------------------------------------------------------------------------------------
 
 subroutine darkmatter
 
-    implicit none
+  implicit none
+  
+  integer :: i, j, k
+  real    :: d, dmin, dmax, sum_dm, sum_dm_local, dmint, dmaxt
+  real*8  :: dsum, dvar, dsumt, dvart
 
-    integer :: i, j, k
-    integer :: i1, j1, k1
-    real    :: d, dmin, dmax, sum_dm, sum_dm_local, dmint, dmaxt
-    real*8  :: dsum, dvar, dsumt, dvart
-    real, dimension(3) :: dis
+  time1 = mpi_wtime(ierr)  
+  if (rank == 0) write(*, *) 'Starting darkmatter ...'
+  
+  !--------------------------------------------------------
+  ! Initialize FFT array to zero 
+  !--------------------------------------------------------
 
-    real(8) time1, time2
-    time1 = mpi_wtime(ierr)
+  do k = 1, nc_node_dim
+     cube(:, :, k) = 0.
+  enddo
 
-    !
-    ! Initialize FFT array to zero 
-    !
+  !--------------------------------------------------------
+  ! Assign data to density grid
+  !--------------------------------------------------------
+  
+  cube(:, :, :) = momden(1:nc_node_dim, 1:nc_node_dim, 1:nc_node_dim)
+  
+  !--------------------------------------------------------
+  ! Calculate some statistics
+  !--------------------------------------------------------
+  
+  sum_dm_local = sum(cube) 
+  call mpi_reduce(sum_dm_local, sum_dm, 1, mpi_real, mpi_sum, 0, mpi_comm_world, ierr)
+  if (rank == 0) write(*,*) "CUBE total sum = ", sum_dm
+  
+  dmin = 0
+  dmax = 0
+  dsum = 0
+  dvar = 0
+  
+  do k = 1, nc_node_dim
+     do j = 1, nc_node_dim
+        do i = 1, nc_node_dim
+           d = cube(i, j, k)
+           dsum = dsum + d
+           dvar = dvar + d*d
+           dmin = min(dmin, d)
+           dmax = max(dmax, d)
+        enddo
+     enddo
+  enddo
+  
+  call mpi_reduce(dsum, dsumt, 1, mpi_double_precision, mpi_sum, 0, mpi_comm_world, ierr)
+  call mpi_reduce(dvar, dvart, 1, mpi_double_precision, mpi_sum, 0, mpi_comm_world, ierr)
+  call mpi_reduce(dmin, dmint, 1, mpi_real, mpi_min, 0, mpi_comm_world, ierr)
+  call mpi_reduce(dmax, dmaxt, 1, mpi_real, mpi_max, 0, mpi_comm_world, ierr)
+  
+  if (rank == 0) then
+     dsum = dsumt / nc**3
+     dvar = sqrt(dvart / nc**3)
+     write(*,*) 'Cube min ', dmint
+     write(*,*) 'Cube max ', dmaxt
+     write(*,*) 'Cube sum ', real(dsum)
+     write(*,*) 'Cube var ', real(dvar)
+  endif
 
-    do k = 1, nc_node_dim
-        cube(:, :, k) = 0.
-    enddo
+  !--------------------------------------------------------
+  ! Forward FFT 
+  !--------------------------------------------------------
+  
+  call cp_fftw(1)
+  
+  time2 = mpi_wtime(ierr)
 
-    !
-    ! Assign data to density grid
-    !
+  if (rank == 0) then
+     write(*,*) 'Finished darkmatter ...'
+     write(*,*) "Elapsed time = ", time2 - time1
+     write(*,*) '--------------------------'
+  endif
 
-    cube(:, :, :) = momden(1:nc_node_dim, 1:nc_node_dim, 1:nc_node_dim)
-
-    !
-    ! Calculate some statistics
-    !
-
-    sum_dm_local = sum(cube) 
-    call mpi_reduce(sum_dm_local, sum_dm, 1, mpi_real, mpi_sum, 0, mpi_comm_world, ierr)
-    if (rank == 0) print *, "CUBE total sum = ", sum_dm
-
-    dmin = 0
-    dmax = 0
-    dsum = 0
-    dvar = 0
-
-    do k = 1, nc_node_dim
-       do j = 1, nc_node_dim
-          do i = 1, nc_node_dim
-             d = cube(i, j, k)
-             dsum = dsum + d
-             dvar = dvar + d*d
-             dmin = min(dmin, d)
-             dmax = max(dmax, d)
-          enddo
-       enddo
-    enddo
-
-    call mpi_reduce(dsum, dsumt, 1, mpi_double_precision, mpi_sum, 0, mpi_comm_world, ierr)
-    call mpi_reduce(dvar, dvart, 1, mpi_double_precision, mpi_sum, 0, mpi_comm_world, ierr)
-    call mpi_reduce(dmin, dmint, 1, mpi_real, mpi_min, 0, mpi_comm_world, ierr)
-    call mpi_reduce(dmax, dmaxt, 1, mpi_real, mpi_max, 0, mpi_comm_world, ierr)
-
-    if (rank == 0) then
-
-      dsum = dsumt / nc**3
-      dvar = sqrt(dvart / nc**3)
-      write(*,*)
-      write(*,*) 'Cube min    ', dmint
-      write(*,*) 'Cube max    ', dmaxt
-      write(*,*) 'Cube sum ', real(dsum)
-      write(*,*) 'Cube var ', real(dvar)
-      write(*,*)
-
-    endif
-
-    ! 
-    ! Forward FFT dm delta field
-    !    
-
-    call cp_fftw(1)
-
-    !
-    ! Compute power spectrum
-    !
-    
-    time2 = mpi_wtime(ierr)
-    if (rank == 0) write(*, *) "Finished darkmatter ... elapsed time = ", time2-time1
-
-    return
-
+  return
 end subroutine darkmatter
 
 ! -------------------------------------------------------------------------------------------------------
 
 subroutine pass_particles(command)
-    !
-    ! Pass particles inside buffer space to their appropriate nodes.
-    !
+  !
+  ! Pass particles inside buffer space to their appropriate nodes.
+  !
+
+  ! Note : it would be possible to remove the xp_buf array by doing as in subroutine buffer_particles_groups
     
-    implicit none
+  implicit none
 
-    integer i,pp,np_buf,np_exit,np_final,npo,npi
-    real x(6),lb,ub
-    integer, dimension(mpi_status_size) :: status,sstatus,rstatus
-    integer :: tag,srequest,rrequest,sierr,rierr
-    real(4), parameter :: eps = 1.0e-03
-    integer(4) :: command
+  integer i,pp,np_buf,np_exit,np_final,npo,npi
+  real x(6),lb,ub
+  integer, dimension(mpi_status_size) :: status,sstatus,rstatus
+  integer :: tag,srequest,rrequest,sierr,rierr
+  real(4), parameter :: eps = 1.0e-03
+  integer(4) :: command
 
-    real(8) time1, time2
-    time1 = mpi_wtime(ierr)
+  time1 = mpi_wtime(ierr)
 
-    !
-    ! Identify particles within the buffer
-    !
+  if (rank == 0) write(*,*) 'Starting pass_particles ...'
 
-    lb = 0.
-    ub = real(nc_node_dim)
+  !--------------------------------------------------------
+  ! Identify particles within the buffer
+  !--------------------------------------------------------
 
-    np_buf = 0
-    pp = 1
-
-    do
-
-        if (command == 0) then
-            if (pp > np_local) exit
-        else
-            if (pp > np_local_dm) exit
-        endif
-
-        !! Read its position  
-        if (command == 0) then
-            x = xvp(:, pp)
-        else
-            x = xvp_dm(:, pp)
-        endif
-        
-        !! See if it lies within the buffer
-        if (x(1) < lb .or. x(1) >= ub .or. x(2) < lb .or. x(2) >= ub .or. &
-            x(3) < lb .or. x(3) >= ub ) then
-       
-            !! Make sure we aren't exceeding the maximum
-            np_buf = np_buf + 1
-        
-            if (np_buf > np_buffer) then
-                print *, rank, 'np_buffer =', np_buffer, 'exceeded - np_buf =', np_buf
-                call mpi_abort(mpi_comm_world, ierr, ierr)
-            endif 
-
-            if (command == 0) then
-                xp_buf(:, np_buf) = xvp(:, pp)
-                xvp(:, pp)        = xvp(:, np_local)
-                np_local          = np_local - 1
-            else
-                xp_buf(:, np_buf) = xvp_dm(:, pp)
-                xvp_dm(:, pp)     = xvp_dm(:, np_local_dm)
-                np_local_dm       = np_local_dm - 1
-            endif       
- 
-            cycle 
-      
-        endif
-      
-        pp = pp + 1
-    
-    enddo
- 
-    call mpi_reduce(np_buf, np_exit, 1, mpi_integer, mpi_sum, 0, &
-                    mpi_comm_world, ierr) 
-
-#ifdef DEBUG
-    do i = 0, nodes-1
-      if (rank == i) print *, rank, 'np_exit = ', np_buf
-      call mpi_barrier(mpi_comm_world, ierr)
-    enddo
-#endif 
-
-    if (rank == 0) print *,'Total exiting particles = ',np_exit
-
-    !
-    ! Pass +x
-    !
-
-    !! Find particles that need to be passed
-
-    tag = 11 
-    npo = 0
-    pp  = 1
-    do 
-      if (pp > np_buf) exit
-      if (xp_buf(1, pp) >= ub) then
-        npo = npo + 1
-        send_buf((npo-1)*6+1:npo*6) = xp_buf(:, pp)
-        xp_buf(:, pp) = xp_buf(:, np_buf)
-        np_buf = np_buf - 1
-        cycle
-      endif
-      pp = pp + 1
-    enddo
-
-#ifdef DEBUG
-    do i = 0, nodes-1
-      if (rank == i) print *, rank, 'np_out=', npo
-      call mpi_barrier(mpi_comm_world, ierr)
-    enddo
-#endif 
-
-    npi = npo
-
-    call mpi_sendrecv_replace(npi, 1, mpi_integer, cart_neighbor(6), &
-                              tag, cart_neighbor(5), tag, mpi_comm_world, &
-                              status, ierr) 
-
-    call mpi_isend(send_buf, npo*6, mpi_real, cart_neighbor(6), &
-                   tag, mpi_comm_world, srequest, sierr)
-    call mpi_irecv(recv_buf, npi*6, mpi_real, cart_neighbor(5), &
-                   tag, mpi_comm_world, rrequest, rierr)
-    call mpi_wait(srequest, sstatus, sierr)
-    call mpi_wait(rrequest, rstatus, rierr)
-
-    do pp = 1, npi
-      xp_buf(:, np_buf + pp) = recv_buf((pp-1)*6+1:pp*6)
-      xp_buf(1, np_buf + pp) = max(xp_buf(1, np_buf+pp) - ub, lb)
-    enddo
-
-#ifdef DEBUG
-    do i = 0, nodes-1
-      if (rank == i .and. command == 0) print *, rank, 'x+ np_local=', np_local
-      if (rank == i .and. command == 1) print *, rank, 'x+ np_local_dm=', np_local_dm
-      call mpi_barrier(mpi_comm_world, ierr)
-    enddo
-#endif 
-
-    pp = 1
-
-    do 
-      if (pp > npi) exit 
-      x = xp_buf(:, np_buf + pp)
-      if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
-          x(3) >= lb .and. x(3) < ub ) then
-        if (command == 0) then
-            np_local = np_local + 1
-            xvp(:, np_local) = x
-        else
-            np_local_dm = np_local_dm + 1
-            xvp_dm(:, np_local_dm) = x
-        endif
-        xp_buf(:, np_buf+pp) = xp_buf(:, np_buf+npi)
-        npi = npi - 1
-        cycle
-      endif
-      pp = pp + 1
-    enddo
-   
-    np_buf = np_buf + npi
-
-#ifdef DEBUG
-    do i = 0, nodes-1
-      if (rank == i .and. command == 0) print *, rank, 'x+ np_exit=', np_buf, np_local
-      if (rank == i .and. command == 1) print *, rank, 'x+ np_exit=', np_buf, np_local_dm
-      call mpi_barrier(mpi_comm_world, ierr)
-    enddo
-#endif 
-
-    !
-    ! Pass -x
-    !
-
-    tag = 12
-    npo = 0
-    pp  = 1
-    do
-      if (pp > np_buf) exit
-      if (xp_buf(1, pp) < lb) then
-        npo = npo + 1
-        send_buf((npo-1)*6+1:npo*6) = xp_buf(:, pp)
-        xp_buf(:, pp) = xp_buf(:, np_buf)
-        np_buf = np_buf - 1
-        cycle 
-      endif
-      pp = pp + 1
-    enddo
-
-    npi = npo
-
-    call mpi_sendrecv_replace(npi, 1, mpi_integer, cart_neighbor(5), &
-                              tag, cart_neighbor(6), tag, mpi_comm_world, &
-                              status, ierr)
-
-    call mpi_isend(send_buf, npo*6, mpi_real, cart_neighbor(5), &
-                   tag, mpi_comm_world, srequest, sierr)
-    call mpi_irecv(recv_buf, npi*6, mpi_real, cart_neighbor(6), &
-                   tag, mpi_comm_world, rrequest, rierr)
-    call mpi_wait(srequest, sstatus, sierr)
-    call mpi_wait(rrequest, rstatus, rierr)
-
-    do pp = 1, npi
-      xp_buf(:, np_buf+pp) = recv_buf((pp-1)*6+1:pp*6)
-      xp_buf(1, np_buf+pp) = min(xp_buf(1,np_buf+pp) + ub, ub-eps)
-    enddo
-
-    pp = 1
-    do
-      if (pp > npi) exit
-      x = xp_buf(:, np_buf+pp)
-      if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
-          x(3) >= lb .and. x(3) < ub ) then
-        if (command == 0) then
-            np_local = np_local + 1
-            xvp(:, np_local) = x
-        else
-            np_local_dm = np_local_dm + 1
-            xvp_dm(:, np_local_dm) = x
-        endif
-        xp_buf(:, np_buf+pp) = xp_buf(:, np_buf+npi)
-        npi = npi - 1
-        cycle 
-      endif
-      pp = pp + 1
-    enddo
+  lb = 0.
+  ub = real(nc_node_dim)
   
-    np_buf = np_buf + npi
+  np_buf = 0
+  pp = 1
+  
+  do
 
-    !
-    ! Pass +y
-    !
+     if (command == 0) then
+        if (pp > np_local) exit
+     else if (command == 1) then
+        if (pp > np_local_dm) exit
+     else
+        if (pp > np_local_h) exit
+     endif
 
-    tag = 13 
-    npo = 0
-    pp  = 1
-    do 
-      if (pp > np_buf) exit
-      if (xp_buf(2, pp) >= ub) then
+     !! Read its position and velocity  
+     if (command == 0) then
+        x = xvp(:, pp)
+     else if (command == 1) then
+        x = xvp_dm(:, pp)
+     else
+        x = xvmp_h(1:6,pp)
+     endif
+        
+     !! See if it lies within the buffer
+     if (x(1) < lb .or. x(1) >= ub .or. x(2) < lb .or. x(2) >= ub .or. &
+          x(3) < lb .or. x(3) >= ub ) then
+       
+        !! Make sure we aren't exceeding the maximum
+        np_buf = np_buf + 1
+        
+        if (np_buf > np_buffer) then
+           print *, rank, 'np_buffer =', np_buffer, 'exceeded - np_buf =', np_buf
+           call mpi_abort(mpi_comm_world, ierr, ierr)
+        endif
+
+        if (command == 0) then
+           xp_buf(:, np_buf) = xvp(:, pp)
+           xvp(:, pp)        = xvp(:, np_local)
+           np_local          = np_local - 1
+        else if (command == 1) then
+           xp_buf(:, np_buf) = xvp_dm(:, pp)
+           xvp_dm(:, pp)     = xvp_dm(:, np_local_dm)
+           np_local_dm       = np_local_dm - 1
+        else
+           xp_buf(:, np_buf) = xvmp_h(:, pp)
+           xvmp_h(:, pp)     = xvmp_h(:, np_local_h)
+           np_local_h       = np_local_h - 1
+        endif
+ 
+        cycle 
+        
+     endif
+      
+     pp = pp + 1
+    
+  enddo
+ 
+  call mpi_reduce(np_buf, np_exit, 1, mpi_integer, mpi_sum, 0, &
+       mpi_comm_world, ierr) 
+
+#ifdef DEBUG
+  do i = 0, nodes-1
+     if (rank == i) print *, rank, 'np_exit = ', np_buf
+     call mpi_barrier(mpi_comm_world, ierr)
+  enddo
+#endif 
+
+  if (rank == 0) write(*,*) 'Total exiting particles = ',np_exit
+
+  !--------------------------------------------------------
+  ! Pass +x
+  !--------------------------------------------------------
+
+  !! Find particles that need to be passed
+
+  tag = 11 
+  npo = 0
+  pp  = 1
+  do 
+     if (pp > np_buf) exit
+     if (xp_buf(1, pp) >= ub) then
+        npo = npo + 1
+        send_buf((npo-1)*6+1:npo*6) = xp_buf(:, pp)
+        xp_buf(:, pp) = xp_buf(:, np_buf)
+        np_buf = np_buf - 1
+        cycle
+     endif
+     pp = pp + 1
+  enddo
+
+#ifdef DEBUG
+  do i = 0, nodes-1
+     if (rank == i) print *, rank, 'np_out=', npo
+     call mpi_barrier(mpi_comm_world, ierr)
+  enddo
+#endif 
+
+  npi = npo
+
+  call mpi_sendrecv_replace(npi, 1, mpi_integer, cart_neighbor(6), &
+       tag, cart_neighbor(5), tag, mpi_comm_world, &
+       status, ierr) 
+  
+  call mpi_isend(send_buf, npo*6, mpi_real, cart_neighbor(6), &
+       tag, mpi_comm_world, srequest, sierr)
+  call mpi_irecv(recv_buf, npi*6, mpi_real, cart_neighbor(5), &
+       tag, mpi_comm_world, rrequest, rierr)
+  call mpi_wait(srequest, sstatus, sierr)
+  call mpi_wait(rrequest, rstatus, rierr)
+
+  do pp = 1, npi
+     xp_buf(:, np_buf + pp) = recv_buf((pp-1)*6+1:pp*6)
+     xp_buf(1, np_buf + pp) = max(xp_buf(1, np_buf+pp) - ub, lb)
+  enddo
+
+#ifdef DEBUG
+  do i = 0, nodes-1
+     if (rank == i .and. command == 0) print *, rank, 'x+ np_local=', np_local
+     if (rank == i .and. command == 1) print *, rank, 'x+ np_local_dm=', np_local_dm
+     call mpi_barrier(mpi_comm_world, ierr)
+  enddo
+#endif 
+
+  pp = 1
+
+  do 
+     if (pp > npi) exit 
+     x = xp_buf(:, np_buf + pp)
+     if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
+          x(3) >= lb .and. x(3) < ub ) then
+        if (command == 0) then
+           np_local = np_local + 1
+           xvp(:, np_local) = x
+        else if (command == 1) then
+           np_local_dm = np_local_dm + 1
+           xvp_dm(:, np_local_dm) = x
+        else
+           np_local_h = np_local_h + 1
+           xvmp_h(:, np_local_h) = x
+        endif
+        xp_buf(:, np_buf+pp) = xp_buf(:, np_buf+npi)
+        npi = npi - 1
+        cycle
+     endif
+     pp = pp + 1
+  enddo
+   
+  np_buf = np_buf + npi
+
+#ifdef DEBUG
+  do i = 0, nodes-1
+     if (rank == i .and. command == 0) print *, rank, 'x+ np_exit=', np_buf, np_local
+     if (rank == i .and. command == 1) print *, rank, 'x+ np_exit=', np_buf, np_local_dm
+     call mpi_barrier(mpi_comm_world, ierr)
+  enddo
+#endif 
+
+  !--------------------------------------------------------
+  ! Pass -x
+  !--------------------------------------------------------
+
+  tag = 12
+  npo = 0
+  pp  = 1
+  do
+     if (pp > np_buf) exit
+     if (xp_buf(1, pp) < lb) then
         npo = npo + 1
         send_buf((npo-1)*6+1:npo*6) = xp_buf(:, pp)
         xp_buf(:, pp) = xp_buf(:, np_buf)
         np_buf = np_buf - 1
         cycle 
-      endif
-      pp = pp + 1
-    enddo
+     endif
+     pp = pp + 1
+  enddo
 
-    npi = npo
+  npi = npo
 
-    call mpi_sendrecv_replace(npi, 1, mpi_integer, cart_neighbor(4), &
-                              tag, cart_neighbor(3), tag, mpi_comm_world, &
-                              status, ierr) 
+  call mpi_sendrecv_replace(npi, 1, mpi_integer, cart_neighbor(5), &
+       tag, cart_neighbor(6), tag, mpi_comm_world, &
+       status, ierr)
+  
+  call mpi_isend(send_buf, npo*6, mpi_real, cart_neighbor(5), &
+       tag, mpi_comm_world, srequest, sierr)
+  call mpi_irecv(recv_buf, npi*6, mpi_real, cart_neighbor(6), &
+       tag, mpi_comm_world, rrequest, rierr)
+  call mpi_wait(srequest, sstatus, sierr)
+  call mpi_wait(rrequest, rstatus, rierr)
+  
+  do pp = 1, npi
+     xp_buf(:, np_buf+pp) = recv_buf((pp-1)*6+1:pp*6)
+     xp_buf(1, np_buf+pp) = min(xp_buf(1,np_buf+pp) + ub, ub-eps)
+  enddo
 
-    call mpi_isend(send_buf, npo*6, mpi_real, cart_neighbor(4), &
-                   tag, mpi_comm_world, srequest, sierr)
-    call mpi_irecv(recv_buf, npi*6, mpi_real, cart_neighbor(3), &
-                   tag, mpi_comm_world, rrequest, rierr)
-    call mpi_wait(srequest, sstatus, sierr)
-    call mpi_wait(rrequest, rstatus, rierr)
-
-    do pp = 1, npi
-      xp_buf(:, np_buf+pp) = recv_buf((pp-1)*6+1:pp*6)
-      xp_buf(2, np_buf+pp) = max(xp_buf(2, np_buf+pp)-ub, lb)
-    enddo
-
-    pp = 1
-    do 
-      if (pp > npi) exit 
-      x = xp_buf(:, np_buf+pp)
-      if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
+  pp = 1
+  do
+     if (pp > npi) exit
+     x = xp_buf(:, np_buf+pp)
+     if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
           x(3) >= lb .and. x(3) < ub ) then
         if (command == 0) then
-            np_local = np_local + 1
-            xvp(:, np_local) = x
+           np_local = np_local + 1
+           xvp(:, np_local) = x
+        else if (command == 1) then
+           np_local_dm = np_local_dm + 1
+           xvp_dm(:, np_local_dm) = x
         else
-            np_local_dm = np_local_dm + 1
-            xvp_dm(:, np_local_dm) = x
+           np_local_h = np_local_h + 1
+           xvmp_h(:, np_local_h) = x
+        endif
+        xp_buf(:, np_buf+pp) = xp_buf(:, np_buf+npi)
+        npi = npi - 1
+        cycle 
+     endif
+     pp = pp + 1
+  enddo
+  
+  np_buf = np_buf + npi
+
+  !--------------------------------------------------------
+  ! Pass +y
+  !--------------------------------------------------------
+
+  tag = 13 
+  npo = 0
+  pp  = 1
+  do 
+     if (pp > np_buf) exit
+     if (xp_buf(2, pp) >= ub) then
+        npo = npo + 1
+        send_buf((npo-1)*6+1:npo*6) = xp_buf(:, pp)
+        xp_buf(:, pp) = xp_buf(:, np_buf)
+        np_buf = np_buf - 1
+        cycle 
+     endif
+     pp = pp + 1
+  enddo
+  
+  npi = npo
+
+  call mpi_sendrecv_replace(npi, 1, mpi_integer, cart_neighbor(4), &
+       tag, cart_neighbor(3), tag, mpi_comm_world, &
+       status, ierr) 
+  
+  call mpi_isend(send_buf, npo*6, mpi_real, cart_neighbor(4), &
+       tag, mpi_comm_world, srequest, sierr)
+  call mpi_irecv(recv_buf, npi*6, mpi_real, cart_neighbor(3), &
+       tag, mpi_comm_world, rrequest, rierr)
+  call mpi_wait(srequest, sstatus, sierr)
+  call mpi_wait(rrequest, rstatus, rierr)
+  
+  do pp = 1, npi
+     xp_buf(:, np_buf+pp) = recv_buf((pp-1)*6+1:pp*6)
+     xp_buf(2, np_buf+pp) = max(xp_buf(2, np_buf+pp)-ub, lb)
+  enddo
+  
+  pp = 1
+  do 
+     if (pp > npi) exit 
+     x = xp_buf(:, np_buf+pp)
+     if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
+          x(3) >= lb .and. x(3) < ub ) then
+        if (command == 0) then
+           np_local = np_local + 1
+           xvp(:, np_local) = x
+        else if (command == 1) then
+           np_local_dm = np_local_dm + 1
+           xvp_dm(:, np_local_dm) = x
+        else
+           np_local_h = np_local_h + 1
+           xvmp_h(:, np_local_h) = x
         endif
         xp_buf(:, np_buf+pp) = xp_buf(:, np_buf+npi)
         npi = npi-1
         cycle 
-      endif
-      pp = pp + 1
-    enddo
+     endif
+     pp = pp + 1
+  enddo
    
-    np_buf = np_buf + npi
+  np_buf = np_buf + npi
 
-    !
-    ! Pass -y
-    !
+  !--------------------------------------------------------
+  ! Pass -y
+  !--------------------------------------------------------
 
-    tag = 14
-    npo = 0
-    pp  = 1
-    do
-      if (pp > np_buf) exit
-      if (xp_buf(2,pp) < lb) then
+  tag = 14
+  npo = 0
+  pp  = 1
+  do
+     if (pp > np_buf) exit
+     if (xp_buf(2,pp) < lb) then
         npo = npo+1
         send_buf((npo-1)*6+1:npo*6) = xp_buf(:, pp)
         xp_buf(:, pp) = xp_buf(:, np_buf)
         np_buf = np_buf - 1
         cycle
-      endif
-      pp = pp + 1
-    enddo
-
-    npi = npo
-
-    call mpi_sendrecv_replace(npi, 1, mpi_integer, cart_neighbor(3), &
-                              tag, cart_neighbor(4), tag, mpi_comm_world, &
-                              status, ierr)
-
-    call mpi_isend(send_buf, npo*6, mpi_real, cart_neighbor(3), &
-                   tag, mpi_comm_world, srequest, sierr)
-    call mpi_irecv(recv_buf, npi*6, mpi_real, cart_neighbor(4), &
-                   tag, mpi_comm_world, rrequest, rierr)
-    call mpi_wait(srequest, sstatus, sierr)
-    call mpi_wait(rrequest, rstatus, rierr)
-
-    do pp = 1, npi
-      xp_buf(:, np_buf+pp) = recv_buf((pp-1)*6+1:pp*6)
-      xp_buf(2, np_buf+pp) = min(xp_buf(2, np_buf+pp)+ub, ub-eps)
-    enddo
-
-    pp = 1
-    do
-      if (pp > npi) exit
-      x = xp_buf(:, np_buf+pp)
-      if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
+     endif
+     pp = pp + 1
+  enddo
+  
+  npi = npo
+  
+  call mpi_sendrecv_replace(npi, 1, mpi_integer, cart_neighbor(3), &
+       tag, cart_neighbor(4), tag, mpi_comm_world, &
+       status, ierr)
+  
+  call mpi_isend(send_buf, npo*6, mpi_real, cart_neighbor(3), &
+       tag, mpi_comm_world, srequest, sierr)
+  call mpi_irecv(recv_buf, npi*6, mpi_real, cart_neighbor(4), &
+       tag, mpi_comm_world, rrequest, rierr)
+  call mpi_wait(srequest, sstatus, sierr)
+  call mpi_wait(rrequest, rstatus, rierr)
+  
+  do pp = 1, npi
+     xp_buf(:, np_buf+pp) = recv_buf((pp-1)*6+1:pp*6)
+     xp_buf(2, np_buf+pp) = min(xp_buf(2, np_buf+pp)+ub, ub-eps)
+  enddo
+  
+  pp = 1
+  do
+     if (pp > npi) exit
+     x = xp_buf(:, np_buf+pp)
+     if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
           x(3) >= lb .and. x(3) < ub ) then
         if (command == 0) then
-            np_local = np_local+1
-            xvp(:, np_local) = x
+           np_local = np_local+1
+           xvp(:, np_local) = x
+        else if (command == 1) then
+           np_local_dm = np_local_dm+1
+           xvp_dm(:, np_local_dm) = x
         else
-            np_local_dm = np_local_dm+1
-            xvp_dm(:, np_local_dm) = x
+           np_local_h = np_local_h+1
+           xvmp_h(:, np_local_h) = x
         endif
         xp_buf(:, np_buf+pp) = xp_buf(:, np_buf+npi)
         npi=npi-1
         cycle 
-      endif
-      pp = pp + 1
-    enddo
+     endif
+     pp = pp + 1
+  enddo
   
-    np_buf = np_buf + npi
+  np_buf = np_buf + npi
+  
+  !--------------------------------------------------------
+  ! Pass +z
+  !--------------------------------------------------------
 
-    !
-    ! Pass +z
-    !
-
-    tag = 15 
-    npo = 0
-    pp  = 1
-    do 
-      if (pp > np_buf) exit
-      if (xp_buf(3, pp) >= ub) then
+  tag = 15 
+  npo = 0
+  pp  = 1
+  do 
+     if (pp > np_buf) exit
+     if (xp_buf(3, pp) >= ub) then
         npo = npo + 1
         send_buf((npo-1)*6+1:npo*6) = xp_buf(:, pp)
         xp_buf(:, pp) = xp_buf(:, np_buf)
         np_buf = np_buf - 1
         cycle 
-      endif
-      pp = pp + 1
-    enddo
+     endif
+     pp = pp + 1
+  enddo
+  
+  npi = npo
 
-    npi = npo
-
-    call mpi_sendrecv_replace(npi,1,mpi_integer,cart_neighbor(2), &
-                              tag,cart_neighbor(1),tag,mpi_comm_world, &
-                              status,ierr) 
-
-    call mpi_isend(send_buf,npo*6,mpi_real,cart_neighbor(2), &
-                   tag,mpi_comm_world,srequest,sierr)
-    call mpi_irecv(recv_buf,npi*6,mpi_real,cart_neighbor(1), &
-                   tag,mpi_comm_world,rrequest,rierr)
-    call mpi_wait(srequest,sstatus,sierr)
-    call mpi_wait(rrequest,rstatus,rierr)
-
-    do pp=1,npi
-      xp_buf(:,np_buf+pp)=recv_buf((pp-1)*6+1:pp*6)
-      xp_buf(3,np_buf+pp)=max(xp_buf(3,np_buf+pp)-ub,lb)
-    enddo
-
-    pp=1
-    do 
-      if (pp > npi) exit 
-      x=xp_buf(:,np_buf+pp)
-      if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
+  call mpi_sendrecv_replace(npi,1,mpi_integer,cart_neighbor(2), &
+       tag,cart_neighbor(1),tag,mpi_comm_world, &
+       status,ierr) 
+  
+  call mpi_isend(send_buf,npo*6,mpi_real,cart_neighbor(2), &
+       tag,mpi_comm_world,srequest,sierr)
+  call mpi_irecv(recv_buf,npi*6,mpi_real,cart_neighbor(1), &
+       tag,mpi_comm_world,rrequest,rierr)
+  call mpi_wait(srequest,sstatus,sierr)
+  call mpi_wait(rrequest,rstatus,rierr)
+  
+  do pp=1,npi
+     xp_buf(:,np_buf+pp)=recv_buf((pp-1)*6+1:pp*6)
+     xp_buf(3,np_buf+pp)=max(xp_buf(3,np_buf+pp)-ub,lb)
+  enddo
+  
+  pp=1
+  do 
+     if (pp > npi) exit 
+     x=xp_buf(:,np_buf+pp)
+     if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
           x(3) >= lb .and. x(3) < ub ) then
         if (command == 0) then
-            np_local=np_local+1
-            xvp(:,np_local)=x
+           np_local=np_local+1
+           xvp(:,np_local)=x
+        else if (command == 1) then
+           np_local_dm=np_local_dm+1
+           xvp_dm(:,np_local_dm)=x
         else
-            np_local_dm=np_local_dm+1
-            xvp_dm(:,np_local_dm)=x
+           np_local_h=np_local_h+1
+           xvmp_h(:,np_local_h)=x
         endif
         xp_buf(:,np_buf+pp)=xp_buf(:,np_buf+npi)
         npi=npi-1
         cycle 
-      endif
-      pp=pp+1
-    enddo
-   
-    np_buf=np_buf+npi
+     endif
+     pp=pp+1
+  enddo
+  
+  np_buf=np_buf+npi
 
-    !
-    ! Pass -z
-    !
+  !--------------------------------------------------------
+  ! Pass -z
+  !--------------------------------------------------------
 
-    tag=16
-    npo=0
-    pp=1
-    do
-      if (pp > np_buf) exit
-      if (xp_buf(3,pp) < lb) then
+  tag=16
+  npo=0
+  pp=1
+  do
+     if (pp > np_buf) exit
+     if (xp_buf(3,pp) < lb) then
         npo=npo+1
         send_buf((npo-1)*6+1:npo*6)=xp_buf(:,pp)
         xp_buf(:,pp)=xp_buf(:,np_buf)
         np_buf=np_buf-1
         cycle
-      endif
-      pp=pp+1
-    enddo
-
-    npi = npo
-
-    call mpi_sendrecv_replace(npi,1,mpi_integer,cart_neighbor(1), &
-                              tag,cart_neighbor(2),tag,mpi_comm_world, &
-                              status,ierr)
-
-    call mpi_isend(send_buf,npo*6,mpi_real,cart_neighbor(1), &
-                   tag,mpi_comm_world,srequest,sierr)
-    call mpi_irecv(recv_buf,npi*6,mpi_real,cart_neighbor(2), &
-                   tag,mpi_comm_world,rrequest,rierr)
-    call mpi_wait(srequest,sstatus,sierr)
-    call mpi_wait(rrequest,rstatus,rierr)
-
-    do pp=1,npi
-      xp_buf(:,np_buf+pp)=recv_buf((pp-1)*6+1:pp*6)
-      xp_buf(3,np_buf+pp)=min(xp_buf(3,np_buf+pp)+ub,ub-eps)
-    enddo
-
-    pp=1
-    do
-      if (pp > npi) exit
-      x=xp_buf(:,np_buf+pp)
-      if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
+     endif
+     pp=pp+1
+  enddo
+  
+  npi = npo
+  
+  call mpi_sendrecv_replace(npi,1,mpi_integer,cart_neighbor(1), &
+       tag,cart_neighbor(2),tag,mpi_comm_world, &
+       status,ierr)
+  
+  call mpi_isend(send_buf,npo*6,mpi_real,cart_neighbor(1), &
+       tag,mpi_comm_world,srequest,sierr)
+  call mpi_irecv(recv_buf,npi*6,mpi_real,cart_neighbor(2), &
+       tag,mpi_comm_world,rrequest,rierr)
+  call mpi_wait(srequest,sstatus,sierr)
+  call mpi_wait(rrequest,rstatus,rierr)
+  
+  do pp=1,npi
+     xp_buf(:,np_buf+pp)=recv_buf((pp-1)*6+1:pp*6)
+     xp_buf(3,np_buf+pp)=min(xp_buf(3,np_buf+pp)+ub,ub-eps)
+  enddo
+  
+  pp=1
+  do
+     if (pp > npi) exit
+     x=xp_buf(:,np_buf+pp)
+     if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
           x(3) >= lb .and. x(3) < ub ) then
         if (command == 0) then
-            np_local=np_local+1
-            xvp(:,np_local)=x
+           np_local=np_local+1
+           xvp(:,np_local)=x
+        else if (command == 1) then
+           np_local_dm=np_local_dm+1
+           xvp_dm(:,np_local_dm)=x
         else
-            np_local_dm=np_local_dm+1
-            xvp_dm(:,np_local_dm)=x
+           np_local_h=np_local_h+1
+           xvmp_h(:,np_local_h)=x
         endif
         xp_buf(:,np_buf+pp)=xp_buf(:,np_buf+npi)
         npi=npi-1
         cycle 
-      endif
-      pp=pp+1
-    enddo
+     endif
+     pp=pp+1
+  enddo
   
-    np_buf=np_buf+npi
+  np_buf=np_buf+npi
 
 #ifdef DEBUG
-    do i=0,nodes-1
-      if (rank==i) print *,rank,'particles left in buffer=',np_buf
-      call mpi_barrier(mpi_comm_world,ierr)
-    enddo
+  do i=0,nodes-1
+     if (rank==i) print *,rank,'particles left in buffer=',np_buf
+     call mpi_barrier(mpi_comm_world,ierr)
+  enddo
 #endif 
 
-    call mpi_reduce(np_buf,np_exit,1,mpi_integer,mpi_sum,0, &
-                    mpi_comm_world,ierr)
-
-    if (rank == 0) print *,'total buffered particles =',np_exit
-
-    if (command == 0) then
-        call mpi_reduce(np_local,np_final,1,mpi_integer,mpi_sum,0, &
-                    mpi_comm_world,ierr)
-    else
-        call mpi_reduce(np_local_dm,np_final,1,mpi_integer,mpi_sum,0, &
-                    mpi_comm_world,ierr)
-    endif
-
-    if (rank == 0) then
-      print *,'total particles =',np_final
-      if (np_final /= np**3) then
-        print *,'ERROR: total number of particles incorrect after passing'
-      endif
-    endif
+  call mpi_reduce(np_buf,np_exit,1,mpi_integer,mpi_sum,0, &
+       mpi_comm_world,ierr)
+  
+  if (command == 0) then
+     call mpi_reduce(np_local,np_final,1,mpi_integer,mpi_sum,0, &
+          mpi_comm_world,ierr)
+  else if (command == 1) then
+     call mpi_reduce(np_local_dm,np_final,1,mpi_integer,mpi_sum,0, &
+          mpi_comm_world,ierr)
+  else
+     call mpi_reduce(np_local_h,np_final,1,mpi_integer,mpi_sum,0, &
+          mpi_comm_world,ierr)
+  endif
+  
+  if (rank == 0) then
+     if (command == 0) then
+        if (np_final /= np**3) then
+           print *,'ERROR: total number of neutrinos incorrect after passing'
+        endif
+     else if (command == 1) then 
+        if (np_final /= (np/ratio_nudm_dim)**3) then
+           print *,'ERROR: total number of dark matter particles incorrect after passing'
+        endif
+     else
+        if (np_final /= np_h) then
+           print *,'ERROR: total number of halos incorrect after passing'
+        endif
+     endif
+  endif
  
-!!  Check for particles out of bounds
+  !--------------------------------------------------------
+  ! Check for particles out of bounds
+  !--------------------------------------------------------
 
-    if (command == 0) then
-        do i=1,np_local
-          if (xvp(1,i) < 0 .or. xvp(1,i) >= nc_node_dim .or. &
-              xvp(2,i) < 0 .or. xvp(2,i) >= nc_node_dim .or. &
-              xvp(3,i) < 0 .or. xvp(3,i) >= nc_node_dim) then
-            print *,'particle out of bounds',rank,i,xvp(:3,i),nc_node_dim
-          endif
-        enddo
-    else
-        do i=1,np_local_dm
-          if (xvp_dm(1,i) < 0 .or. xvp_dm(1,i) >= nc_node_dim .or. &
-              xvp_dm(2,i) < 0 .or. xvp_dm(2,i) >= nc_node_dim .or. &
-              xvp_dm(3,i) < 0 .or. xvp_dm(3,i) >= nc_node_dim) then
-            print *,'particle out of bounds',rank,i,xvp_dm(:3,i),nc_node_dim
-          endif
-        enddo
-    endif
-
-    time2 = mpi_wtime(ierr)
-    if (rank == 0) write(*, *) "Finished pass_particles ... elapsed time = ", time2-time1
-
-    return
-
+  if (command == 0) then
+     do i=1,np_local
+        if (xvp(1,i) < 0 .or. xvp(1,i) >= nc_node_dim .or. &
+             xvp(2,i) < 0 .or. xvp(2,i) >= nc_node_dim .or. &
+             xvp(3,i) < 0 .or. xvp(3,i) >= nc_node_dim) then
+           print *,'neutrino out of bounds',rank,i,xvp(:3,i),nc_node_dim
+        endif
+     enddo
+  else if (command == 1) then
+     do i=1,np_local_dm
+        if (xvp_dm(1,i) < 0 .or. xvp_dm(1,i) >= nc_node_dim .or. &
+             xvp_dm(2,i) < 0 .or. xvp_dm(2,i) >= nc_node_dim .or. &
+             xvp_dm(3,i) < 0 .or. xvp_dm(3,i) >= nc_node_dim) then
+           print *,'dark matter particle out of bounds',rank,i,xvp_dm(:3,i),nc_node_dim
+        endif
+     enddo
+  else
+     do i=1,np_local_h
+        if (xvmp_h(1,i) < 0 .or. xvmp_h(1,i) >= nc_node_dim .or. &
+             xvmp_h(2,i) < 0 .or. xvmp_h(2,i) >= nc_node_dim .or. &
+             xvmp_h(3,i) < 0 .or. xvmp_h(3,i) >= nc_node_dim) then
+           print *,'halo out of bounds',rank,i,xvmp_h(:3,i),nc_node_dim
+        endif
+     enddo
+  endif
+  
+  time2 = mpi_wtime(ierr)
+  if (rank == 0) then
+     write(*,*) 'Finished pass_particles ...'
+     write(*,*) 'time elapsed             = ', time2-time1
+     write(*,*) 'total buffered particles =',np_exit
+     write(*,*) 'total particles          =',np_final
+     write(*,*) '--------------------------'
+  endif
+  return
+  
 end subroutine pass_particles
 
 ! -------------------------------------------------------------------------------------------------------
 
-#ifndef MOMENTUM
-subroutine link_list(command)
-    !
-    ! Makes linked list of particles in each coarse mesh cell.
-    !
+subroutine order_xvp_ll(command, glook, test_order)
+  !
+  ! Ordre the xvp array acoording to the particles's coarse grid cell appartenance
+  ! Treat both groups separately
+  !
 
-    implicit none
+  implicit none
 
-    integer(4) :: i, j, k, pp
-    integer(4) :: command
-    real(8) :: sec1, sec2
+  integer    :: k,j,i,k2,j2,i2,pp,pp2,base,command,pp_up,pp_down
+  integer(8) :: index, index2
+  integer(1) :: glook
+  real       :: xvtemp(6), xvswap(6)
+  logical    :: test_order
 
-    sec1 = mpi_wtime(ierr)
+  real(8)    :: sec1, sec2, sec3
 
-    !
-    ! Initialize arrays to zero
-    !
+  sec1 = mpi_wtime(ierr)
 
-    if (command == 0) then
-        do k = 1, max_np
-            ll(k) = 0
+  if (rank == 0) then
+     write(*,*) 'Starting order_xvp_ll ...'
+  endif
+
+  !--------------------------------------------------------
+  ! Determine extent of the xvp array we have to work on
+  !--------------------------------------------------------
+
+  if (glook == g0) then
+     pp_down = 1
+     if (command == 0) then
+        pp_up = np_groups(g0) + np_buf_groups(g0)
+     else if (command == 1) then
+        pp_up = np_groups_dm(g0) + np_buf_groups_dm(g0)
+     else if (command == 2) then
+        pp_up = np_groups_h(g0) + np_buf_groups_h(g0)
+     endif
+
+  else if (glook == g1) then
+     if (command == 0) then
+        pp_up = max_np
+        pp_down = max_np + 1 - np_groups(g1) - np_buf_groups(g1)
+     else if (command == 1) then
+        pp_up = max_np_dm
+        pp_down = max_np_dm + 1 - np_groups_dm(g1) - np_buf_groups_dm(g1)
+     else if (command == 2) then
+        pp_up = max_np_h
+        pp_down = max_np_h + 1 - np_groups_h(g1) - np_buf_groups_h(g1)
+     endif
+  endif
+
+  if (command == 0) then
+
+     !--------------------------------------------------------
+     ! Constructs hoc
+     !--------------------------------------------------------
+
+     !! Clear hoc
+     do k = hoc_nc_l, hoc_nc_h
+        hoc(:,:,k) = 0
+     enddo
+
+     !! Count particles in each coarse cell
+     do pp = pp_down,pp_up
+        xvtemp(1:3) = xvp(1:3,pp)
+        i = floor(xvtemp(1)/mesh_scale) + 1
+        j = floor(xvtemp(2)/mesh_scale) + 1
+        k = floor(xvtemp(3)/mesh_scale) + 1
+        hoc(i,j,k) = hoc(i,j,k) + 1
+     enddo
+     
+     !! cum sum hoc --> hoc will point to the end of memory spot reserved for each coarse cell
+     pp = pp_down - 1
+     do k = hoc_nc_l, hoc_nc_h
+        do j = hoc_nc_l, hoc_nc_h
+           do i = hoc_nc_l, hoc_nc_h
+              pp = hoc(i,j,k) + pp
+              hoc(i,j,k) = pp
+           enddo
         enddo
-        do k = hoc_nc_l, hoc_nc_h
-            hoc(:, :, k) = 0
-        enddo
-    else
-        do k = 1, max_np_dm
-            ll_dm(k) = 0
-        enddo
-        do k = hoc_nc_l, hoc_nc_h
-            hoc_dm(:, :, k) = 0
-        enddo
-    endif
+     enddo
 
-    !
-    ! Now construct linked list
-    !
+     !--------------------------------------------------------
+     ! Actually sort the xvp_array
+     !--------------------------------------------------------
 
-    pp = 1
-    if (command == 0) then
+     !! Start at the beginning of xvp_array, looking at the first coarse cell
+     pp = pp_down
+     k2 = hoc_nc_l
+     j2 = hoc_nc_l
+     i2 = hoc_nc_l
+     base = hoc_nc_h - hoc_nc_l + 1
+     index2 = 0
+     xvtemp(:) = xvp(:,pp)
+
+     do
+        !! if we are looking at the last coarse cell, it means that everything is already sorted
+        if (k2 == hoc_nc_h .and. j2 == hoc_nc_h .and. i2 == hoc_nc_h) exit
+
+        !! else we want to fill the coarse cell we are looking at
         do
-            if (pp > np_local) exit
-            i = floor(xvp(1, pp)/mesh_scale) + 1
-            j = floor(xvp(2, pp)/mesh_scale) + 1
-            k = floor(xvp(3, pp)/mesh_scale) + 1
-            if (i < hoc_nc_l .or. i > hoc_nc_h .or. &
-                j < hoc_nc_l .or. j > hoc_nc_h .or. &
-                k < hoc_nc_l .or. k > hoc_nc_h) then
-                write(*,*) "WARNING: LinkList Particle Deleted: ", xvp(1:3,pp)
-                xvp(:,pp) = xvp(:,np_local)
-                np_local = np_local - 1
-                cycle
-            else
-                ll(pp) = hoc(i, j, k)
-                hoc(i, j, k) = pp
-            endif
-            pp = pp + 1
+           !! if the coarse cell is filled, jump to next coarse cell
+           if (pp > hoc(i2, j2, k2)) exit
+
+           !! coarse cell the current particle should be
+           i = floor(xvtemp(1)/mesh_scale) + 1
+           j = floor(xvtemp(2)/mesh_scale) + 1
+           k = floor(xvtemp(3)/mesh_scale) + 1
+  
+           index = (i-hoc_nc_l) + (j-hoc_nc_l) * base + (k-hoc_nc_l)*base*base 
+           !! if the particle is already sorted
+           !! jump to next particle
+           if ( index <= index2 ) then
+              pp = pp + 1
+              xvtemp(:) = xvp(:,pp)
+           !! else we put it in its right cell
+           else
+              !! determines its position
+              pp2 = hoc(i,j,k)
+              !! swap with the particle at its position
+              xvswap(:) = xvp(:,pp2)
+              xvp(:,pp) = xvswap(:)
+              xvp(:,pp2) = xvtemp(:)
+              !! new particle we are looking at
+              xvtemp(:) = xvswap(:)
+              !! update the position for the cell
+              hoc(i,j,k) = hoc(i,j,k) - 1
+           endif
+
+        enddo 
+        !! now we have pp = hoc(i2,j2,k2) + 1,
+        !! which means that the cell is completed,
+        !! we just have to jump to the next cell
+        if ( j2 == hoc_nc_h .and. i2 == hoc_nc_h ) then
+           k2 = k2 + 1
+           j2 = hoc_nc_l
+           i2 = hoc_nc_l
+        else if (i2 == hoc_nc_h ) then
+           j2 = j2 + 1
+           i2 = hoc_nc_l
+        else
+           i2 = i2 + 1
+        endif
+        index2 = (i2-hoc_nc_l) + (j2-hoc_nc_l) * base + (k2-hoc_nc_l)*base*base 
+     enddo
+
+     !--------------------------------------------------------
+     ! Test that the xvp array has the right order
+     !--------------------------------------------------------
+
+     !! Now the xvp array should be ordered, we want to test it
+
+     if (test_order) then
+        if (rank == 0) then
+           write(*,*) 'Checking sorting is right ...'
+        endif
+
+        index2 = 0
+        do pp = pp_down, pp_up
+           xvtemp(1:3) = xvp(1:3,pp)
+           
+           i = floor(xvtemp(1)/mesh_scale) + 1
+           j = floor(xvtemp(2)/mesh_scale) + 1
+           k = floor(xvtemp(3)/mesh_scale) + 1
+           
+           index = (i-hoc_nc_l) + (j-hoc_nc_l) * base + (k-hoc_nc_l)*base*base
+           
+           if (index >= index2) then
+              index2 = index
+           else
+              write(*,*) 'WARNING : xvp array not correctly sorted !!! CHECK ALGORITHM',pp, index, index2
+           endif
         enddo
-    else
+     endif
+  
+  else if (command == 1) then
+
+     !--------------------------------------------------------
+     ! Do the same for dark matter
+     !--------------------------------------------------------
+
+     do k = hoc_nc_l, hoc_nc_h
+        hoc_dm(:,:,k) = 0
+     enddo
+
+     do pp = pp_down,pp_up
+        xvtemp(1:3) = xvp_dm(1:3,pp)
+        i = floor(xvtemp(1)/mesh_scale) + 1
+        j = floor(xvtemp(2)/mesh_scale) + 1
+        k = floor(xvtemp(3)/mesh_scale) + 1
+        hoc_dm(i,j,k) = hoc_dm(i,j,k) + 1
+     enddo
+     
+     pp = pp_down - 1
+     do k = hoc_nc_l, hoc_nc_h
+        do j = hoc_nc_l, hoc_nc_h
+           do i = hoc_nc_l, hoc_nc_h
+              pp = hoc_dm(i,j,k) + pp
+              hoc_dm(i,j,k) = pp
+           enddo
+        enddo
+     enddo
+
+     pp = pp_down
+     k2 = hoc_nc_l
+     j2 = hoc_nc_l
+     i2 = hoc_nc_l
+     base = hoc_nc_h - hoc_nc_l + 1
+     index2 = 0
+     xvtemp(:) = xvp_dm(:,pp)
+
+     do
+        if (k2 == hoc_nc_h .and. j2 == hoc_nc_h .and. i2 == hoc_nc_h) exit
+
         do
-            if (pp > np_local_dm) exit
-            i = floor(xvp_dm(1, pp)/mesh_scale) + 1
-            j = floor(xvp_dm(2, pp)/mesh_scale) + 1
-            k = floor(xvp_dm(3, pp)/mesh_scale) + 1
-            if (i < hoc_nc_l .or. i > hoc_nc_h .or. &
-                j < hoc_nc_l .or. j > hoc_nc_h .or. &
-                k < hoc_nc_l .or. k > hoc_nc_h) then
-                write(*,*) "WARNING: LinkList Particle Deleted: ", xvp_dm(1:3,pp)
-                xvp_dm(:,pp) = xvp_dm(:,np_local_dm)
-                np_local_dm = np_local_dm - 1
-                cycle
-            else
-                ll_dm(pp) = hoc_dm(i, j, k)
-                hoc_dm(i, j, k) = pp
-            endif
-            pp = pp + 1
+           if (pp > hoc_dm(i2, j2, k2)) exit
+
+           i = floor(xvtemp(1)/mesh_scale) + 1
+           j = floor(xvtemp(2)/mesh_scale) + 1
+           k = floor(xvtemp(3)/mesh_scale) + 1
+  
+           index = (i-hoc_nc_l) + (j-hoc_nc_l) * base + (k-hoc_nc_l)*base*base 
+           if ( index <= index2 ) then
+              pp = pp + 1
+              xvtemp(:) = xvp_dm(:,pp)
+           else
+              pp2 = hoc_dm(i,j,k)
+              xvswap(:) = xvp_dm(:,pp2)
+              xvp_dm(:,pp) = xvswap(:)
+              xvp_dm(:,pp2) = xvtemp(:)
+              xvtemp(:) = xvswap(:)
+              hoc_dm(i,j,k) = hoc_dm(i,j,k) - 1
+           endif
+
         enddo
-    endif
+        if ( j2 == hoc_nc_h .and. i2 == hoc_nc_h ) then
+           k2 = k2 + 1
+           j2 = hoc_nc_l
+           i2 = hoc_nc_l
+        else if (i2 == hoc_nc_h ) then
+           j2 = j2 + 1
+           i2 = hoc_nc_l
+        else
+           i2 = i2 + 1
+        endif
+        index2 = (i2-hoc_nc_l) + (j2-hoc_nc_l) * base + (k2-hoc_nc_l)*base*base 
+     enddo
 
-    sec2 = mpi_wtime(ierr)
-    if (rank == 0) write(*,*) "Finished link_list ... elapsed time = ", sec2 - sec1
+     if (test_order) then
+        if (rank == 0) then
+           write(*,*) 'Checking sorting is right ...'
+        endif
 
-end subroutine link_list
+        index2 = 0
+        do pp = pp_down, pp_up
+           xvtemp(1:3) = xvp_dm(1:3,pp)
+           
+           i = floor(xvtemp(1)/mesh_scale) + 1
+           j = floor(xvtemp(2)/mesh_scale) + 1
+           k = floor(xvtemp(3)/mesh_scale) + 1
+           
+           index = (i-hoc_nc_l) + (j-hoc_nc_l) * base + (k-hoc_nc_l)*base*base
+           
+           if (index >= index2) then
+              index2 = index
+           else
+              write(*,*) 'WARNING : xvp array not correctly sorted !!! CHECK ALGORITHM',pp, index, index2
+           endif
+        enddo
+     endif
+
+  else if (command == 2) then
+
+     !--------------------------------------------------------
+     ! Do the same for halos
+     !--------------------------------------------------------
+
+     do k = hoc_nc_l_h, hoc_nc_h_h
+        hoc_h(:,:,k) = 0
+     enddo
+
+     do pp = pp_down,pp_up
+        xvtemp(1:3) = xvmp_h(1:3,pp)
+        i = floor(xvtemp(1)/mesh_scale_h) + 1
+        j = floor(xvtemp(2)/mesh_scale_h) + 1
+        k = floor(xvtemp(3)/mesh_scale_h) + 1
+        hoc_h(i,j,k) = hoc_h(i,j,k) + 1
+     enddo
+     
+     pp = pp_down - 1
+     do k = hoc_nc_l_h, hoc_nc_h_h
+        do j = hoc_nc_l_h, hoc_nc_h_h
+           do i = hoc_nc_l_h, hoc_nc_h_h
+              pp = hoc_h(i,j,k) + pp
+              hoc_h(i,j,k) = pp
+           enddo
+        enddo
+     enddo
+
+     pp = pp_down
+     k2 = hoc_nc_l_h
+     j2 = hoc_nc_l_h
+     i2 = hoc_nc_l_h
+     base = hoc_nc_h_h - hoc_nc_l_h + 1
+     index2 = 0
+     xvtemp(:) = xvmp_h(:,pp)
+
+     do
+        if (k2 == hoc_nc_h_h .and. j2 == hoc_nc_h_h .and. i2 == hoc_nc_h_h) exit
+
+        do
+           if (pp > hoc_h(i2, j2, k2)) exit
+
+           i = floor(xvtemp(1)/mesh_scale_h) + 1
+           j = floor(xvtemp(2)/mesh_scale_h) + 1
+           k = floor(xvtemp(3)/mesh_scale_h) + 1
+  
+           index = (i-hoc_nc_l_h) + (j-hoc_nc_l_h) * base + (k-hoc_nc_l_h)*base*base 
+           if ( index <= index2 ) then
+              pp = pp + 1
+              xvtemp(:) = xvmp_h(:,pp)
+           else
+              pp2 = hoc_h(i,j,k)
+              xvswap(:) = xvmp_h(:,pp2)
+              xvmp_h(:,pp) = xvswap(:)
+              xvmp_h(:,pp2) = xvtemp(:)
+              xvtemp(:) = xvswap(:)
+              hoc_h(i,j,k) = hoc_h(i,j,k) - 1
+           endif
+
+        enddo
+        if ( j2 == hoc_nc_h_h .and. i2 == hoc_nc_h_h ) then
+           k2 = k2 + 1
+           j2 = hoc_nc_l_h
+           i2 = hoc_nc_l_h
+        else if (i2 == hoc_nc_h_h ) then
+           j2 = j2 + 1
+           i2 = hoc_nc_l_h
+        else
+           i2 = i2 + 1
+        endif
+        index2 = (i2-hoc_nc_l_h) + (j2-hoc_nc_l_h) * base + (k2-hoc_nc_l_h)*base*base 
+     enddo
+
+     if (test_order) then
+        if (rank == 0) then
+           write(*,*) 'Checking sorting is right ...'
+        endif
+
+        index2 = 0
+        do pp = pp_down, pp_up
+           xvtemp(1:3) = xvmp_h(1:3,pp)
+           
+           i = floor(xvtemp(1)/mesh_scale_h) + 1
+           j = floor(xvtemp(2)/mesh_scale_h) + 1
+           k = floor(xvtemp(3)/mesh_scale_h) + 1
+           
+           index = (i-hoc_nc_l_h) + (j-hoc_nc_l_h) * base + (k-hoc_nc_l_h)*base*base
+           
+           if (index >= index2) then
+              index2 = index
+           else
+              write(*,*) 'WARNING : xvp array not correctly sorted !!! CHECK ALGORITHM',pp, index, index2
+           endif
+        enddo
+     endif
+
+  endif
+
+  sec2 = mpi_wtime(ierr)
+  if (rank == 0) then
+     write(*,*) 'Finished order_xvp_ll'
+     write(*,*) 'Group processed     : ', glook
+     write(*,*) 'Number of particles : ', (pp_up-pp_down+1)
+     write(*,*) "Elapsed time        = ", sec2 - sec1
+     write(*,*) '--------------------------'
+  endif
+
+end subroutine order_xvp_ll
 
 ! -------------------------------------------------------------------------------------------------------
 
-subroutine buffer_particles(command)
-    !
-    ! Exchange coarse mesh buffers for finding halos near node edges. Add these
-    ! particles to the linked list.
-    !
+subroutine order_xvp_groups(command)
+  !
+  ! Split the xvp array in 2 :
+  ! Group 0 at the beginning of the array
+  ! Group 1 at the end of the array
+  !
 
-    implicit none
+  implicit none
 
-    integer :: pp, i, j, k
-    integer :: np_buf, nppx, npmx, nppy, npmy, nppz, npmz
-    integer, dimension(mpi_status_size) :: status, sstatus, rstatus
-    integer :: tag, srequest, rrequest, sierr, rierr
-    real(4), parameter :: eps = 1.0e-03
-    integer(4) :: np_local_start, np_buffer_sent_local
-    integer(8) :: np_buffer_sent
-    real(8) :: sec1, sec2
-    integer(4) :: command
+  integer(4) :: command
+  integer :: np0, np1, pp
+  integer(8) :: np1_tot, np2_tot
+  real(4) :: r 
+  integer(1) :: g
 
-    sec1 = mpi_wtime(ierr)
+  time1 = mpi_wtime(ierr)
 
-    if (command == 0) then
-        np_local_start = np_local
-    else
-        np_local_start = np_local_dm
-    endif
+  !--------------------------------------------------------    
+  ! Assign groups + put group1 particles at the end of the xvp array
+  !--------------------------------------------------------    
 
-    !
-    ! Pass +x
-    ! 
+  np0 = 0
+  np1 = 0
 
-    tag = 11
-    np_buf = 0
+  pp = 1
 
-    do k = hoc_nc_l, hoc_nc_h
+  if (command == 0) then
+     do
+        if (np0 + np1 >= np_local) exit
+        call random_number(r)
+        g = int(r+0.5)
+        
+        if (g == g0) then
+           np0 = np0 + 1
+           pp = pp + 1
+        else if (g == g1) then
+           xvp(:,max_np-np1) = xvp(:,pp)
+           xvp(:,pp) = xvp(:,np_local - np1)
+           np1 = np1 + 1
+        endif
+     enddo
+  else if (command == 1) then
+     do
+        if (np0 + np1 >= np_local_dm) exit
+        call random_number(r)
+        g = int(r+0.5)
+        
+        if (g == g0) then
+           np0 = np0 + 1
+           pp = pp + 1
+        else if (g == g1) then
+           xvp_dm(:,max_np_dm-np1) = xvp_dm(:,pp)
+           xvp_dm(:,pp) = xvp_dm(:,np_local_dm - np1)
+           np1 = np1 + 1
+        endif
+     enddo
+  else if (command == 2) then
+     do
+        if (np0 + np1 >= np_local_h) exit
+        call random_number(r)
+        g = int(r+0.5)
+        
+        if (g == g0) then
+           np0 = np0 + 1
+           pp = pp + 1
+        else if (g == g1) then
+           xvmp_h(:,max_np_h-np1) = xvmp_h(:,pp)
+           xvmp_h(:,pp) = xvmp_h(:,np_local_h - np1)
+           np1 = np1 + 1
+        endif
+     enddo
+  endif
+
+  !--------------------------------------------------------    
+  ! Assign np_groups in consequence
+  !--------------------------------------------------------    
+
+  if (command == 0) then
+     np_groups(0) = np0
+     np_groups(1) = np1
+  else if (command == 1) then 
+     np_groups_dm(0) = np0
+     np_groups_dm(1) = np1
+  else if (command == 2) then
+     np_groups_h(0) = np0
+     np_groups_h(1) = np1
+  endif
+   
+
+  call mpi_allreduce(int(np0,kind=8), np1_tot, 1, mpi_integer8, mpi_sum, mpi_comm_world, ierr)
+  call mpi_allreduce(int(np1,kind=8), np2_tot, 1, mpi_integer8, mpi_sum, mpi_comm_world, ierr)
+
+
+  if (command == 0) then
+     np_groups_tot(0) = np1_tot
+     np_groups_tot(1) = np2_tot
+  else if (command == 1) then
+     np_groups_tot_dm(0) = np1_tot
+     np_groups_tot_dm(1) = np2_tot
+  else if (command == 2) then
+     np_groups_tot_h(0) = np1_tot
+     np_groups_tot_h(1) = np2_tot
+  endif
+
+
+  time2 = mpi_wtime(ierr)
+  if (rank == 0) then
+     write(*,*) 'Finished order_xvp_groups ...'
+     write(*,*) 'np_groups_tot(0) = ', np1_tot
+     write(*,*) 'np_groups_tot(1) = ', np2_tot
+     write(*,*) 'Total = ', np1_tot+np2_tot
+     write(*,*) 'Elapsed time = ', time2 - time1
+     write(*,*) '--------------------------'
+  endif
+
+end subroutine order_xvp_groups
+
+! -------------------------------------------------------------------------------------------------------
+
+subroutine remake_hoc(command, glook)
+  !
+  ! Reconstructs hoc just before velocity density
+  ! That way, hoc can be equivalenced
+  !
+
+  implicit none
+  integer      :: command,pp,pp_down,pp_up,k,j,i
+  real         :: xvtemp(6)
+  integer(1)   :: glook
+
+  !--------------------------------------------------------
+  ! Determine xvp spot we have to look at
+  !--------------------------------------------------------
+
+  if (glook == g0) then
+     pp_down = 1
+     if (command == 0) then
+        pp_up = np_groups(g0) + np_buf_groups(g0)
+     else if (command == 1) then
+        pp_up = np_groups_dm(g0) + np_buf_groups_dm(g0)
+     else if (command == 2) then
+        pp_up = np_groups_h(g0) + np_buf_groups_h(g0)
+     endif
+
+  else if (glook == g1) then
+     if (command == 0) then
+        pp_up = max_np
+        pp_down = max_np + 1 - np_groups(g1) - np_buf_groups(g1)
+     else if (command == 1) then
+        pp_up = max_np_dm
+        pp_down = max_np_dm + 1 - np_groups_dm(g1) - np_buf_groups_dm(g1)
+     else if (command == 2) then
+        pp_up = max_np_h
+        pp_down = max_np_h + 1 - np_groups_h(g1) - np_buf_groups_h(g1)
+     endif
+  endif
+
+  !--------------------------------------------------------
+  ! Actually constructs hoc
+  !--------------------------------------------------------
+
+  if (command == 0) then
+     do k = hoc_nc_l, hoc_nc_h
+        hoc(:,:,k) = 0
+     enddo
+
+     !! Count particles in each coarse cell                                                                                                     
+     do pp = pp_down,pp_up
+        xvtemp(1:3) = xvp(1:3,pp)
+        i = floor(xvtemp(1)/mesh_scale) + 1
+        j = floor(xvtemp(2)/mesh_scale) + 1
+        k = floor(xvtemp(3)/mesh_scale) + 1
+        hoc(i,j,k) = hoc(i,j,k) + 1
+     enddo
+
+     !! cum sum hoc --> hoc will point to the end of memory spot reserved for each coarse cell                                                
+     pp = pp_down - 1
+     do k = hoc_nc_l, hoc_nc_h
         do j = hoc_nc_l, hoc_nc_h
-            do i = hoc_nc_h-hoc_pass_depth, hoc_nc_h
-                if (command == 0) then
-                    pp = hoc(i, j, k)
-                    do
-                        if (pp == 0) exit
-                        if (xvp(1, pp) >= nc_node_dim-rnf_buf) then
-                            np_buf = np_buf + 1
-                            send_buf((np_buf-1)*6+1:np_buf*6) = xvp(:, pp)
-                            GID_send_buf(np_buf) = GID(pp)
-                        endif
-                        pp = ll(pp)
-                    enddo
-                else
-                    pp = hoc_dm(i, j, k)
-                    do
-                        if (pp == 0) exit
-                        if (xvp_dm(1, pp) >= nc_node_dim-rnf_buf) then
-                            np_buf = np_buf + 1
-                            send_buf((np_buf-1)*6+1:np_buf*6) = xvp_dm(:, pp)
-                            GID_send_buf(np_buf) = GID_dm(pp)
-                        endif
-                        pp = ll_dm(pp)
-                    enddo
-                endif
-            enddo
+           do i = hoc_nc_l, hoc_nc_h
+              pp = hoc(i,j,k) + pp
+              hoc(i,j,k) = pp
+           enddo
         enddo
-    enddo
+     enddo
+     
+  else if (command == 1) then
+     do k = hoc_nc_l, hoc_nc_h
+        hoc_dm(:,:,k) = 0
+     enddo
 
-    if (6*np_buf > np_buffer) then
-        write(*,*) "ERROR: Not enough space to send buffer particles: ", rank, np_buf, np_buffer
-        call mpi_abort(mpi_comm_world, ierr, ierr)
-    endif
+     do pp = pp_down,pp_up
+        xvtemp(1:3) = xvp_dm(1:3,pp)
+        i = floor(xvtemp(1)/mesh_scale) + 1
+        j = floor(xvtemp(2)/mesh_scale) + 1
+        k = floor(xvtemp(3)/mesh_scale) + 1
+        hoc_dm(i,j,k) = hoc_dm(i,j,k) + 1
+     enddo
 
-    nppx = np_buf
-
-    call mpi_sendrecv_replace(nppx, 1, mpi_integer, cart_neighbor(6), tag, &
-                              cart_neighbor(5), tag, mpi_comm_world, status, ierr)
-
-    if (command == 0) then
-        if (np_local+nppx > max_np) then
-            write(*,*) "ERROR: Not enough space to receive buffer particles (nppx): ", rank, np_local, nppx, max_np
-            call mpi_abort(mpi_comm_world, ierr, ierr)
-        endif
-    else
-        if (np_local_dm+nppx > max_np_dm) then
-            write(*,*) "ERROR: Not enough space to receive buffer particles (nppx): ", rank, np_local_dm, nppx, max_np_dm
-            call mpi_abort(mpi_comm_world, ierr, ierr)
-        endif
-    endif
-
-    call mpi_isend(send_buf, np_buf*6, mpi_real, cart_neighbor(6), &
-                   tag, mpi_comm_world, srequest, sierr)
-    call mpi_irecv(recv_buf, nppx*6, mpi_real, cart_neighbor(5), &
-                   tag, mpi_comm_world, rrequest, rierr)
-
-    call mpi_wait(srequest, sstatus, sierr)
-    call mpi_wait(rrequest, rstatus, rierr)
-
-    call mpi_isend(GID_send_buf, np_buf, mpi_integer1, cart_neighbor(6), &
-                   tag, mpi_comm_world, srequest, sierr)
-    call mpi_irecv(GID_recv_buf, nppx, mpi_integer1, cart_neighbor(5), &
-                   tag, mpi_comm_world, rrequest, rierr)
-
-    call mpi_wait(srequest, sstatus, sierr)
-    call mpi_wait(rrequest, rstatus, rierr)
-
-    if (command == 0) then
-        do i = 1, nppx
-            xvp(:, np_local+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
-            xvp(1, np_local+i) = max(xvp(1,np_local+i)-nc_node_dim, -rnf_buf)
-            GID(np_local+i) = GID_recv_buf(i)
-        enddo
-    else
-        do i = 1, nppx
-            xvp_dm(:, np_local_dm+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
-            xvp_dm(1, np_local_dm+i) = max(xvp_dm(1,np_local_dm+i)-nc_node_dim, -rnf_buf)
-            GID_dm(np_local_dm+i) = GID_recv_buf(i)
-        enddo
-    endif
-
-    if (command == 0) then
-        np_local = np_local + nppx
-    else
-        np_local_dm = np_local_dm + nppx
-    endif
-
-    !
-    ! Pass -x
-    !
-
-    tag = 12
-    np_buf = 0
-
-    do k = hoc_nc_l, hoc_nc_h
+     pp = pp_down - 1
+     do k = hoc_nc_l, hoc_nc_h
         do j = hoc_nc_l, hoc_nc_h
-            do i = hoc_nc_l, hoc_nc_l+hoc_pass_depth
-                if (command == 0) then
-                    pp = hoc(i, j, k)
-                    do
-                        if (pp == 0) exit
-                        if (xvp(1, pp) < rnf_buf) then
-                            np_buf = np_buf + 1
-                            send_buf((np_buf-1)*6+1:np_buf*6) = xvp(:, pp)
-                            GID_send_buf(np_buf) = GID(pp)
-                        endif
-                        pp = ll(pp)
-                    enddo
-                else
-                    pp = hoc_dm(i, j, k)
-                    do
-                        if (pp == 0) exit
-                        if (xvp_dm(1, pp) < rnf_buf) then
-                            np_buf = np_buf + 1
-                            send_buf((np_buf-1)*6+1:np_buf*6) = xvp_dm(:, pp)
-                            GID_send_buf(np_buf) = GID_dm(pp)
-                        endif
-                        pp = ll_dm(pp)
-                    enddo
-                endif
-            enddo
+           do i = hoc_nc_l, hoc_nc_h
+              pp = hoc_dm(i,j,k) + pp
+              hoc_dm(i,j,k) = pp
+           enddo
         enddo
-    enddo
+     enddo
 
-    if (6*np_buf > np_buffer) then
-        write(*,*) "ERROR: Not enough space to send buffer particles: ", rank, np_buf, np_buffer
+  else if (command == 2) then
+     do k = hoc_nc_l_h, hoc_nc_h_h
+        hoc_h(:,:,k) = 0
+     enddo
+
+     do pp = pp_down,pp_up
+        xvtemp(1:3) = xvmp_h(1:3,pp)
+        i = floor(xvtemp(1)/mesh_scale_h) + 1
+        j = floor(xvtemp(2)/mesh_scale_h) + 1
+        k = floor(xvtemp(3)/mesh_scale_h) + 1
+        hoc_h(i,j,k) = hoc_h(i,j,k) + 1
+     enddo
+
+     pp = pp_down - 1
+     do k = hoc_nc_l_h, hoc_nc_h_h
+        do j = hoc_nc_l_h, hoc_nc_h_h
+           do i = hoc_nc_l_h, hoc_nc_h_h
+              pp = hoc_h(i,j,k) + pp
+              hoc_h(i,j,k) = pp
+           enddo
+        enddo
+     enddo
+
+  endif
+
+end subroutine remake_hoc
+
+! -------------------------------------------------------------------------------------------------------
+
+subroutine buffer_particles_groups(command,glook)
+  !
+  ! Exchange coarse mesh buffers for finding halos near node edges.
+  ! Only deals one group at a time
+  ! 
+  
+  !! It would be possible to exchange only the nearest particles ...
+
+  implicit none
+  
+  integer :: pp,pp_down,pp_up
+  integer :: np_buf, nppx, npmx, nppy, npmy, nppz, npmz
+  integer, dimension(mpi_status_size) :: status, sstatus, rstatus
+  integer :: tag, srequest, rrequest, sierr, rierr
+  real(4), parameter :: eps = 1.0e-03
+  integer(4) :: np_buffer_sent_local
+  integer(8) :: np_buffer_sent
+  integer(4) :: command
+  integer(1) :: glook
+
+  time1 = mpi_wtime(ierr)
+  
+  if (rank == 0) then 
+     write(*,*) 'Starting buffer_particles_groups ...'
+  endif
+  
+  !--------------------------------------------------------
+  ! Pass +x
+  !--------------------------------------------------------
+
+  tag = 11
+  np_buf = 0
+  
+  if (glook == g0) then
+     pp_down = 1
+     if (command == 0) then
+        pp_up = np_groups(g0)
+     else if (command == 1) then
+        pp_up = np_groups_dm(g0)
+     else if (command == 2) then
+        pp_up = np_groups_h(g0)
+     endif
+  else if (glook == g1) then
+     if (command == 0) then
+        pp_up = max_np
+        pp_down = max_np + 1 - np_groups(g1)
+     else if (command == 1) then
+        pp_up = max_np_dm
+        pp_down = max_np_dm + 1 - np_groups_dm(g1)
+     else if (command == 2) then
+        pp_up = max_np_h
+        pp_down = max_np_h + 1 - np_groups_h(g1)
+     endif
+  endif
+          
+  if (command == 0) then
+     do pp = pp_down, pp_up
+        if (xvp(1, pp) >= nc_node_dim-rnf_buf) then
+           np_buf = np_buf + 1
+           send_buf((np_buf-1)*6+1:np_buf*6) = xvp(:, pp)
+        endif
+     enddo
+  else if (command == 1) then
+     do pp = pp_down,pp_up
+        if (xvp_dm(1, pp) >= nc_node_dim-rnf_buf) then
+           np_buf = np_buf + 1
+           send_buf((np_buf-1)*6+1:np_buf*6) = xvp_dm(:, pp)
+        endif
+     enddo
+  else if (command == 2) then
+     do pp = pp_down, pp_up
+        if (xvmp_h(1, pp) >= nc_node_dim-rnf_buf_h) then
+           np_buf = np_buf + 1
+           send_buf((np_buf-1)*6+1:np_buf*6) = xvmp_h(:, pp)
+        endif
+     enddo
+  endif
+  
+  if (6*np_buf > np_buffer) then
+     write(*,*) "ERROR: Not enough space to send buffer particles: ", rank, np_buf, np_buffer
+     call mpi_abort(mpi_comm_world, ierr, ierr)
+  endif
+  
+  nppx = np_buf
+
+  call mpi_sendrecv_replace(nppx, 1, mpi_integer, cart_neighbor(6), tag, &
+       cart_neighbor(5), tag, mpi_comm_world, status, ierr)
+
+  if (command == 0) then
+     if (np_local+nppx > max_np) then
+        write(*,*) "ERROR: Not enough space to receive buffer nu particles (nppx): ", rank, np_local, nppx, max_np
         call mpi_abort(mpi_comm_world, ierr, ierr)
-    endif
-
-    npmx = np_buf
-
-    call mpi_sendrecv_replace(npmx, 1, mpi_integer, cart_neighbor(5), tag, &
-                              cart_neighbor(6), tag, mpi_comm_world, status, ierr)
-
-    if (command == 0) then
-        if (np_local+npmx > max_np) then
-            write(*,*) "ERROR: Not enough space to receive buffer particles (npmx): ", rank, np_local, npmx, max_np
-            call mpi_abort(mpi_comm_world, ierr, ierr)
-        endif
-    else
-        if (np_local_dm+npmx > max_np_dm) then
-            write(*,*) "ERROR: Not enough space to receive buffer particles (npmx): ", rank, np_local_dm, npmx, max_np_dm
-            call mpi_abort(mpi_comm_world, ierr, ierr)
-        endif
-    endif
-
-    call mpi_isend(send_buf, np_buf*6, mpi_real, cart_neighbor(5), &
-                   tag, mpi_comm_world, srequest, sierr)
-    call mpi_irecv(recv_buf, npmx*6, mpi_real, cart_neighbor(6), &
-                   tag, mpi_comm_world, rrequest, rierr)
-
-    call mpi_wait(srequest, sstatus, sierr)
-    call mpi_wait(rrequest, rstatus, rierr)
-
-    call mpi_isend(GID_send_buf, np_buf, mpi_integer1, cart_neighbor(5), &
-                   tag, mpi_comm_world, srequest, sierr)
-    call mpi_irecv(GID_recv_buf, npmx, mpi_integer1, cart_neighbor(6), &
-                   tag, mpi_comm_world, rrequest, rierr)
-
-    call mpi_wait(srequest, sstatus, sierr)
-    call mpi_wait(rrequest, rstatus, rierr)
-
-    if (command == 0) then
-        do i = 1, npmx
-            xvp(:, np_local+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
-            GID(np_local+i) = GID_recv_buf(i)
-            if (abs(xvp(1, np_local+i)) .lt. eps) then
-                if(xvp(1, np_local+i) < 0.) then
-                    xvp(1, np_local+i) = -eps
-                else
-                    xvp(1, np_local+i) = eps
-                endif
-            endif
-            xvp(1, np_local+i) = min(xvp(1, np_local+i)+real(nc_node_dim,4), &
-                                     nc_node_dim+rnf_buf-eps)
-        enddo
-    else
-        do i = 1, npmx
-            xvp_dm(:, np_local_dm+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
-            GID_dm(np_local_dm+i) = GID_recv_buf(i)
-            if (abs(xvp_dm(1, np_local_dm+i)) .lt. eps) then
-                if(xvp_dm(1, np_local_dm+i) < 0.) then
-                    xvp_dm(1, np_local_dm+i) = -eps
-                else
-                    xvp_dm(1, np_local_dm+i) = eps
-                endif
-            endif
-            xvp_dm(1, np_local_dm+i) = min(xvp_dm(1, np_local_dm+i)+real(nc_node_dim,4), &
-                                     nc_node_dim+rnf_buf-eps)
-        enddo
-    endif
-
-    if (command == 0) then
-        np_local = np_local + npmx
-    else
-        np_local_dm = np_local_dm + npmx
-    endif
-
-    !
-    ! Add additional particles to the linked list
-    !
-
-    if (command == 0) then
-        pp = np_local-npmx-nppx + 1
-        do
-            if (pp > np_local) exit
-            i = floor(xvp(1, pp)/mesh_scale) + 1
-            j = floor(xvp(2, pp)/mesh_scale) + 1
-            k = floor(xvp(3, pp)/mesh_scale) + 1
-#ifdef DIAG
-            if (i < hoc_nc_l .or. i > hoc_nc_h .or. &
-                j < hoc_nc_l .or. j > hoc_nc_h .or. &
-                k < hoc_nc_l .or. k > hoc_nc_h) then
-                write (*, *) 'BUFFER PARTICLE DELETED', xvp(1:3, pp)
-                xvp(:,pp) = xvp(:,np_local)
-                np_local = np_local - 1
-                cycle
-            endif
-#endif
-            ll(pp) = hoc(i, j, k)
-            hoc(i, j, k) = pp
-            pp = pp + 1
-        enddo
-    else
-        pp = np_local_dm-npmx-nppx + 1
-        do
-            if (pp > np_local_dm) exit
-            i = floor(xvp_dm(1, pp)/mesh_scale) + 1
-            j = floor(xvp_dm(2, pp)/mesh_scale) + 1
-            k = floor(xvp_dm(3, pp)/mesh_scale) + 1
-#ifdef DIAG
-            if (i < hoc_nc_l .or. i > hoc_nc_h .or. &
-                j < hoc_nc_l .or. j > hoc_nc_h .or. &
-                k < hoc_nc_l .or. k > hoc_nc_h) then
-                write (*, *) 'BUFFER PARTICLE DELETED', xvp_dm(1:3, pp)
-                xvp_dm(:,pp) = xvp_dm(:,np_local_dm)
-                np_local_dm = np_local_dm - 1
-                cycle
-            endif
-#endif
-            ll_dm(pp) = hoc_dm(i, j, k)
-            hoc_dm(i, j, k) = pp
-            pp = pp + 1
-        enddo
-    endif
-
-    !
-    ! Pass +y
-    ! 
-
-    tag = 13
-    np_buf = 0
-
-    do k = hoc_nc_l, hoc_nc_h
-        do j = hoc_nc_h-hoc_pass_depth, hoc_nc_h
-            do i = hoc_nc_l, hoc_nc_h
-                if (command == 0) then
-                    pp = hoc(i, j, k)
-                    do
-                        if (pp == 0) exit
-                        if (xvp(2, pp) >= nc_node_dim-rnf_buf) then
-                            np_buf = np_buf + 1
-                            send_buf((np_buf-1)*6+1:np_buf*6) = xvp(:, pp)
-                            GID_send_buf(np_buf) = GID(pp)
-                        endif
-                        pp = ll(pp)
-                    enddo
-                else
-                    pp = hoc_dm(i, j, k)
-                    do
-                        if (pp == 0) exit
-                        if (xvp_dm(2, pp) >= nc_node_dim-rnf_buf) then
-                            np_buf = np_buf + 1
-                            send_buf((np_buf-1)*6+1:np_buf*6) = xvp_dm(:, pp)
-                            GID_send_buf(np_buf) = GID_dm(pp)
-                        endif
-                        pp = ll_dm(pp)
-                    enddo
-                endif
-            enddo
-        enddo
-    enddo
-
-    if (6*np_buf > np_buffer) then
-        write(*,*) "ERROR: Not enough space to send buffer particles: ", rank, np_buf, np_buffer
+     endif
+  else if (command == 1) then
+     if (np_local_dm+nppx > max_np_dm) then
+        write(*,*) "ERROR: Not enough space to receive buffer dm particles (nppx): ", rank, np_local_dm, nppx, max_np_dm
         call mpi_abort(mpi_comm_world, ierr, ierr)
-    endif
-
-    nppy = np_buf
-
-    call mpi_sendrecv_replace(nppy, 1, mpi_integer, cart_neighbor(4), tag, &
-                              cart_neighbor(3), tag, mpi_comm_world, status, ierr)
-
-    if (command == 0) then
-        if (np_local+nppy > max_np) then
-            write(*,*) "ERROR: Not enough space to receive buffer particles (nppy): ", rank, np_local, nppy, max_np
-            call mpi_abort(mpi_comm_world, ierr, ierr)
-        endif
-    else
-        if (np_local_dm+nppy > max_np_dm) then
-            write(*,*) "ERROR: Not enough space to receive buffer particles (nppy): ", rank, np_local_dm, nppy, max_np_dm
-            call mpi_abort(mpi_comm_world, ierr, ierr)
-        endif
-    endif
-
-    call mpi_isend(send_buf, np_buf*6, mpi_real, cart_neighbor(4), &
-                   tag, mpi_comm_world, srequest, sierr)
-    call mpi_irecv(recv_buf, nppy*6, mpi_real, cart_neighbor(3), &
-                   tag, mpi_comm_world, rrequest, rierr)
-
-    call mpi_wait(srequest, sstatus, sierr)
-    call mpi_wait(rrequest, rstatus, rierr)
-
-    call mpi_isend(GID_send_buf, np_buf, mpi_integer1, cart_neighbor(4), &
-                   tag, mpi_comm_world, srequest, sierr)
-    call mpi_irecv(GID_recv_buf, nppy, mpi_integer1, cart_neighbor(3), &
-                   tag, mpi_comm_world, rrequest, rierr)
-
-    call mpi_wait(srequest, sstatus, sierr)
-    call mpi_wait(rrequest, rstatus, rierr)
-
-    if (command == 0) then
-        do i = 1, nppy
-            xvp(:, np_local+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
-            xvp(2, np_local+i) = max(xvp(2,np_local+i)-nc_node_dim, -rnf_buf)
-            GID(np_local+i) = GID_recv_buf(i)
-        enddo
-    else
-        do i = 1, nppy
-            xvp_dm(:, np_local_dm+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
-            xvp_dm(2, np_local_dm+i) = max(xvp_dm(2,np_local_dm+i)-nc_node_dim, -rnf_buf)
-            GID_dm(np_local_dm+i) = GID_recv_buf(i)
-        enddo
-    endif
-
-    if (command == 0) then 
-        np_local = np_local + nppy
-    else
-        np_local_dm = np_local_dm + nppy
-    endif
-
-    !
-    ! Pass -y
-    !
-
-    tag = 14
-    np_buf = 0
-
-    do k = hoc_nc_l, hoc_nc_h
-        do j = hoc_nc_l, hoc_nc_l+hoc_pass_depth
-            do i = hoc_nc_l, hoc_nc_h
-                if (command == 0) then 
-                    pp = hoc(i, j, k)
-                    do
-                        if (pp == 0) exit
-                        if (xvp(2, pp) < rnf_buf) then
-                            np_buf = np_buf + 1
-                            send_buf((np_buf-1)*6+1:np_buf*6) = xvp(:, pp)
-                            GID_send_buf(np_buf) = GID(pp)
-                        endif
-                        pp = ll(pp)
-                    enddo
-                else
-                    pp = hoc_dm(i, j, k)
-                    do
-                        if (pp == 0) exit
-                        if (xvp_dm(2, pp) < rnf_buf) then
-                            np_buf = np_buf + 1
-                            send_buf((np_buf-1)*6+1:np_buf*6) = xvp_dm(:, pp)
-                            GID_send_buf(np_buf) = GID_dm(pp)
-                        endif
-                        pp = ll_dm(pp)
-                    enddo
-                endif
-            enddo
-        enddo
-    enddo
-
-    if (6*np_buf > np_buffer) then
-        write(*,*) "ERROR: Not enough space to send buffer particles: ", rank, np_buf, np_buffer
+     endif
+  else
+     if (np_local_h+nppx > max_np_h) then
+        write(*,*) "ERROR: Not enough space to receive buffer halo (nppx): ", rank, np_local_h, nppx, max_np_h
         call mpi_abort(mpi_comm_world, ierr, ierr)
-    endif
+     endif
+  endif
 
-    npmy = np_buf
+  call mpi_isend(send_buf, np_buf*6, mpi_real, cart_neighbor(6), &
+       tag, mpi_comm_world, srequest, sierr)
+  call mpi_irecv(recv_buf, nppx*6, mpi_real, cart_neighbor(5), &
+       tag, mpi_comm_world, rrequest, rierr)
+  
+  call mpi_wait(srequest, sstatus, sierr)
+  call mpi_wait(rrequest, rstatus, rierr)
+  
+  if (glook == g0) then
+     if (command == 0) then
+        pp_down = np_groups(g0)
+     else if (command == 1) then
+        pp_down = np_groups_dm(g0)
+     else if (command == 2) then
+        pp_down = np_groups_h(g0)
+     endif
+  else if (glook == g1) then
+     if (command == 0) then
+        pp_down = max_np-np_groups(g1)
+     else if (command == 1) then
+        pp_down = max_np_dm-np_groups_dm(g1)
+     else if (command == 2) then
+        pp_down = max_np_h-np_groups_h(g1)
+     endif
+     pp_down = pp_down - nppx
+  endif
+  
+  if (command == 0) then
+     do pp = 1, nppx
+        xvp(:, pp_down+pp) = recv_buf((pp-1)*6+1:(pp-1)*6+6)
+        xvp(1, pp_down+pp) = max(xvp(1,pp_down+pp)-nc_node_dim, -rnf_buf)
+     enddo
+  else if (command == 1) then
+     do pp = 1, nppx
+        xvp_dm(:, pp_down+pp) = recv_buf((pp-1)*6+1:(pp-1)*6+6)
+        xvp_dm(1, pp_down+pp) = max(xvp_dm(1,pp_down+pp)-nc_node_dim, -rnf_buf)
+     enddo
+  else if (command == 2) then
+     do pp = 1, nppx
+        xvmp_h(:, pp_down+pp) = recv_buf((pp-1)*6+1:(pp-1)*6+6)
+        xvmp_h(1, pp_down+pp) = max(xvmp_h(1,pp_down+pp)-nc_node_dim, -rnf_buf_h)
+     enddo
+  endif
+  
+  if (command == 0) then
+     np_local = np_local + nppx
+     np_buf_groups(glook) = nppx
+  else if (command == 1) then
+     np_local_dm = np_local_dm + nppx
+     np_buf_groups_dm(glook) = nppx
+  else if (command == 2) then
+     np_local_h = np_local_h + nppx
+     np_buf_groups_h(glook) = nppx
+  endif
 
-    call mpi_sendrecv_replace(npmy, 1, mpi_integer, cart_neighbor(3), tag, &
-                              cart_neighbor(4), tag, mpi_comm_world, status, ierr)
+  !--------------------------------------------------------
+  ! Pass -x
+  !--------------------------------------------------------
+  
+  tag = 12
+  np_buf = 0
+  
+  if (glook == g0) then
+     pp_down = 1
+     if (command == 0) then
+        pp_up = np_groups(g0)
+     else if (command == 1) then
+        pp_up = np_groups_dm(g0)
+     else if (command == 2) then
+        pp_up = np_groups_h(g0)
+     endif
+  else if (glook == g1) then
+     if (command == 0) then
+        pp_up = max_np
+        pp_down = max_np + 1 - np_groups(g1)
+     else if (command == 1) then
+        pp_up = max_np_dm
+        pp_down = max_np_dm + 1 - np_groups_dm(g1)
+     else if (command == 2) then
+        pp_up = max_np_h
+        pp_down = max_np_h + 1 - np_groups_h(g1)
+     endif
+  endif
 
-    if (command == 0) then 
-        if (np_local+npmy > max_np) then
-            write(*,*) "ERROR: Not enough space to receive buffer particles (npmy): ", rank, np_local, npmy, max_np
-            call mpi_abort(mpi_comm_world, ierr, ierr)
+  if (command == 0) then
+     do pp = pp_down, pp_up
+        if (xvp(1, pp) < rnf_buf) then
+           np_buf = np_buf + 1
+           send_buf((np_buf-1)*6+1:np_buf*6) = xvp(:, pp)
         endif
-    else
-        if (np_local_dm+npmy > max_np_dm) then
-            write(*,*) "ERROR: Not enough space to receive buffer particles (npmy): ", rank, np_local_dm, npmy, max_np_dm
-            call mpi_abort(mpi_comm_world, ierr, ierr)
+     enddo
+  else if (command == 1) then
+     do pp = pp_down,pp_up
+        if (xvp_dm(1, pp) < rnf_buf) then
+           np_buf = np_buf + 1
+           send_buf((np_buf-1)*6+1:np_buf*6) = xvp_dm(:, pp)
         endif
-    endif
-
-    call mpi_isend(send_buf, np_buf*6, mpi_real, cart_neighbor(3), &
-                   tag, mpi_comm_world, srequest, sierr)
-    call mpi_irecv(recv_buf, npmy*6, mpi_real, cart_neighbor(4), &
-                   tag, mpi_comm_world, rrequest, rierr)
-
-    call mpi_wait(srequest, sstatus, sierr)
-    call mpi_wait(rrequest, rstatus, rierr)
-
-    call mpi_isend(GID_send_buf, np_buf, mpi_integer1, cart_neighbor(3), &
-                   tag, mpi_comm_world, srequest, sierr)
-    call mpi_irecv(GID_recv_buf, npmy, mpi_integer1, cart_neighbor(4), &
-                   tag, mpi_comm_world, rrequest, rierr)
-
-    call mpi_wait(srequest, sstatus, sierr)
-    call mpi_wait(rrequest, rstatus, rierr)
-
-    if (command == 0) then
-        do i = 1, npmy
-            xvp(:, np_local+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
-            GID(np_local+i) = GID_recv_buf(i)
-            if (abs(xvp(2, np_local+i)) .lt. eps) then
-                if(xvp(2, np_local+i) < 0.) then
-                    xvp(2, np_local+i) = -eps
-                else
-                    xvp(2, np_local+i) = eps
-                endif
-            endif
-            xvp(2, np_local+i) = min(xvp(2,np_local+i)+real(nc_node_dim,4), &
-                                     nc_node_dim+rnf_buf-eps)
-        enddo
-    else
-        do i = 1, npmy
-            xvp_dm(:, np_local_dm+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
-            GID_dm(np_local_dm+i) = GID_recv_buf(i)
-            if (abs(xvp_dm(2, np_local_dm+i)) .lt. eps) then
-                if(xvp_dm(2, np_local_dm+i) < 0.) then
-                    xvp_dm(2, np_local_dm+i) = -eps
-                else
-                    xvp_dm(2, np_local_dm+i) = eps
-                endif
-            endif
-            xvp_dm(2, np_local_dm+i) = min(xvp_dm(2,np_local_dm+i)+real(nc_node_dim,4), &
-                                     nc_node_dim+rnf_buf-eps)
-        enddo
-    endif
-
-    if (command == 0) then
-        np_local = np_local + npmy
-    else
-        np_local_dm = np_local_dm + npmy
-    endif
-
-    !
-    ! Add additional particles to the linked list 
-    !
-
-    if (command == 0) then
-        pp = np_local-npmy-nppy + 1
-        do
-            if (pp > np_local) exit
-            i = floor(xvp(1, pp)/mesh_scale) + 1
-            j = floor(xvp(2, pp)/mesh_scale) + 1
-            k = floor(xvp(3, pp)/mesh_scale) + 1
-#ifdef DIAG
-            if (i < hoc_nc_l .or. i > hoc_nc_h .or. &
-                j < hoc_nc_l .or. j > hoc_nc_h .or. &
-                k < hoc_nc_l .or. k > hoc_nc_h) then
-                write (*, *) 'BUFFER PARTICLE DELETED', xvp(1:3, pp)
-                xvp(:,pp) = xvp(:,np_local)
-                np_local = np_local - 1
-                cycle
-            endif
-#endif
-            ll(pp) = hoc(i, j, k)
-            hoc(i, j, k) = pp
-            pp = pp + 1
-        enddo
-    else
-        pp = np_local_dm-npmy-nppy + 1
-        do
-            if (pp > np_local_dm) exit
-            i = floor(xvp_dm(1, pp)/mesh_scale) + 1
-            j = floor(xvp_dm(2, pp)/mesh_scale) + 1
-            k = floor(xvp_dm(3, pp)/mesh_scale) + 1
-#ifdef DIAG
-            if (i < hoc_nc_l .or. i > hoc_nc_h .or. &
-                j < hoc_nc_l .or. j > hoc_nc_h .or. &
-                k < hoc_nc_l .or. k > hoc_nc_h) then
-                write (*, *) 'BUFFER PARTICLE DELETED', xvp_dm(1:3, pp)
-                xvp_dm(:,pp) = xvp_dm(:,np_local_dm)
-                np_local_dm = np_local_dm - 1
-                cycle
-            endif
-#endif
-            ll_dm(pp) = hoc_dm(i, j, k)
-            hoc_dm(i, j, k) = pp
-            pp = pp + 1
-        enddo
-    endif
-
-    !
-    ! Pass +z
-    ! 
-
-    tag = 15
-    np_buf = 0
-
-    do k = hoc_nc_h-hoc_pass_depth, hoc_nc_h
-        do j = hoc_nc_l, hoc_nc_h
-            do i = hoc_nc_l, hoc_nc_h
-                if (command == 0) then
-                    pp = hoc(i, j, k)
-                    do
-                        if (pp == 0) exit
-                        if (xvp(3, pp) >= nc_node_dim-rnf_buf) then
-                            np_buf = np_buf + 1
-                            send_buf((np_buf-1)*6+1:np_buf*6) = xvp(:, pp)
-                            GID_send_buf(np_buf) = GID(pp)
-                        endif
-                        pp = ll(pp)
-                    enddo
-                else
-                    pp = hoc_dm(i, j, k)
-                    do
-                        if (pp == 0) exit
-                        if (xvp_dm(3, pp) >= nc_node_dim-rnf_buf) then
-                            np_buf = np_buf + 1
-                            send_buf((np_buf-1)*6+1:np_buf*6) = xvp_dm(:, pp)
-                            GID_send_buf(np_buf) = GID_dm(pp)
-                        endif
-                        pp = ll_dm(pp)
-                    enddo
-                endif
-            enddo
-        enddo
-    enddo
-
-    if (6*np_buf > np_buffer) then
-        write(*,*) "ERROR: Not enough space to send buffer particles: ", rank, np_buf, np_buffer
+     enddo
+  else if (command == 2) then
+     do pp = pp_down,pp_up
+        if (xvmp_h(1, pp) < rnf_buf_h) then
+           np_buf = np_buf + 1
+           send_buf((np_buf-1)*6+1:np_buf*6) = xvmp_h(:, pp)
+        endif
+     enddo
+  endif
+  
+  if (6*np_buf > np_buffer) then
+     write(*,*) "ERROR: Not enough space to send buffer particles: ", rank, np_buf, np_buffer
+     call mpi_abort(mpi_comm_world, ierr, ierr)
+  endif
+  
+  npmx = np_buf
+  
+  call mpi_sendrecv_replace(npmx, 1, mpi_integer, cart_neighbor(5), tag, &
+       cart_neighbor(6), tag, mpi_comm_world, status, ierr)
+  
+  if (command == 0) then
+     if (np_local+npmx > max_np) then
+        write(*,*) "ERROR: Not enough space to receive buffer nu particles (npmx): ", rank, np_local, npmx, max_np
         call mpi_abort(mpi_comm_world, ierr, ierr)
-    endif
-
-    nppz = np_buf
-
-    call mpi_sendrecv_replace(nppz, 1, mpi_integer, cart_neighbor(2), tag, &
-                              cart_neighbor(1), tag, mpi_comm_world, status, ierr)
-
-    if (command == 0) then
-        if (np_local+nppz > max_np) then
-            write(*,*) "ERROR: Not enough space to receive buffer particles (nppz):", rank, np_local, nppz, max_np
-            call mpi_abort(mpi_comm_world, ierr, ierr)
-        endif
-    else
-        if (np_local_dm+nppz > max_np_dm) then
-            write(*,*) "ERROR: Not enough space to receive buffer particles (nppz):", rank, np_local_dm, nppz, max_np_dm
-            call mpi_abort(mpi_comm_world, ierr, ierr)
-        endif
-    endif
-
-    call mpi_isend(send_buf, np_buf*6, mpi_real, cart_neighbor(2), &
-                   tag, mpi_comm_world, srequest, sierr)
-    call mpi_irecv(recv_buf, nppz*6, mpi_real, cart_neighbor(1), &
-                   tag, mpi_comm_world, rrequest, rierr)
-
-    call mpi_wait(srequest, sstatus, sierr)
-    call mpi_wait(rrequest, rstatus, rierr)
-
-    call mpi_isend(GID_send_buf, np_buf, mpi_integer1, cart_neighbor(2), &
-                   tag, mpi_comm_world, srequest, sierr)
-    call mpi_irecv(GID_recv_buf, nppz, mpi_integer1, cart_neighbor(1), &
-                   tag, mpi_comm_world, rrequest, rierr)
-
-    call mpi_wait(srequest, sstatus, sierr)
-    call mpi_wait(rrequest, rstatus, rierr)
-
-    if (command == 0) then
-        do i = 1, nppz
-            xvp(:, np_local+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
-            xvp(3, np_local+i) = max(xvp(3,np_local+i)-nc_node_dim, -rnf_buf)
-            GID(np_local+i) = GID_recv_buf(i)
-        enddo
-    else
-        do i = 1, nppz
-            xvp_dm(:, np_local_dm+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
-            xvp_dm(3, np_local_dm+i) = max(xvp_dm(3,np_local_dm+i)-nc_node_dim, -rnf_buf)
-            GID_dm(np_local_dm+i) = GID_recv_buf(i)
-        enddo
-    endif
-
-    if (command == 0) then
-        np_local = np_local + nppz
-    else
-        np_local_dm = np_local_dm + nppz
-    endif
-
-    !
-    ! Pass -z
-    !
-
-    tag = 16
-    np_buf = 0
-
-    do k = hoc_nc_l, hoc_nc_l+hoc_pass_depth
-        do j = hoc_nc_l, hoc_nc_h
-            do i = hoc_nc_l, hoc_nc_h
-                if (command == 0) then
-                    pp = hoc(i, j, k)
-                    do
-                        if (pp == 0) exit
-                        if (xvp(3, pp) < rnf_buf) then
-                            np_buf = np_buf + 1
-                            send_buf((np_buf-1)*6+1:np_buf*6) = xvp(:, pp)
-                            GID_send_buf(np_buf) = GID(pp)
-                        endif
-                        pp = ll(pp)
-                    enddo
-                else
-                    pp = hoc_dm(i, j, k)
-                    do
-                        if (pp == 0) exit
-                        if (xvp_dm(3, pp) < rnf_buf) then
-                            np_buf = np_buf + 1
-                            send_buf((np_buf-1)*6+1:np_buf*6) = xvp_dm(:, pp)
-                            GID_send_buf(np_buf) = GID_dm(pp)
-                        endif
-                        pp = ll_dm(pp)
-                    enddo
-                endif
-            enddo
-        enddo
-    enddo
-
-    if (6*np_buf > np_buffer) then
-        write(*,*) "ERROR: Not enough space to send buffer particles: ", rank, np_buf, np_buffer
+     endif
+  else if (command == 1) then
+     if (np_local_dm+npmx > max_np_dm) then
+        write(*,*) "ERROR: Not enough space to receive buffer dm particles (npmx): ", rank, np_local_dm, npmx, max_np_dm
         call mpi_abort(mpi_comm_world, ierr, ierr)
-    endif
+     endif
+  else if (command == 2) then
+     if (np_local_h+npmx > max_np_h) then
+        write(*,*) "ERROR: Not enough space to receive buffer halos (npmx): ", rank, np_local_h, npmx, max_np_h
+        call mpi_abort(mpi_comm_world, ierr, ierr)
+     endif
+  endif
+  
+  call mpi_isend(send_buf, np_buf*6, mpi_real, cart_neighbor(5), &
+       tag, mpi_comm_world, srequest, sierr)
+  call mpi_irecv(recv_buf, npmx*6, mpi_real, cart_neighbor(6), &
+       tag, mpi_comm_world, rrequest, rierr)
+  
+  call mpi_wait(srequest, sstatus, sierr)
+  call mpi_wait(rrequest, rstatus, rierr)
+  
+  if (glook == g0) then
+     if (command == 0) then
+        pp_down = np_groups(g0) + np_buf_groups(g0)
+     else if (command == 1) then
+        pp_down = np_groups_dm(g0) + np_buf_groups_dm(g0)
+     else if (command == 2) then
+        pp_down = np_groups_h(g0) + np_buf_groups_h(g0)
+     endif
+  else if (glook == g1) then
+     if (command == 0) then
+        pp_down = max_np-np_groups(g1)-np_buf_groups(g1)
+     else if (command == 1) then
+        pp_down = max_np_dm-np_groups_dm(g1)-np_buf_groups_dm(g1)
+     else if (command == 2) then
+        pp_down = max_np_h-np_groups_h(g1)-np_buf_groups_h(g1)
+     endif
+     pp_down = pp_down - npmx
+  endif
+  
 
-    npmz = np_buf
-
-    call mpi_sendrecv_replace(npmz, 1, mpi_integer, cart_neighbor(1), tag, &
-                              cart_neighbor(2), tag, mpi_comm_world, status, ierr)
-
-    if (command == 0) then
-        if (np_local+npmz > max_np) then
-            write(*,*) "ERROR: Not enough space to receive buffer particles (npmz): ", rank, np_local, npmz, max_np
-            call mpi_abort(mpi_comm_world, ierr, ierr)
+  if (command == 0) then
+     do pp = 1, npmx
+        xvp(:, pp_down+pp) = recv_buf((pp-1)*6+1:(pp-1)*6+6)
+        if (abs(xvp(1, pp_down+pp)) .lt. eps) then
+           if(xvp(1, pp_down+pp) < 0.) then
+              xvp(1, pp_down+pp) = -eps
+           else
+              xvp(1, pp_down+pp) = eps
+           endif
         endif
-    else
-        if (np_local_dm+npmz > max_np_dm) then
-            write(*,*) "ERROR: Not enough space to receive buffer particles (npmz): ", rank, np_local_dm, npmz, max_np_dm
-            call mpi_abort(mpi_comm_world, ierr, ierr)
+        xvp(1, pp_down+pp) = min(xvp(1, pp_down+pp)+real(nc_node_dim,4), &
+             nc_node_dim+rnf_buf-eps)
+     enddo
+  else if (command == 1) then
+     do pp = 1, npmx
+        xvp_dm(:, pp_down+pp) = recv_buf((pp-1)*6+1:(pp-1)*6+6)
+        if (abs(xvp_dm(1, pp_down+pp)) .lt. eps) then
+           if(xvp_dm(1, pp_down+pp) < 0.) then
+              xvp_dm(1, pp_down+pp) = -eps
+           else
+              xvp_dm(1, pp_down+pp) = eps
+           endif
         endif
-    endif
+        xvp_dm(1, pp_down+pp) = min(xvp_dm(1, pp_down+pp)+real(nc_node_dim,4), &
+             nc_node_dim+rnf_buf-eps)
+     enddo
+  else if (command == 2) then
+     do pp = 1, npmx
+        xvmp_h(:, pp_down+pp) = recv_buf((pp-1)*6+1:(pp-1)*6+6)
+        if (abs(xvmp_h(1, pp_down+pp)) .lt. eps) then
+           if(xvmp_h(1, pp_down+pp) < 0.) then
+              xvmp_h(1, pp_down+pp) = -eps
+           else
+              xvmp_h(1, pp_down+pp) = eps
+           endif
+        endif
+        xvmp_h(1, pp_down+pp) = min(xvmp_h(1, pp_down+pp)+real(nc_node_dim,4), &
+             nc_node_dim+rnf_buf_h-eps)
+     enddo
+  endif
+  
+  if (command == 0) then
+     np_local = np_local + npmx
+     np_buf_groups(glook) = np_buf_groups(glook) + npmx
+  else if (command == 1) then
+     np_local_dm = np_local_dm + npmx
+     np_buf_groups_dm(glook) = np_buf_groups_dm(glook) + npmx
+  else if (command == 2) then
+     np_local_h = np_local_h + npmx
+     np_buf_groups_h(glook) = np_buf_groups_h(glook) + npmx
+  endif
 
-    call mpi_isend(send_buf, np_buf*6, mpi_real, cart_neighbor(1), &
-                   tag, mpi_comm_world, srequest, sierr)
-    call mpi_irecv(recv_buf, npmz*6, mpi_real, cart_neighbor(2), &
-                   tag, mpi_comm_world, rrequest, rierr)
+  !--------------------------------------------------------
+  ! Pass +y
+  !--------------------------------------------------------
 
-    call mpi_wait(srequest, sstatus, sierr)
-    call mpi_wait(rrequest, rstatus, rierr)
+  tag = 13
+  np_buf = 0
+  
+  if (glook == g0) then
+     pp_down = 1
+     if (command == 0) then
+        pp_up = np_groups(g0) + np_buf_groups(g0)
+     else if (command == 1) then
+        pp_up = np_groups_dm(g0) + np_buf_groups_dm(g0)
+     else if (command == 2) then
+        pp_up = np_groups_h(g0) + np_buf_groups_h(g0)
+     endif
+  else if (glook == g1) then
+     if (command == 0) then
+        pp_up = max_np
+        pp_down = max_np + 1 - np_groups(g1) - np_buf_groups(g1)
+     else if (command == 1) then
+        pp_up = max_np_dm
+        pp_down = max_np_dm + 1 - np_groups_dm(g1) - np_buf_groups_dm(g1)
+     else if (command == 2) then
+        pp_up = max_np_h
+        pp_down = max_np_h + 1 - np_groups_h(g1) - np_buf_groups_h(g1)
+     endif
+  endif
+  
+  if (command == 0) then
+     do pp = pp_down, pp_up
+        if (xvp(2, pp) >= nc_node_dim-rnf_buf) then
+           np_buf = np_buf + 1
+           send_buf((np_buf-1)*6+1:np_buf*6) = xvp(:, pp)
+        endif
+     enddo
+  else if (command == 1) then
+     do pp = pp_down, pp_up
+        if (xvp_dm(2, pp) >= nc_node_dim-rnf_buf) then
+           np_buf = np_buf + 1
+           send_buf((np_buf-1)*6+1:np_buf*6) = xvp_dm(:, pp)
+        endif
+     enddo
+  else if (command == 2) then
+     do pp = pp_down, pp_up
+        if (xvmp_h(2, pp) >= nc_node_dim-rnf_buf_h) then
+           np_buf = np_buf + 1
+           send_buf((np_buf-1)*6+1:np_buf*6) = xvmp_h(:, pp)
+        endif
+     enddo
+  endif
 
-    call mpi_isend(GID_send_buf, np_buf, mpi_integer1, cart_neighbor(1), &
-                   tag, mpi_comm_world, srequest, sierr)
-    call mpi_irecv(GID_recv_buf, npmz, mpi_integer1, cart_neighbor(2), &
-                   tag, mpi_comm_world, rrequest, rierr)
+  if (6*np_buf > np_buffer) then
+     write(*,*) "ERROR: Not enough space to send buffer particles: ", rank, np_buf, np_buffer
+     call mpi_abort(mpi_comm_world, ierr, ierr)
+  endif
+  
+  nppy = np_buf
+  
+  call mpi_sendrecv_replace(nppy, 1, mpi_integer, cart_neighbor(4), tag, &
+       cart_neighbor(3), tag, mpi_comm_world, status, ierr)
+  
+  if (command == 0) then
+     if (np_local+nppy > max_np) then
+        write(*,*) "ERROR: Not enough space to receive nu buffer particles (nppy): ", rank, np_local, nppy, max_np
+        call mpi_abort(mpi_comm_world, ierr, ierr)
+     endif
+  else if (command == 1) then
+     if (np_local_dm+nppy > max_np_dm) then
+        write(*,*) "ERROR: Not enough space to receive dm buffer particles (nppy): ", rank, np_local_dm, nppy, max_np_dm
+        call mpi_abort(mpi_comm_world, ierr, ierr)
+     endif
+  else if (command == 2) then
+     if (np_local_h+nppy > max_np_h) then
+        write(*,*) "ERROR: Not enough space to receive buffer halos (nppy): ", rank, np_local_h, nppy, max_np_h
+        call mpi_abort(mpi_comm_world, ierr, ierr)
+     endif
+  endif
+  
+  call mpi_isend(send_buf, np_buf*6, mpi_real, cart_neighbor(4), &
+       tag, mpi_comm_world, srequest, sierr)
+  call mpi_irecv(recv_buf, nppy*6, mpi_real, cart_neighbor(3), &
+       tag, mpi_comm_world, rrequest, rierr)
+  
+  call mpi_wait(srequest, sstatus, sierr)
+  call mpi_wait(rrequest, rstatus, rierr)
+  
+  if (glook == g0) then
+     if (command == 0) then
+        pp_down = np_groups(g0) + np_buf_groups(g0)
+     else if (command == 1) then
+        pp_down = np_groups_dm(g0) + np_buf_groups_dm(g0)
+     else if (command == 2) then
+        pp_down = np_groups_h(g0) + np_buf_groups_h(g0)
+     endif
+  else if (glook == g1) then
+     if (command == 0) then
+        pp_down = max_np-np_groups(g1)-np_buf_groups(g1)
+     else if (command == 1) then
+        pp_down = max_np_dm-np_groups_dm(g1)-np_buf_groups_dm(g1)
+     else if (command == 2) then
+        pp_down = max_np_h-np_groups_h(g1)-np_buf_groups_h(g1)
+     endif
+     pp_down = pp_down - nppy
+  endif
+  
 
-    call mpi_wait(srequest, sstatus, sierr)
-    call mpi_wait(rrequest, rstatus, rierr)
+  if (command == 0) then
+     do pp = 1, nppy
+        xvp(:, pp_down+pp) = recv_buf((pp-1)*6+1:(pp-1)*6+6)
+        xvp(2, pp_down+pp) = max(xvp(2,pp_down+pp)-nc_node_dim, -rnf_buf)
+     enddo
+  else if (command == 1) then
+     do pp = 1, nppy
+        xvp_dm(:, pp_down+pp) = recv_buf((pp-1)*6+1:(pp-1)*6+6)
+        xvp_dm(2, pp_down+pp) = max(xvp_dm(2,pp_down+pp)-nc_node_dim, -rnf_buf)
+     enddo
+  else
+     do pp = 1, nppy
+        xvmp_h(:, pp_down+pp) = recv_buf((pp-1)*6+1:(pp-1)*6+6)
+        xvmp_h(2, pp_down+pp) = max(xvmp_h(2,pp_down+pp)-nc_node_dim, -rnf_buf_h)
+     enddo
+  endif
+  
+  if (command == 0) then 
+     np_local = np_local + nppy
+     np_buf_groups(glook) = np_buf_groups(glook) + nppy
+  else if (command == 1) then
+     np_local_dm = np_local_dm + nppy
+     np_buf_groups_dm(glook) = np_buf_groups_dm(glook) + nppy
+  else if (command == 2) then
+     np_local_h = np_local_h + nppy
+     np_buf_groups_h(glook) = np_buf_groups_h(glook) + nppy
+  endif
 
-    if (command == 0) then
-        do i = 1, npmz
-            xvp(:, np_local+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
-            GID(np_local+i) = GID_recv_buf(i)
-            if (abs(xvp(3, np_local+i)) .lt. eps) then
-                if(xvp(3, np_local+i) < 0.) then
-                    xvp(3, np_local+i) = -eps
-                else
-                    xvp(3, np_local+i) = eps
-                endif
-            endif
-            xvp(3,np_local+i) = min(xvp(3,np_local+i)+real(nc_node_dim,4), &
-                                     nc_node_dim+rnf_buf-eps)
-        enddo
-    else
-        do i = 1, npmz
-            xvp_dm(:, np_local_dm+i) = recv_buf((i-1)*6+1:(i-1)*6+6)
-            GID_dm(np_local_dm+i) = GID_recv_buf(i)
-            if (abs(xvp_dm(3, np_local_dm+i)) .lt. eps) then
-                if(xvp_dm(3, np_local_dm+i) < 0.) then
-                    xvp_dm(3, np_local_dm+i) = -eps
-                else
-                    xvp_dm(3, np_local_dm+i) = eps
-                endif
-            endif
-            xvp_dm(3,np_local_dm+i) = min(xvp_dm(3,np_local_dm+i)+real(nc_node_dim,4), &
-                                     nc_node_dim+rnf_buf-eps)
-        enddo
-    endif
+  !--------------------------------------------------------  
+  ! Pass -y
+  !--------------------------------------------------------  
+  
+  tag = 14
+  np_buf = 0
+  
+  if (glook == g0) then
+     pp_down = 1
+     if (command == 0) then
+        pp_up = np_groups(g0) + np_buf_groups(g0)
+     else if (command == 1) then
+        pp_up = np_groups_dm(g0) + np_buf_groups_dm(g0)
+     else if (command == 2) then
+        pp_up = np_groups_h(g0) + np_buf_groups_h(g0)
+     endif
+     pp_up = pp_up - nppy
+  else if (glook == g1) then
+     if (command == 0) then
+        pp_up = max_np
+        pp_down = max_np + 1 - np_groups(g1) - np_buf_groups(g1)
+     else if (command == 1) then
+        pp_up = max_np_dm
+        pp_down = max_np_dm + 1 - np_groups_dm(g1) - np_buf_groups_dm(g1)
+     else if (command == 2) then
+        pp_up = max_np_h
+        pp_down = max_np_h + 1 - np_groups_h(g1) - np_buf_groups_h(g1)
+     endif
+     pp_down = pp_down + nppy
+  endif
+  
+  if (command == 0) then 
+     do pp = pp_down, pp_up
+        if (xvp(2, pp) < rnf_buf) then
+           np_buf = np_buf + 1
+           send_buf((np_buf-1)*6+1:np_buf*6) = xvp(:, pp)
+        endif
+     enddo
+  else if (command == 1) then
+     do pp = pp_down, pp_up
+        if (xvp_dm(2, pp) < rnf_buf) then
+           np_buf = np_buf + 1
+           send_buf((np_buf-1)*6+1:np_buf*6) = xvp_dm(:, pp)
+        endif
+     enddo
+  else if (command == 2) then
+     do pp = pp_down, pp_up
+        if (xvmp_h(2, pp) < rnf_buf_h) then
+           np_buf = np_buf + 1
+           send_buf((np_buf-1)*6+1:np_buf*6) = xvmp_h(:, pp)
+        endif
+     enddo
+  endif
+  
+  if (6*np_buf > np_buffer) then
+     write(*,*) "ERROR: Not enough space to send buffer particles: ", rank, np_buf, np_buffer
+     call mpi_abort(mpi_comm_world, ierr, ierr)
+  endif
+  
+  npmy = np_buf
+  
+  call mpi_sendrecv_replace(npmy, 1, mpi_integer, cart_neighbor(3), tag, &
+       cart_neighbor(4), tag, mpi_comm_world, status, ierr)
+  
+  if (command == 0) then 
+     if (np_local+npmy > max_np) then
+        write(*,*) "ERROR: Not enough space to receive buffer nu particles (npmy): ", rank, np_local, npmy, max_np
+        call mpi_abort(mpi_comm_world, ierr, ierr)
+     endif
+  else if (command == 1) then
+     if (np_local_dm+npmy > max_np_dm) then
+        write(*,*) "ERROR: Not enough space to receive buffer dm particles (npmy): ", rank, np_local_dm, npmy, max_np_dm
+        call mpi_abort(mpi_comm_world, ierr, ierr)
+     endif
+  else if (command == 2) then
+     if (np_local_h+npmy > max_np_h) then
+        write(*,*) "ERROR: Not enough space to receive buffer halos (npmy): ", rank, np_local_h, npmy, max_np_h
+        call mpi_abort(mpi_comm_world, ierr, ierr)
+     endif
+  endif
+  
+  call mpi_isend(send_buf, np_buf*6, mpi_real, cart_neighbor(3), &
+       tag, mpi_comm_world, srequest, sierr)
+  call mpi_irecv(recv_buf, npmy*6, mpi_real, cart_neighbor(4), &
+       tag, mpi_comm_world, rrequest, rierr)
+  
+  call mpi_wait(srequest, sstatus, sierr)
+  call mpi_wait(rrequest, rstatus, rierr)
+  
+  if (glook == g0) then
+     if (command == 0) then
+        pp_down = np_groups(g0) + np_buf_groups(g0)
+     else if (command == 1) then
+        pp_down = np_groups_dm(g0) + np_buf_groups_dm(g0)
+     else if (command == 2) then
+        pp_down = np_groups_h(g0) + np_buf_groups_h(g0)
+     endif
+  else if (glook == g1) then
+     if (command == 0) then
+        pp_down = max_np-np_groups(g1)-np_buf_groups(g1)
+     else if (command == 1) then
+        pp_down = max_np_dm-np_groups_dm(g1)-np_buf_groups_dm(g1)
+     else if (command == 2) then
+        pp_down = max_np_h-np_groups_h(g1)-np_buf_groups_h(g1)
+     endif
+     pp_down = pp_down - npmy
+  endif
+  
+  if (command == 0) then
+     do pp = 1, npmy
+        xvp(:, pp_down+pp) = recv_buf((pp-1)*6+1:(pp-1)*6+6)
+        if (abs(xvp(2, pp_down+pp)) .lt. eps) then
+           if(xvp(2, pp_down+pp) < 0.) then
+              xvp(2, pp_down+pp) = -eps
+           else
+              xvp(2, pp_down+pp) = eps
+           endif
+        endif
+        xvp(2, pp_down+pp) = min(xvp(2,pp_down+pp)+real(nc_node_dim,4), &
+             nc_node_dim+rnf_buf-eps)
+     enddo
+  else if (command == 1) then
+     do pp = 1, npmy
+        xvp_dm(:, pp_down+pp) = recv_buf((pp-1)*6+1:(pp-1)*6+6)
+        if (abs(xvp_dm(2, pp_down+pp)) .lt. eps) then
+           if(xvp_dm(2, pp_down+pp) < 0.) then
+              xvp_dm(2, pp_down+pp) = -eps
+           else
+              xvp_dm(2, pp_down+pp) = eps
+           endif
+        endif
+        xvp_dm(2, pp_down+pp) = min(xvp_dm(2,pp_down+pp)+real(nc_node_dim,4), &
+             nc_node_dim+rnf_buf-eps)
+     enddo
+  else if (command == 2) then
+     do pp = 1, npmy
+        xvmp_h(:, pp_down+pp) = recv_buf((pp-1)*6+1:(pp-1)*6+6)
+        if (abs(xvmp_h(2, pp_down+pp)) .lt. eps) then
+           if(xvmp_h(2, pp_down+pp) < 0.) then
+              xvmp_h(2, pp_down+pp) = -eps
+           else
+              xvmp_h(2, pp_down+pp) = eps
+           endif
+        endif
+        xvmp_h(2, pp_down+pp) = min(xvmp_h(2,pp_down+pp)+real(nc_node_dim,4), &
+             nc_node_dim+rnf_buf_h-eps)
+     enddo
+  endif
+  
+  if (command == 0) then
+     np_local = np_local + npmy
+     np_buf_groups(glook) = np_buf_groups(glook) + npmy
+  else if (command == 1) then
+     np_local_dm = np_local_dm + npmy
+     np_buf_groups_dm(glook) = np_buf_groups_dm(glook) + npmy
+  else
+     np_local_h = np_local_h + npmy
+     np_buf_groups_h(glook) = np_buf_groups_h(glook) + npmy
+  endif
 
-    if (command == 0) then
-        np_local = np_local + npmz
-    else
-        np_local_dm = np_local_dm + npmz
-    endif
+  !--------------------------------------------------------    
+  ! Pass +z
+  !--------------------------------------------------------    
 
-    !
-    ! Add additional particles to the linked list 
-    !
+  tag = 15
+  np_buf = 0
+  
+  if (glook == g0) then
+     pp_down = 1
+     if (command == 0) then
+        pp_up = np_groups(g0) + np_buf_groups(g0)
+     else if (command == 1) then
+        pp_up = np_groups_dm(g0) + np_buf_groups_dm(g0)
+     else if (command == 2) then
+        pp_up = np_groups_h(g0) + np_buf_groups_h(g0)
+     endif
+  else if (glook == g1) then
+     if (command == 0) then
+        pp_up = max_np
+        pp_down = max_np + 1 - np_groups(g1) - np_buf_groups(g1)
+     else if (command == 1) then
+        pp_up = max_np_dm
+        pp_down = max_np_dm + 1 - np_groups_dm(g1) - np_buf_groups_dm(g1)
+     else if (command == 2) then
+        pp_up = max_np_h
+        pp_down = max_np_h + 1 - np_groups_h(g1) - np_buf_groups_h(g1)
+     endif
+  endif
+  
+  if (command == 0) then
+     do pp = pp_down, pp_up
+        if (xvp(3, pp) >= nc_node_dim-rnf_buf) then
+           np_buf = np_buf + 1
+           send_buf((np_buf-1)*6+1:np_buf*6) = xvp(:, pp)
+        endif
+     enddo
+  else if (command == 1) then
+     do pp = pp_down, pp_up
+        if (xvp_dm(3, pp) >= nc_node_dim-rnf_buf) then
+           np_buf = np_buf + 1
+           send_buf((np_buf-1)*6+1:np_buf*6) = xvp_dm(:, pp)
+        endif
+     enddo
+  else if (command == 2) then
+     do pp = pp_down, pp_up
+        if (xvmp_h(3, pp) >= nc_node_dim-rnf_buf_h) then
+           np_buf = np_buf + 1
+           send_buf((np_buf-1)*6+1:np_buf*6) = xvmp_h(:, pp)
+        endif
+     enddo
+  endif
+  
+  if (6*np_buf > np_buffer) then
+     write(*,*) "ERROR: Not enough space to send buffer particles: ", rank, np_buf, np_buffer
+     call mpi_abort(mpi_comm_world, ierr, ierr)
+  endif
+  
+  nppz = np_buf
+  
+  call mpi_sendrecv_replace(nppz, 1, mpi_integer, cart_neighbor(2), tag, &
+       cart_neighbor(1), tag, mpi_comm_world, status, ierr)
+  
+  if (command == 0) then
+     if (np_local+nppz > max_np) then
+        write(*,*) "ERROR: Not enough space to receive buffer nu particles (nppz):", rank, np_local, nppz, max_np
+        call mpi_abort(mpi_comm_world, ierr, ierr)
+     endif
+  else if (command == 1) then
+     if (np_local_dm+nppz > max_np_dm) then
+        write(*,*) "ERROR: Not enough space to receive buffer dm particles (nppz):", rank, np_local_dm, nppz, max_np_dm
+        call mpi_abort(mpi_comm_world, ierr, ierr)
+     endif
+  else if (command == 2) then
+     if (np_local_h+nppz > max_np_h) then
+        write(*,*) "ERROR: Not enough space to receive buffer halos (nppz):", rank, np_local_h, nppz, max_np_h
+        call mpi_abort(mpi_comm_world, ierr, ierr)
+     endif
+  endif
+  
+  call mpi_isend(send_buf, np_buf*6, mpi_real, cart_neighbor(2), &
+       tag, mpi_comm_world, srequest, sierr)
+  call mpi_irecv(recv_buf, nppz*6, mpi_real, cart_neighbor(1), &
+       tag, mpi_comm_world, rrequest, rierr)
+  
+  call mpi_wait(srequest, sstatus, sierr)
+  call mpi_wait(rrequest, rstatus, rierr)
 
-    if (command == 0) then
-        pp = np_local-npmz-nppz + 1
-        do
-            if (pp > np_local) exit
-            i = floor(xvp(1, pp)/mesh_scale) + 1
-            j = floor(xvp(2, pp)/mesh_scale) + 1
-            k = floor(xvp(3, pp)/mesh_scale) + 1
-#ifdef DIAG
-            if (i < hoc_nc_l .or. i > hoc_nc_h .or. &
-                j < hoc_nc_l .or. j > hoc_nc_h .or. &
-                k < hoc_nc_l .or. k > hoc_nc_h) then
-                write (*, *) 'BUFFER PARTICLE DELETED', xvp(1:3, pp)
-                xvp(:,pp) = xvp(:,np_local)
-                np_local = np_local - 1
-                cycle
-            endif
-#endif
-            ll(pp) = hoc(i, j, k)
-            hoc(i, j, k) = pp
-            pp = pp + 1
-        enddo
-    else
-        pp = np_local_dm-npmz-nppz + 1
-        do
-            if (pp > np_local_dm) exit
-            i = floor(xvp_dm(1, pp)/mesh_scale) + 1
-            j = floor(xvp_dm(2, pp)/mesh_scale) + 1
-            k = floor(xvp_dm(3, pp)/mesh_scale) + 1
-#ifdef DIAG
-            if (i < hoc_nc_l .or. i > hoc_nc_h .or. &
-                j < hoc_nc_l .or. j > hoc_nc_h .or. &
-                k < hoc_nc_l .or. k > hoc_nc_h) then
-                write (*, *) 'BUFFER PARTICLE DELETED', xvp_dm(1:3, pp)
-                xvp_dm(:,pp) = xvp_dm(:,np_local_dm)
-                np_local_dm = np_local_dm - 1
-                cycle
-            endif
-#endif
-            ll_dm(pp) = hoc_dm(i, j, k)
-            hoc_dm(i, j, k) = pp
-            pp = pp + 1
-        enddo
-    endif
+  if (glook == g0) then
+     if (command == 0) then
+        pp_down = np_groups(g0) + np_buf_groups(g0)
+     else if (command == 1) then
+        pp_down = np_groups_dm(g0) + np_buf_groups_dm(g0)
+     else if (command == 2) then
+        pp_down = np_groups_h(g0) + np_buf_groups_h(g0)
+     endif
+  else if (glook == g1) then
+     if (command == 0) then
+        pp_down = max_np-np_groups(g1)-np_buf_groups(g1)
+     else if (command == 1) then
+        pp_down = max_np_dm-np_groups_dm(g1)-np_buf_groups_dm(g1)
+     else if (command == 2) then
+        pp_down = max_np_h-np_groups_h(g1)-np_buf_groups_h(g1)
+     endif
+     pp_down = pp_down - nppz
+  endif
+  
+  
+  if (command == 0) then
+     do pp = 1, nppz
+        xvp(:, pp_down+pp) = recv_buf((pp-1)*6+1:(pp-1)*6+6)
+        xvp(3, pp_down+pp) = max(xvp(3,pp_down+pp)-nc_node_dim, -rnf_buf)
+     enddo
+  else if (command == 1) then
+     do pp = 1, nppz
+        xvp_dm(:, pp_down+pp) = recv_buf((pp-1)*6+1:(pp-1)*6+6)
+        xvp_dm(3, pp_down+pp) = max(xvp_dm(3,pp_down+pp)-nc_node_dim, -rnf_buf)
+     enddo
+  else if (command == 2) then
+     do pp = 1, nppz
+        xvmp_h(:, pp_down+pp) = recv_buf((pp-1)*6+1:(pp-1)*6+6)
+        xvmp_h(3, pp_down+pp) = max(xvmp_h(3,pp_down+pp)-nc_node_dim, -rnf_buf_h)
+     enddo
+  endif
+  
+  if (command == 0) then
+     np_local = np_local + nppz
+     np_buf_groups(glook) = np_buf_groups(glook) + nppz
+  else if (command == 1) then
+     np_local_dm = np_local_dm + nppz
+     np_buf_groups_dm(glook) = np_buf_groups_dm(glook) + nppz
+  else if (command == 2) then
+     np_local_h = np_local_h + nppz
+     np_buf_groups_h(glook) = np_buf_groups_h(glook) + nppz
+  endif
 
-    !
-    ! Collect some statistics
-    !
+  !--------------------------------------------------------    
+  ! Pass -z
+  !--------------------------------------------------------    
+  
+  tag = 16
+  np_buf = 0
+  
+  if (glook == g0) then
+     pp_down = 1
+     if (command == 0) then
+        pp_up = np_groups(g0) + np_buf_groups(g0)
+     else if (command == 1) then
+        pp_up = np_groups_dm(g0) + np_buf_groups_dm(g0)
+     else if (command == 2) then
+        pp_up = np_groups_h(g0) + np_buf_groups_h(g0)
+     endif
+     pp_up = pp_up - nppz
+  else if (glook == g1) then
+     if (command == 0) then
+        pp_up = max_np
+        pp_down = max_np + 1 - np_groups(g1) - np_buf_groups(g1)
+     else if (command == 1) then
+        pp_up = max_np_dm
+        pp_down = max_np_dm + 1 - np_groups_dm(g1) - np_buf_groups_dm(g1)
+     else if (command == 2) then
+        pp_up = max_np_h
+        pp_down = max_np_h + 1 - np_groups_h(g1) - np_buf_groups_h(g1)
+     endif
+     pp_down = pp_down + nppz
+  endif
 
-    if (command == 0) then
-        np_buffer_sent_local = np_local - np_local_start
-    else
-        np_buffer_sent_local = np_local_dm - np_local_start
-    endif
-    call mpi_reduce(int(np_buffer_sent_local, kind=8), np_buffer_sent, 1, mpi_integer8, mpi_sum, 0, mpi_comm_world, ierr)
+  if (command == 0) then
+     do pp = pp_down, pp_up
+        if (xvp(3, pp) < rnf_buf) then
+           np_buf = np_buf + 1
+           send_buf((np_buf-1)*6+1:np_buf*6) = xvp(:, pp)
+        endif
+     enddo
+  else if (command == 1) then
+     do pp = pp_down, pp_up
+        if (xvp_dm(3, pp) < rnf_buf) then
+           np_buf = np_buf + 1
+           send_buf((np_buf-1)*6+1:np_buf*6) = xvp_dm(:, pp)
+        endif
+     enddo
+  else if (command == 2) then
+     do pp = pp_down, pp_up
+        if (xvmp_h(3, pp) < rnf_buf_h) then
+           np_buf = np_buf + 1
+           send_buf((np_buf-1)*6+1:np_buf*6) = xvmp_h(:, pp)
+        endif
+     enddo
+  endif
+  
+  if (6*np_buf > np_buffer) then
+     write(*,*) "ERROR: Not enough space to send buffer particles: ", rank, np_buf, np_buffer
+     call mpi_abort(mpi_comm_world, ierr, ierr)
+  endif
+  
+  npmz = np_buf
+  
+  call mpi_sendrecv_replace(npmz, 1, mpi_integer, cart_neighbor(1), tag, &
+       cart_neighbor(2), tag, mpi_comm_world, status, ierr)
+  
+  if (command == 0) then
+     if (np_local+npmz > max_np) then
+        write(*,*) "ERROR: Not enough space to receive buffer nu particles (npmz): ", rank, np_local, npmz, max_np
+        call mpi_abort(mpi_comm_world, ierr, ierr)
+     endif
+  else if (command == 1) then
+     if (np_local_dm+npmz > max_np_dm) then
+        write(*,*) "ERROR: Not enough space to receive buffer dm particles (npmz): ", rank, np_local_dm, npmz, max_np_dm
+        call mpi_abort(mpi_comm_world, ierr, ierr)
+     endif
+  else
+     if (np_local_h+npmz > max_np_h) then
+        write(*,*) "ERROR: Not enough space to receive halos (npmz): ", rank, np_local_h, npmz, max_np_h
+        call mpi_abort(mpi_comm_world, ierr, ierr)
+     endif
+  endif
+  
+  call mpi_isend(send_buf, np_buf*6, mpi_real, cart_neighbor(1), &
+       tag, mpi_comm_world, srequest, sierr)
+  call mpi_irecv(recv_buf, npmz*6, mpi_real, cart_neighbor(2), &
+       tag, mpi_comm_world, rrequest, rierr)
+  
+  call mpi_wait(srequest, sstatus, sierr)
+  call mpi_wait(rrequest, rstatus, rierr)
 
-    if (rank == 0) write(*,*) "Total Buffer Particles: ", np_buffer_sent
+  if (glook == g0) then
+     if (command == 0) then
+        pp_down = np_groups(g0) + np_buf_groups(g0)
+     else if (command == 1) then
+        pp_down = np_groups_dm(g0) + np_buf_groups_dm(g0)
+     else if (command == 2) then
+        pp_down = np_groups_h(g0) + np_buf_groups_h(g0)
+     endif
+  else if (glook == g1) then
+     if (command == 0) then
+        pp_down = max_np-np_groups(g1)-np_buf_groups(g1)
+     else if (command == 1) then
+        pp_down = max_np_dm-np_groups_dm(g1)-np_buf_groups_dm(g1)
+     else if (command == 2) then
+        pp_down = max_np_h-np_groups_h(g1)-np_buf_groups_h(g1)
+     endif
+     pp_down = pp_down - npmz
+  endif
+  
 
-    sec2 = mpi_wtime(ierr)
-    if (rank == 0) write(*,*) "Finished buffer_particles ... elapsed time = ", sec2 - sec1
+  if (command == 0) then
+     do pp = 1, npmz
+        xvp(:, pp_down+pp) = recv_buf((pp-1)*6+1:(pp-1)*6+6)
+        if (abs(xvp(3, pp_down+pp)) .lt. eps) then
+           if(xvp(3, pp_down+pp) < 0.) then
+              xvp(3, pp_down+pp) = -eps
+           else
+              xvp(3, pp_down+pp) = eps
+           endif
+        endif
+        xvp(3,pp_down+pp) = min(xvp(3,pp_down+pp)+real(nc_node_dim,4), &
+             nc_node_dim+rnf_buf-eps)
+     enddo
+  else if (command == 1) then
+     do pp = 1, npmz
+        xvp_dm(:, pp_down+pp) = recv_buf((pp-1)*6+1:(pp-1)*6+6)
+        if (abs(xvp_dm(3, pp_down+pp)) .lt. eps) then
+           if(xvp_dm(3, pp_down+pp) < 0.) then
+              xvp_dm(3, pp_down+pp) = -eps
+           else
+              xvp_dm(3, pp_down+pp) = eps
+           endif
+        endif
+        xvp_dm(3,pp_down+pp) = min(xvp_dm(3,pp_down+pp)+real(nc_node_dim,4), &
+             nc_node_dim+rnf_buf-eps)
+     enddo
+  else if (command == 2) then
+     do pp = 1, npmz
+        xvmp_h(:, pp_down+pp) = recv_buf((pp-1)*6+1:(pp-1)*6+6)
+        if (abs(xvmp_h(3, pp_down+pp)) .lt. eps) then
+           if(xvmp_h(3, pp_down+pp) < 0.) then
+              xvmp_h(3, pp_down+pp) = -eps
+           else
+              xvmp_h(3, pp_down+pp) = eps
+           endif
+        endif
+        xvmp_h(3,pp_down+pp) = min(xvmp_h(3,pp_down+pp)+real(nc_node_dim,4), &
+             nc_node_dim+rnf_buf_h-eps)
+     enddo
+  endif
+  
+  if (command == 0) then
+     np_local = np_local + npmz
+     np_buf_groups(glook) = np_buf_groups(glook) + npmz
+  else if (command == 1) then
+     np_local_dm = np_local_dm + npmz
+     np_buf_groups_dm(glook) = np_buf_groups_dm(glook) + npmz
+  else
+     np_local_h = np_local_h + npmz
+     np_buf_groups_h(glook) = np_buf_groups_h(glook) + npmz
+  endif
 
-end subroutine buffer_particles
+  !--------------------------------------------------------    
+  ! Calculate some statistics
+  !--------------------------------------------------------    
+  
+  if (command == 0) then
+     np_buffer_sent_local = np_buf_groups(glook)
+  else if (command == 1) then
+     np_buffer_sent_local = np_buf_groups_dm(glook)
+  else
+     np_buffer_sent_local = np_buf_groups_h(glook)
+  endif
+  call mpi_reduce(int(np_buffer_sent_local, kind=8), np_buffer_sent, 1, mpi_integer8, mpi_sum, 0, mpi_comm_world, ierr)
+  
+  time2 = mpi_wtime(ierr)
+  if (rank == 0) then
+     write(*,*) 'Finished buffer_particles_groups ...'
+     write(*,*) 'Group processed        : ',glook
+     write(*,*) 'Time elapsed           : ',time2 - time1
+     write(*,*) 'Total Buffer Particles : ', np_buffer_sent
+     write(*,*) '--------------------------'
+  endif
+
+end subroutine buffer_particles_groups
 
 ! -------------------------------------------------------------------------------------------------------
 
 subroutine initialize_random_number
-    !
-    ! Initialize random number generator
-    !
+  !
+  ! Initialize random number generator
+  !
 
-    implicit none
+  implicit none
 
-    integer :: i, j, k
-    real(4) :: x
-    integer :: seedsize, clock
-    integer, dimension(8) :: values
-    integer(4), allocatable, dimension(:) :: iseed
-    integer(4), allocatable, dimension(:) :: iseed_all
+  integer :: i, j, k, fstat
+  real(4) :: x
+  integer :: seedsize, clock
+  integer, dimension(8) :: values
+  integer(4), allocatable, dimension(:) :: iseed
+  integer(4), allocatable, dimension(:) :: iseed_all
+  character(len=4)   :: rank_string
+  character(len=180) :: fn
 
-    call random_seed()
-    call random_seed(size=seedsize)
+  if (rank == 0) write(*,*) 'Starting initialize_random_number ...'
+    
+  write(rank_string, '(i4)') rank
+  rank_string = adjustl(rank_string)
 
-    allocate(iseed(seedsize))
-    allocate(iseed_all(seedsize*nodes))
+  if (generate_seed) then
 
-    call system_clock(count=clock)
-    iseed = clock + 37 * (/ (i - 1, i = 1, 2) /)
+     call random_seed()
+     call random_seed(size=seedsize)
 
-    call date_and_time(values=values)
-    if(rank==0) write(*,*) values(7:8), iseed
+     allocate(iseed(seedsize))
+     allocate(randomseed(seedsize))
+     allocate(iseed_all(seedsize*nodes))
 
-    call random_seed(put=values(7:8))
-    call random_seed(put=iseed(1:seedsize))
+     call system_clock(count=clock)
+     iseed = clock + 37 * (/ (i - 1, i = 1, 2) /)
+     
+     call date_and_time(values=values)
+     if(rank==0) write(*,*) values(7:8), iseed
+     
+     call random_seed(put=values(7:8))
+     call random_seed(put=iseed(1:seedsize))
 
-    if (rank == 0) then
+     if (rank == 0) then
         write(*,*) 'Generating seeds'
         do j = 1, nodes
-            do k = 1, seedsize
-                call random_number(x)
-                iseed_all((j-1)*seedsize+k) = int(x*huge(0))
-            enddo
+           do k = 1, seedsize
+              call random_number(x)
+              iseed_all((j-1)*seedsize+k) = int(x*huge(0))
+           enddo
         enddo
-    endif
-    call mpi_scatter(iseed_all, seedsize, mpi_integer, iseed, seedsize, mpi_integer, 0, mpi_comm_world, ierr)
+     endif
+     call mpi_scatter(iseed_all, seedsize, mpi_integer, iseed, seedsize, mpi_integer, 0, mpi_comm_world, ierr)
 
-    call random_seed(put=iseed(1:seedsize))
+     randomseedsize = seedsize
+     randomseed(1:seedsize) = iseed(1:seedsize)
 
-    return
+     call random_seed(put=iseed(1:seedsize))
+  else
+     fn = output_path//'node'//rank_string(1:len_trim(rank_string))//'/seed'//rank_string(1:len_trim(rank_string))
 
+     open(unit=21,file=fn,status="old",iostat=fstat,access="stream")
+
+     if (fstat /= 0) then
+        write(*,*) 'ERROR: Cannot open seed file'
+        write(*,*) 'rank', rank, ' file: ',fn
+        call mpi_abort(mpi_comm_world, ierr, ierr)
+     endif
+
+     if (rank == 0) write(*,*) 'Catching seeds from file'
+
+     read(21) randomseedsize
+     allocate(randomseed(randomseedsize))
+     do k = 1, randomseedsize
+        read(21) randomseed(k)
+     enddo
+     close(21)
+
+     call random_seed(put=randomseed(1:randomseedsize))
+  endif
+
+  if (write_seed) then
+
+     if (rank == 0) write(*,*) 'Writing seeds to file'
+     fn = output_path//'node'//rank_string(1:len_trim(rank_string))//'/seed'//rank_string(1:len_trim(rank_string))
+     open(unit=11, file=fn, status="replace", iostat=fstat, access="stream")
+     write(11) randomseedsize
+     do k = 1, randomseedsize
+        write(11) randomseed(k)
+     enddo
+     close(11)
+  endif
+
+  if (rank == 0) then
+     write(*,*) 'Finished initialize_random_number ... '
+     write(*,*) 'seedsize : ', randomseedsize
+     write(*,*) '--------------------------'
+  endif
+
+  return
 end subroutine initialize_random_number
 
 ! -------------------------------------------------------------------------------------------------------
 
-subroutine assign_groups(command)
-    !
-    ! To remove shot noise in autocorrelation we randomly divide all particles
-    ! into one of two groups (controlled by their value of GID). Then we
-    ! cross-correlate the two groups together.
-    !
+subroutine reinitialize_random_number
+  !                                                                                                                                                 
+  ! Re initialize the random number generator using the seed                                                                                        
+  !                                                                                                                                            
 
-    implicit none
+  call random_seed(put=randomseed(1:randomseedsize))
 
-    integer(4) :: command
-    integer :: k, np_tot, np0, np1
-    integer(8) :: np1_tot, np2_tot, npa_tot
-    real(4) :: r 
-    integer(1) :: g
+  if (rank == 0) then
+     write(*,*) 'Finished reinitialize_random_number ... '
+     write(*,*) 'seedsize : ', randomseedsize
+     write(*,*) '--------------------------'
+  endif
 
-    if (command == 0) then
-        np_tot = np_local
-    else 
-        np_tot = np_local_dm
-    endif
-
-    np0 = 0
-    np1 = 0
-
-    do k = 1, np_tot
-
-        call random_number(r)
-        g = int(r+0.5)
-
-        if (g == 0) then
-            np0 = np0 + 1
-        else if (g == 1) then
-            np1 = np1 + 1
-        endif
-
-        if (command == 0) then
-            GID(k) = g
-        else 
-            GID_dm(k) = g
-        endif
-
-    enddo
-
-    call mpi_reduce(int(np_tot,kind=8), npa_tot, 1, mpi_integer8, mpi_sum, 0, mpi_comm_world, ierr)
-    call mpi_reduce(int(np0,kind=8), np1_tot, 1, mpi_integer8, mpi_sum, 0, mpi_comm_world, ierr)
-    call mpi_reduce(int(np1,kind=8), np2_tot, 1, mpi_integer8, mpi_sum, 0, mpi_comm_world, ierr)
-
-    if (rank == 0) then
-        write(*,*) "Groups assigned: ", np1_tot, np2_tot, npa_tot
-    endif
-
-    return
-
-end subroutine assign_groups
+end subroutine reinitialize_random_number
 
 ! -------------------------------------------------------------------------------------------------------
 
 subroutine clear_groups
-    !
-    ! Assign all particles to group 0
-    !
+  !
+  ! Assign all particles to group 0
+  ! 
+  
+  implicit none
+  integer :: pp_start, pp_up, pp_down, pp, command
 
-    implicit none
+  time1 = mpi_wtime(ierr)  
 
-    GID(:) = 0
-    GID_dm(:) = 0
+  !--------------------------------------------------------    
+  ! Reput all particles at the beginnig of the xvp array
+  !--------------------------------------------------------    
 
-    return
+  do command = 0,2
 
+     if (command == 0) then
+        pp_start = np_groups(g0) + np_buf_groups(g0) + 1
+        pp_up = max_np
+        pp_down = max_np + 1 - np_groups(g1) - np_buf_groups(g1)
+     else if (command == 1) then
+        pp_start = np_groups_dm(g0) + np_buf_groups_dm(g0) + 1
+        pp_up = max_np_dm
+        pp_down = max_np_dm + 1 - np_groups_dm(g1) - np_buf_groups_dm(g1)
+     else if (command == 2) then
+        pp_start = np_groups_h(g0) + np_buf_groups_h(g0) + 1
+        pp_up = max_np_h
+        pp_down = max_np_h + 1 - np_groups_h(g1) - np_buf_groups_h(g1)
+     endif
+
+     if (command == 0) then 
+        do pp = 0, (pp_up-pp_down)
+           xvp(:,pp_start+pp) = xvp(:,pp_down+pp) 
+        enddo
+     else if (command == 1) then
+        do pp = 0, (pp_up-pp_down)
+           xvp_dm(:,pp_start+pp) = xvp_dm(:,pp_down+pp) 
+        enddo
+     else if (command == 2) then
+        do pp = 0, (pp_up-pp_down)
+           xvmp_h(:,pp_start+pp) = xvmp_h(:,pp_down+pp) 
+        enddo
+     endif
+
+  enddo
+    
+  !--------------------------------------------------------    
+  ! Update np_groups ...
+  !--------------------------------------------------------    
+
+  np_groups(g0) = np_groups(g0) + np_groups(g1)
+  np_groups(g1) = 0
+  
+  np_groups_dm(g0) = np_groups_dm(g0) + np_groups_dm(g1)
+  np_groups_dm(g1) = 0
+  
+  np_groups_h(g0) = np_groups_h(g0) + np_groups_h(g1)
+  np_groups_h(g1) = 0
+  
+  np_groups_tot(g0) = np_groups_tot(g0) + np_groups_tot(g1)
+  np_groups_tot(g1) = 0
+  
+  np_groups_tot_dm(g0) = np_groups_tot_dm(g0) + np_groups_tot_dm(g1)
+  np_groups_tot_dm(g1) = 0
+  
+  np_groups_tot_h(0) = np_groups_tot_h(g0) + np_groups_tot_h(g1)
+  np_groups_tot_h(g1) = 0
+
+  np_buf_groups(g0) = np_buf_groups(g0) + np_buf_groups(g1)
+  np_buf_groups(g1) = 0
+
+  np_buf_groups_dm(g0) = np_buf_groups_dm(g0) + np_buf_groups_dm(g1)
+  np_buf_groups_dm(g1) = 0
+
+  np_buf_groups_h(g0) = np_buf_groups_h(g0) + np_buf_groups_h(g1)
+  np_buf_groups_h(g1) = 0
+
+  time2 = mpi_wtime(ierr)  
+  if (rank == 0) then
+     write(*,*) 'Finished clear_groups ...'     
+     write(*,*) 'Time elapsed       : ',time2 - time1
+     write(*,*) 'Total neutrinos    : ',np_groups_tot(0)
+     write(*,*) 'Total dm particles : ',np_groups_tot_dm(0)
+     write(*,*) 'Total halos        : ',np_groups_tot_h(0)
+     write(*,*) '--------------------------'
+  endif
+
+  return  
 end subroutine clear_groups
 
 ! -------------------------------------------------------------------------------------------------------
 
-subroutine velocity_density(command, glook, nfind)
-    !
-    ! Determine velocity field by taking the average velocity of the closest
-    ! particles to each grid centre.
-    ! 
+subroutine velocity_density_V2(command, glook, nfind, dir)
+  !
+  ! Determine velocity field by taking the average velocity of the closest
+  ! particles to each grid centre.
+  ! 
+  
+  implicit none
+  
+  integer :: ind, i, j, k, pp, thread, dir
+  integer :: ic, jc, kc, pp_up, pp_down, pp_down0
+  integer :: npart
+  real, dimension(3) :: dr, rc
+  real :: dmax,xvtemp(6)
+  integer(4) :: command, nfind
+  integer(1) :: glook
+  logical :: converged, pb
+  integer(8) :: num_notconverged, num2, sameR, num1, corner, num3
+  real*8 :: rsum, rsumt
+  real    :: v, r2, vswap, r2swap
+  integer :: m,mm
+  
+  time1 = mpi_wtime(ierr)
+  
+  !-----------------------------------------------------------
+  ! Initialize to zeros + remake hoc
+  !-----------------------------------------------------------
+  
+  call remake_hoc(command, glook)
 
-    implicit none
+  do i = 0, nc_node_dim + 1
+     momden(:, :, i) = 0.
+  enddo
+  
+  
+  if (glook == g0) then
+     pp_down0 = 1
+  else if (glook == g1) then
+     if (command == 0) then
+        pp_down0 = max_np + 1 - np_groups(g1) - np_buf_groups(g1)
+     else if (command == 1) then
+        pp_down0 = max_np_dm + 1 - np_groups_dm(g1) - np_buf_groups_dm(g1)
+     else if (command == 2) then
+        pp_down0 = max_np_h + 1 - np_groups_h(g1) - np_buf_groups_h(g1)
+     endif
+  endif
 
-    integer :: ind, i, j, k, pp, thread
-    integer :: ic, jc, kc
-    integer :: npart
-    real, dimension(3) :: dr, rc
-    real :: vx
-    integer(4) :: command, nfind
-    integer(1) :: glook
-    logical :: converged
-    integer(8) :: num_notconverged, num2
 
-    real(8) time1, time2
-    time1 = mpi_wtime(ierr)
+  !-----------------------------------------------------------
+  ! For each cell find the closest nfind particles and average their velocities
+  !-----------------------------------------------------------
 
-    !
-    ! Initialize to zeros
-    !
+  num_notconverged = 0
+  sameR = 0
+  corner = 0
+  rsum = 0.0
 
-    do i = 0, nc_node_dim + 1
-        momden(:, :, i) = 0.
-    enddo
+  !$omp  parallel num_threads(nt) default(shared) private(i, j, k, thread, rc, npart, ic, jc, kc, ind, pp, dr, converged, pb, dmax, v, r2, vswap, r2swap, m, mm, xvtemp, pp_up, pp_down) reduction(+:num_notconverged) reduction(+:sameR) reduction(+:rsum) reduction(+:corner)
 
-    !
-    ! For each cell find the closest nfind particles and average their velocities
-    !
+  thread = 1
+  thread = omp_get_thread_num() + 1
 
-    num_notconverged = 0
-
-    !$omp  parallel num_threads(nt) default(shared) private(i, j, k, thread, rc, npart, ic, jc, kc, ind, pp, dr, vx, converged) reduction(+:num_notconverged)
-    thread = 1
-    thread = omp_get_thread_num() + 1
-    !$omp do
-    do k = 1, nc_node_dim
+  if (command == 0) then  
+     !$omp do
+     do k = 1, nc_node_dim
         do j = 1, nc_node_dim
-            do i = 1, nc_node_dim
-
-                !! Centre of cell
-                rc(1) = i - 0.5
-                rc(2) = j - 0.5
-                rc(3) = k - 0.5
-
-                !! Number of total particles found
-                npart = 0
-
-                !! Determine whether or not this procedure converged
-                converged = .false.
-
-                if (command == 0) then
-                    do ind = 1, num_ngbhs
-
-                        !! Cell indices to search within
-                        ic = int((i-1)/mesh_scale) + 1 + cell_search(ind, 1)
-                        jc = int((j-1)/mesh_scale) + 1 + cell_search(ind, 2)
-                        kc = int((k-1)/mesh_scale) + 1 + cell_search(ind, 3)
-
-                        !! Loop over particles in this cell
-                        pp = hoc(ic, jc, kc)
-                        do
-                            if (pp == 0) exit
-                            if (GID(pp) == glook) then
-                                npart = npart + 1
-                                if (npart > max_npart_search) then
-                                    write(*,*) "ERROR: npart > max_npart_search. Consider increasing max_npart_search !!", max_npart_search
-                                    call mpi_abort(mpi_comm_world, ierr, ierr)
-                                endif
-                                dr(:) = xvp(:3,pp) - rc(:)
-                                rpos(thread, 1, npart) = xvp(3+cur_dimension,pp)
-                                rpos(thread, 2, npart) = dr(1)**2 + dr(2)**2 + dr(3)**2
-                            endif
-                            pp = ll(pp)
-                        enddo !! pp
-
-                        !! Exit if we have found at least nfind particles and we have completed an entire shell.
-                        if (npart >= nfind .and. done_shell(ind)) then
-                            converged = .true.
-                            exit
-                        endif
-
-                    enddo !! ind
-                else
-                    do ind = 1, num_ngbhs
-
-                        !! Cell indices to search within
-                        ic = int((i-1)/mesh_scale) + 1 + cell_search(ind, 1)
-                        jc = int((j-1)/mesh_scale) + 1 + cell_search(ind, 2)
-                        kc = int((k-1)/mesh_scale) + 1 + cell_search(ind, 3)
-
-                        !! Loop over particles in this cell
-                        pp = hoc_dm(ic, jc, kc)
-                        do
-                            if (pp == 0) exit
-                            if (GID_dm(pp) == glook) then
-                                npart = npart + 1
-                                if (npart > max_npart_search) then
-                                    write(*,*) "ERROR: npart > max_npart_search. Consider increasing max_npart_search !!", max_npart_search
-                                    call mpi_abort(mpi_comm_world, ierr, ierr)
-                                endif
-                                dr(:) = xvp_dm(:3,pp) - rc(:)
-                                rpos(thread, 1, npart) = xvp_dm(3+cur_dimension,pp)
-                                rpos(thread, 2, npart) = dr(1)**2 + dr(2)**2 + dr(3)**2
-                            endif
-                            pp = ll_dm(pp)
-                        enddo !! pp
-
-                        !! Exit if we have found at least nfind particles and we have completed an entire shell.
-                        if (npart >= nfind .and. done_shell(ind)) then
-                            converged = .true.
-                            exit
-                        endif 
-
-                    enddo !! ind
-                endif
-
-                !! Sort particles from closest to furthest from the cell centre 
-                ipos(thread, :npart) =  (/ (ic, ic=1, npart) /)
-                call indexedsort(npart, rpos(thread,2,:npart), ipos(thread,:npart))
-
-                !! Get the average of the closest particles 
-                vx = 0.
-                do ind = 1, nfind 
-                    vx = vx + rpos(thread, 1, ipos(thread, ind))
-                enddo
-                momden(i, j, k) = vx / nfind 
-
-                !! Count number of cells that did not converge 
-                if (converged .eqv. .false.) then
-                    num_notconverged = num_notconverged + 1
-                    !! Don't want to set momden(i, j, k) to the previous value of rpos
-                    momden(i, j, k) = 0.
-                endif
-
-            enddo ! i
-        enddo ! j 
-    enddo ! k
-    !$omp end do
-    !$omp end parallel
-
-    call mpi_reduce(num_notconverged, num2, 1, mpi_integer8, mpi_sum, 0, mpi_comm_world, ierr)
-
-    time2 = mpi_wtime(ierr)
-    if (rank == 0) then 
-        write(*, *) "Finished velocity_density ... elapsed time = ", time2-time1
-        if (num2 /= 0) then
-            write(*,*) "WARNING: num_notconverged = ", num2, " ... consider increasing nfine_buf !!"
-            write(*,*) "         command, glook, nfind = ", command, glook, nfind 
-        endif
-    endif
-
-    return
-
-end subroutine velocity_density
-
-#endif
-
-! -------------------------------------------------------------------------------------------------------
-
-#ifdef MOMENTUM
-subroutine mass_density(command)
-    !
-    ! Bin particles in position space to generate mass density field 
-    ! 
-
-    implicit none
-
-    real :: mp
-    integer :: i, j, i1, i2, j1, j2, k1, k2
-    real    :: x, y, z, dx1, dx2, dy1, dy2, dz1, dz2
-
-    integer(4) :: command, iend
-
-    real(8) time1, time2
-    time1 = mpi_wtime(ierr)
-
-    !
-    ! Initialize grid to 0
-    !
-
-    do k1 = 0, nc_node_dim+1
-        massden(:,:,k1) = 0.
-    enddo
-
-    if (command == 0) then 
-        mp = (ncr/np)**3
-    else !! Dark matter are further reduced by factor of r_n_1_3 
-        mp = (ncr/(np/ratio_nudm_dim))**3
-    endif
-
-    if (command == 0) then
-        iend = np_local
-    else
-        iend = np_local_dm
-    endif
-
-    do i = 1, iend
-
-        !! Read particle position
-        if (command == 0) then
-            x = xvp(1, i) - 0.5
-            y = xvp(2, i) - 0.5
-            z = xvp(3, i) - 0.5
-        else
-            x = xvp_dm(1, i) - 0.5
-            y = xvp_dm(2, i) - 0.5
-            z = xvp_dm(3, i) - 0.5
-        endif
-
-        !! Determine particle grid location
-        i1 = floor(x) + 1
-        i2 = i1 + 1
-        dx1 = i1 - x
-        dx2 = 1 - dx1
-        j1 = floor(y) + 1
-        j2 = j1 + 1
-        dy1 = j1 - y
-        dy2 = 1 - dy1
-        k1 = floor(z) + 1
-        k2 = k1 + 1
-        dz1 = k1 - z
-        dz2 = 1 - dz1
-
-        if (i1 < 0 .or. i2 > nc_node_dim+1 .or. j1 < 0 .or. &
-            j2 > nc_node_dim+1 .or. k1 < 0 .or. k2 > nc_node_dim+1) then
-                print *,'WARNING: Particle out of bounds', i1, i2, j1, j2, k1, k2, nc_node_dim
-        endif
-
-       dz1 = mp * dz1
-       dz2 = mp * dz2
-
-       massden(i1, j1, k1) = massden(i1, j1, k1) + dx1 * dy1 * dz1
-       massden(i2, j1, k1) = massden(i2, j1, k1) + dx2 * dy1 * dz1
-       massden(i1, j2, k1) = massden(i1, j2, k1) + dx1 * dy2 * dz1
-       massden(i2, j2, k1) = massden(i2, j2, k1) + dx2 * dy2 * dz1
-       massden(i1, j1, k2) = massden(i1, j1, k2) + dx1 * dy1 * dz2
-       massden(i2, j1, k2) = massden(i2, j1, k2) + dx2 * dy1 * dz2
-       massden(i1, j2, k2) = massden(i1, j2, k2) + dx1 * dy2 * dz2
-       massden(i2, j2, k2) = massden(i2, j2, k2) + dx2 * dy2 * dz2
-
-    enddo
-
-    time2 = mpi_wtime(ierr)
-    if (rank == 0) write(*, *) "Finished mass_density ... elapsed time = ", time2-time1
-
-    return
-
-end subroutine mass_density
-
-! -------------------------------------------------------------------------------------------------------
-
-subroutine momentum_density(command)
-    !
-    ! Bin particles in position space to generate the 3D momentum density field
-    ! 
-
-    implicit none
-
-    real :: mp
-    integer :: i, j, i1, i2, j1, j2, k1, k2
-    real    :: x, y, z, dx1, dx2, dy1, dy2, dz1, dz2
-    real    :: dv1, dv2, v(3)
-    real    :: vsim2phys, zcur
-    real    :: vrmsx, vrmsy, vrmsz
-
-    integer(4) :: command, iend
-
-    real(8) time1, time2
-    time1 = mpi_wtime(ierr)
-
-    !
-    ! Initialize grid to 0
-    !
-
-    do k1 = 0, nc_node_dim+1
-        momden(:,:,k1) = 0.
-    enddo
-
-    if (command == 0) then 
-        mp = (ncr/np)**3
-    else !! Dark matter are further reduced by factor of r_n_1_3 
-        mp = (ncr/(np/ratio_nudm_dim))**3
-    endif
-
-    !
-    ! Determine RMS velocity in each dimension
-    !
-
-    vrmsx = 0.
-    vrmsy = 0.
-    vrmsz = 0.
-
-    if (command == 0) then
-        iend = np_local
-    else
-        iend = np_local_dm
-    endif
-
-    do i = 1, iend
-
-        !! Read particle position
-        if (command == 0) then
-            x = xvp(1, i) - 0.5 
-            y = xvp(2, i) - 0.5
-            z = xvp(3, i) - 0.5
-            v(1) = xvp(4, i)
-            v(2) = xvp(5, i)
-            v(3) = xvp(6, i)
-        else
-            x = xvp_dm(1, i) - 0.5
-            y = xvp_dm(2, i) - 0.5
-            z = xvp_dm(3, i) - 0.5
-            v(1) = xvp_dm(4, i)
-            v(2) = xvp_dm(5, i)
-            v(3) = xvp_dm(6, i)
-        endif
-
-        !! Determine particle grid location
-        i1 = floor(x) + 1
-        i2 = i1 + 1
-        dx1 = i1 - x
-        dx2 = 1 - dx1
-        j1 = floor(y) + 1
-        j2 = j1 + 1
-        dy1 = j1 - y
-        dy2 = 1 - dy1
-        k1 = floor(z) + 1
-        k2 = k1 + 1
-        dz1 = k1 - z
-        dz2 = 1 - dz1
-
-        if (i1 < 0 .or. i2 > nc_node_dim+1 .or. j1 < 0 .or. &
-            j2 > nc_node_dim+1 .or. k1 < 0 .or. k2 > nc_node_dim+1) then
-                print *,'WARNING: Particle out of bounds', i1, i2, j1, j2, k1, k2, nc_node_dim
-        endif
-
-        vrmsx = vrmsx + v(1)**2
-        vrmsy = vrmsy + v(2)**2
-        vrmsz = vrmsz + v(3)**2
-
-        dv1 = dz1 * mp * v(cur_dimension)
-        dv2 = dz2 * mp * v(cur_dimension)
-
-        momden(i1, j1, k1) = momden(i1, j1, k1) + dx1 * dy1 * dv1
-        momden(i2, j1, k1) = momden(i2, j1, k1) + dx2 * dy1 * dv1
-        momden(i1, j2, k1) = momden(i1, j2, k1) + dx1 * dy2 * dv1
-        momden(i2, j2, k1) = momden(i2, j2, k1) + dx2 * dy2 * dv1
-        momden(i1, j1, k2) = momden(i1, j1, k2) + dx1 * dy1 * dv2
-        momden(i2, j1, k2) = momden(i2, j1, k2) + dx2 * dy1 * dv2
-        momden(i1, j2, k2) = momden(i1, j2, k2) + dx1 * dy2 * dv2
-        momden(i2, j2, k2) = momden(i2, j2, k2) + dx2 * dy2 * dv2
-
-    enddo
-
-    !
-    ! Determine root mean square velocities
-    !
-
-    ! First get conversion factor to physical velocity in km/s
-    zcur      = z_checkpoint(cur_checkpoint)
-    vsim2phys = 300. * sqrt(omega_m) * box * (1. + zcur) / 2. / nc !! Takes h = 1
-
-    vrmsx = vsim2phys * sqrt(vrmsx / iend)
-    vrmsy = vsim2phys * sqrt(vrmsy / iend)
-    vrmsz = vsim2phys * sqrt(vrmsz / iend)
-
-    if (rank == 0 .and. cur_dimension == 0) write(*, *) "RMS physical velocities (rank, z, vx, vy, vz): ", rank, zcur, vrmsx, vrmsy, vrmsz
-
-    time2 = mpi_wtime(ierr)
-    if (rank == 0) write(*, *) "Finished momentum_density ... elapsed time = ", time2-time1
-
-    return
-
-end subroutine momentum_density
-
-! -------------------------------------------------------------------------------------------------------
-
-subroutine momentum2velocity
-    !
-    ! Converts momentum density field v*(1+delta) to velocity field by dividing
-    ! by density field (1+delta)
-    !
-
-    implicit none
-
-    integer :: m, i, j, k
-    integer(8) :: ecount_local, ecount
-
-    real(8) time1, time2
-    time1 = mpi_wtime(ierr)
-
-#ifdef GAUSSIAN_SMOOTH
-    !
-    ! First smooth the density field
-    !
-
-    cube(:, :, :) = massden(1:nc_node_dim, 1:nc_node_dim, 1:nc_node_dim)
-    call Gaussian_filter
-    massden(1:nc_node_dim, 1:nc_node_dim, 1:nc_node_dim) = cube(:, :, :)
-
-    !
-    ! Now smooth each component of the momentum field
-    !
-
-    cube(:, :, :) = momden(1:nc_node_dim, 1:nc_node_dim, 1:nc_node_dim)
-    call Gaussian_filter
-    momden(1:nc_node_dim, 1:nc_node_dim, 1:nc_node_dim) = cube(:, :, :)
-
-#endif
-
-    !
-    ! Divide the latter by the former to get the velocity field
-    !
-
-    ecount_local = 0
-
-    do i = 1, nc_node_dim
-        do j = 1, nc_node_dim
-            do k = 1, nc_node_dim
-                if (massden(i, j, k) .ne. 0.) then
-                    momden(i, j, k) = momden(i, j, k) / massden(i, j, k)
-                else
-                    ecount_local = ecount_local + 1
-                endif
-            enddo
-        enddo
-    enddo
-
-    call mpi_reduce(ecount_local, ecount, 1, mpi_integer8, mpi_sum, 0, mpi_comm_world, ierr)
-
-    time2 = mpi_wtime(ierr)
-
-    if (rank == 0) write(*, *) "Empty cells in the density field = ", ecount
-    if (rank == 0) write(*, *) "Finished momentum2velocity ... elapsed time = ", time2-time1
-
-    return
-
-end subroutine momentum2velocity
-
-! -------------------------------------------------------------------------------------------------------
-
-#ifdef GAUSSIAN_SMOOTH
-subroutine Gaussian_filter
-    !
-    ! Smooths the provided real space field (in cube) with a Gaussian filter in
-    ! Fourier space (via slab) and transforms back to real space (through cube).
-    !
-
-    implicit none
-
-    integer :: i, j, k, kg, ig, mg, jg
-    real :: fr, kr, kx, ky, kz
-#ifndef SLAB
-    integer :: ind, dx, dxy
-#endif
-
-    !! Forward transform cube to slab
-    call cp_fftw(1)
-
-#ifndef SLAB
-    dx  = fsize(1)
-    dxy = dx * fsize(2)
-    ind = 0
-#endif
-
-    !! Convolve Fourier field with a Gaussian filter
-
-#ifdef SLAB
-    do k = 1, nc_slab
-        kg = k + nc_slab*rank
-        if (kg .lt. hc+2) then
-            kz = kg - 1
-        else
-            kz = kg - 1 - nc
-        endif
-        do j = 1, nc
-            if (j .lt. hc+2) then
-                ky = j - 1
-            else
-                ky = j - 1 - nc
-            endif
-            do i = 1, nc+2, 2
-                kx = (i-1)/2
+           do i = 1, nc_node_dim
+
+              !! Centre of cell
+              rc(1) = i - 0.5
+              rc(2) = j - 0.5
+              rc(3) = k - 0.5
+
+              !! Number of total particles found
+              npart = 0
+
+              !! Determine whether or not this procedure converged
+              converged = .false.
+              pb = .false.
+
+              !! if dmax > 0, it will represent the max distance to search
+              dmax = -1.0 !! OR  dmax = cell_search_r(num_ngbhs) + 1.0 OR dmax = 2*nfine_buf + 1.0 --> do not do that with NP_LINLOGMAX
+
+              do ind = 1, num_ngbhs
+
+                 !! if we are too far, we can already exit the loop
+                 if (dmax >= 0 .and. cell_search_r(ind) >= dmax) exit !! OR JUST if(cell_search_r(ind) >= dmax) ...
+
+                 !! Cell indices to search within
+                 ic = int((i-1)/mesh_scale) + 1 + cell_search(1, ind)
+                 jc = int((j-1)/mesh_scale) + 1 + cell_search(2, ind)
+                 kc = int((k-1)/mesh_scale) + 1 + cell_search(3, ind)
+
+                 if ( ic == hoc_nc_l .and. jc == hoc_nc_l .and. kc == hoc_nc_l ) then
+                    pp_down = pp_down0
+                    pp_up = hoc(ic,jc,kc)
+                 else if (ic == hoc_nc_l .and. jc == hoc_nc_l) then
+                    pp_down = hoc(hoc_nc_h, hoc_nc_h, kc-1) + 1
+                    pp_up = hoc(hoc_nc_l, hoc_nc_l, kc)
+                 else if (ic == hoc_nc_l) then
+                    pp_down = hoc(hoc_nc_h, jc-1, kc) + 1
+                    pp_up = hoc(hoc_nc_l, jc, kc)
+                 else
+                    pp_down = hoc(ic-1, jc, kc) + 1
+                    pp_up = hoc(ic, jc, kc)
+                 endif
+
+#ifdef NP_LINLOGMAX
+
+#ifdef NP_FAST
+                 if ( (pp_up - pp_down + 1) > max_npart_cell_search) then
+                    write(*,*) "ERROR: npart > max_npart_cell_search. Consider increasing max_npart_cell_search !!", max_npart_cell_search
+                    call mpi_abort(mpi_comm_world, ierr, ierr)
+                 endif
+
+                 xvp_cell(:,1:(pp_up - pp_down + 1),thread) = xvp(:,pp_down:pp_up)
+
+                 do pp = 1, (pp_up - pp_down + 1)
+                    dr(1:3) = xvp_cell(1:3, pp, thread) - rc(1:3)
+                    xvp_cell(2+dir, pp, thread) = dr(1)**2 + dr(2)**2 + dr(3)**2
+                 enddo
+
+                 if (npart + pp_up - pp_down + 1 > max_npart_search) then
+                    write(*,*) "ERROR: npart > max_npart_search. Consider increasing max_npart_search !!", max_npart_search
+                    call mpi_abort(mpi_comm_world, ierr, ierr)
+                 endif
+
+                 do pp = 1, (pp_up - pp_down + 1)
+                    npart = npart + 1
+                    rpos(1:2, npart, thread) = xvp_cell(2+dir:3+dir, pp, thread)
+                 enddo
 #else
-    do k = 1, nc_pen+mypadd
+                 if (npart + pp_up - pp_down + 1 > max_npart_search) then
+                    write(*,*) "ERROR: npart > max_npart_search. Consider increasing max_npart_search !!", max_npart_search
+                    call mpi_abort(mpi_comm_world, ierr, ierr)
+                 endif
+
+                 do pp = pp_down, pp_up
+                    xvtemp(1:6) = xvp(1:6,pp)
+                    dr(:) = xvtemp(1:3) - rc(:)
+                    xvtemp(2+dir) = dr(1)**2 + dr(2)**2 + dr(3)**2
+                    npart = npart + 1
+                    rpos(1:2, npart, thread) = xvtemp(2+dir:3+dir)
+                 enddo
+#endif
+#else
+
+#ifdef NP_FAST
+                 if ( (pp_up - pp_down + 1) > max_npart_cell_search) then
+                    write(*,*) "ERROR: npart > max_npart_cell_search. Consider increasing max_npart_cell_search !!", max_npart_cell_search
+                    call mpi_abort(mpi_comm_world, ierr, ierr)
+                 endif
+
+                 !! Copy the particles to a temporary array
+                 xvp_cell(:,1:(pp_up - pp_down + 1),thread) = xvp(:,pp_down:pp_up)
+
+                 !! Compute distance to the center of the cell
+                 !! and insert the nearest particles into the table
+                 do pp = 1,(pp_up - pp_down + 1)
+                    dr(:) = xvp_cell(1:3, pp, thread) - rc(:)
+                    r2 = dr(1)**2 + dr(2)**2 + dr(3)**2
+                    v = xvp_cell(3+dir, pp, thread)
+#else
+                 do pp = pp_down, pp_up
+                    xvtemp(1:6) = xvp(1:6,pp)
+                    dr(:) = xvtemp(1:3) - rc(:)
+                    r2 = dr(1)**2 + dr(2)**2 + dr(3)**2
+                    v = xvtemp(3+dir)
+#endif
+                    npart = npart + 1
+
+                    !! if it's the first particle we found, just add it to the list                                                                    
+                    if (npart == 1) then
+                       rpos(1, 1, thread) = v
+                       rpos(2, 1, thread) = r2
+                       
+                       !! else if we haven't found at least nfind particles, just append it to its right place                              
+                    else if ((npart - 1) < nfind) then
+                       m = 1
+                       do while (m < npart)
+                          if (r2 > rpos(2, m, thread)) then
+                             exit
+                          else if (r2 == rpos(2, m, thread)) then
+                             exit
+                          endif
+                          m = m+1
+                       enddo
+                       
+                       do while (m < npart)
+                          vswap = rpos(1, m, thread)
+                          r2swap = rpos(2, m, thread)
+                          rpos(1, m, thread) = v
+                          rpos(2, m, thread) = r2
+                          v = vswap
+                          r2 = r2swap
+                          m = m+1
+                       enddo
+                       rpos(1, npart, thread) = v
+                       rpos(2, npart, thread) = r2
+                       
+                       !! else push it to its right place and get rid of the furtest particle                                     
+                    else if (r2 < rpos(2, 1, thread)) then
+                       m = 2
+                       do while (m <= nfind)
+                          if (r2 > rpos(2, m, thread)) then
+                             exit
+                          else if (r2 == rpos(2, m, thread)) then
+                             exit
+                          endif
+                          m = m+1
+                       enddo
+
+                       if (m == 2) then
+                          pb = .false.
+                       else if (rpos(2, 1, thread) == rpos(2, 2, thread)) then
+                          pb = .true.
+                       else if (pb) then
+                          pb = .false.
+                       endif
+
+                       do mm = 1, m-1
+                          vswap = rpos(1, m-mm, thread)
+                          r2swap = rpos(2, m-mm, thread)
+                          rpos(1, m-mm, thread) = v
+                          rpos(2, m-mm, thread) = r2
+                          v = vswap
+                          r2 = r2swap
+                       enddo
+                    else if (r2 == rpos(2, 1, thread)) then
+                       pb = .true.
+                    endif
+                 enddo !! pp
+#endif
+
+#ifdef NP_LINLOGMAX
+                 if (npart >= nfind .and. dmax < 0) then
+                    dmax = cell_search_r_max(ind)
+                    converged = .true.
+                 endif
+#else
+                 if (npart >= nfind) then
+                    dmax = sqrt(rpos(2, 1, thread))
+                    converged = .true.
+                 endif
+#endif                 
+              enddo !! ind
+
+#ifdef NP_LINLOGMAX
+              ipos(:npart, thread) =  (/ (ic, ic=1, npart) /)
+              call indexedsort(npart, rpos(2,:npart, thread), ipos(:npart, thread))
+              v = 0.0
+              r2 = 0.0
+              if (npart > 0) then
+                 do ind = 1, min(nfind,npart)
+                    v = v + rpos(1, ipos(ind, thread), thread)
+                 enddo
+                 r2 = sqrt(rpos(2, ipos(min(nfind, npart), thread), thread))
+#ifdef RADIUS
+                 momden(i, j, k) = r2
+#else
+                 momden(i, j, k) = v / real(min(nfind,npart))
+#endif            
+                 if (npart > nfind) then
+                    if ( rpos(2, ipos(nfind+1, thread), thread) == rpos(2, ipos(nfind, thread), thread) ) then
+                       pb = .true.
+                    endif
+                 endif
+              else
+                 r2 = rnf_buf*sqrt(3.0)
+#ifdef RADIUS
+                 momden(i, j, k) = r2
+#endif
+              endif
+#else
+              v = 0.0
+              r2 = 0.0
+              if (npart > 0) then
+                 do ind = 1, min(nfind, npart)
+                    v = v + rpos(1, ind, thread)
+                 enddo
+                 r2 = sqrt(rpos(2, 1, thread))
+#ifdef RADIUS
+                 momden(i, j, k) = r2
+#else
+                 momden(i, j, k) = v / real(min(nfind, npart))
+#endif            
+              else
+                 r2 = rnf_buf*sqrt(3.0)
+#ifdef RADIUS
+                 momden(i, j, k) = r2
+#endif
+              endif
+#endif
+              rsum = rsum + r2
+              if (.not. converged ) then
+                 num_notconverged = num_notconverged + 1
+              endif
+
+              if (r2 >= rnf_buf) then
+                 corner = corner + 1
+              endif
+
+              if (pb) then
+                 sameR = sameR + 1
+              endif
+
+           enddo !! i
+        enddo !! j
+     enddo !! k
+     !$omp end do  
+
+  else if (command == 1) then  
+     !$omp do
+     do k = 1, nc_node_dim
         do j = 1, nc_node_dim
-            do i = 1, nc, 2
-                kg = ind / dxy
-                mg = ind - kg * dxy
-                jg = mg / dx
-                ig = mg - jg * dx
-                kg = fstart(3) + kg
-                jg = fstart(2) + jg
-                ig = 2 * (fstart(1) + ig) - 1
-                ind = ind + 1
-                if (kg < hc+2) then
-                    kz=kg-1
-                else
-                    kz=kg-1-nc
-                endif
-                if (jg < hc+2) then
-                    ky=jg-1
-                else
-                    ky=jg-1-nc
-                endif
-                kx = (ig-1)/2
+           do i = 1, nc_node_dim
+
+              rc(1) = i - 0.5
+              rc(2) = j - 0.5
+              rc(3) = k - 0.5
+
+              npart = 0
+              converged = .false.
+              pb = .false.
+              dmax = -1.0
+
+              do ind = 1, num_ngbhs
+                 if (dmax >= 0 .and. cell_search_r(ind) >= dmax) exit
+                 ic = int((i-1)/mesh_scale) + 1 + cell_search(1, ind)
+                 jc = int((j-1)/mesh_scale) + 1 + cell_search(2, ind)
+                 kc = int((k-1)/mesh_scale) + 1 + cell_search(3, ind)
+
+                 if ( ic == hoc_nc_l .and. jc == hoc_nc_l .and. kc == hoc_nc_l ) then
+                    pp_down = pp_down0
+                    pp_up = hoc_dm(ic,jc,kc)
+                 else if (ic == hoc_nc_l .and. jc == hoc_nc_l) then
+                    pp_down = hoc_dm(hoc_nc_h, hoc_nc_h, kc-1) + 1
+                    pp_up = hoc_dm(hoc_nc_l, hoc_nc_l, kc)
+                 else if (ic == hoc_nc_l) then
+                    pp_down = hoc_dm(hoc_nc_h, jc-1, kc) + 1
+                    pp_up = hoc_dm(hoc_nc_l, jc, kc)
+                 else
+                    pp_down = hoc_dm(ic-1, jc, kc) + 1
+                    pp_up = hoc_dm(ic, jc, kc)
+                 endif
+
+#ifdef NP_LINLOGMAX
+#ifdef NP_FAST
+                 if ( (pp_up - pp_down + 1) > max_npart_cell_search) then
+                    write(*,*) "ERROR: npart > max_npart_cell_search. Consider increasing max_npart_cell_search !!", max_npart_cell_search
+                    call mpi_abort(mpi_comm_world, ierr, ierr)
+                 endif
+
+                 xvp_cell(:,1:(pp_up - pp_down + 1),thread) = xvp_dm(:,pp_down:pp_up)
+
+                 do pp = 1, (pp_up - pp_down + 1)
+                    dr(1:3) = xvp_cell(1:3, pp, thread) - rc(1:3)
+                    xvp_cell(2+dir, pp, thread) = dr(1)**2 + dr(2)**2 + dr(3)**2
+                 enddo
+
+                 if (npart + pp_up - pp_down + 1 > max_npart_search) then
+                    write(*,*) "ERROR: npart > max_npart_search. Consider increasing max_npart_search !!", max_npart_search
+                    call mpi_abort(mpi_comm_world, ierr, ierr)
+                 endif
+
+                 do pp = 1, (pp_up - pp_down + 1)
+                    npart = npart + 1
+                    rpos(1:2, npart, thread) = xvp_cell(2+dir:3+dir, pp, thread)
+                 enddo
+#else
+                 if (npart + pp_up - pp_down + 1 > max_npart_search) then
+                    write(*,*) "ERROR: npart > max_npart_search. Consider increasing max_npart_search !!", max_npart_search
+                    call mpi_abort(mpi_comm_world, ierr, ierr)
+                 endif
+
+                 do pp = pp_down, pp_up
+                    xvtemp(1:6) = xvp_dm(1:6,pp)
+                    dr(:) = xvtemp(1:3) - rc(:)
+                    xvtemp(2+dir) = dr(1)**2 + dr(2)**2 + dr(3)**2
+                    npart = npart + 1
+                    rpos(1:2, npart, thread) = xvtemp(2+dir:3+dir)
+                 enddo
 #endif
-                kr = sqrt(kx**2 + ky**2 + kz**2)
-                fr = 2. * pi * kr / box
+#else
 
-                slab(i:i+1,j,k) = slab(i:i+1,j,k) * exp(-0.5*(fr*R_smooth)**2)
+#ifdef NP_FAST
+                 if ( (pp_up - pp_down + 1) > max_npart_cell_search) then
+                    write(*,*) "ERROR: npart > max_npart_search. Consider increasing max_npart_search !!", max_npart_cell_search
+                    call mpi_abort(mpi_comm_world, ierr, ierr)
+                 endif
 
-            enddo
-        enddo
-    enddo
+                 xvp_cell(:,1:(pp_up - pp_down + 1),thread) = xvp_dm(:,pp_down:pp_up)
 
-    !! Backward transform slab to cube
-    call cp_fftw(-1)
+                 do pp = 1,(pp_up - pp_down + 1)
+                    dr(:) = xvp_cell(1:3,pp,thread) - rc(:)
+                    r2 = dr(1)**2 + dr(2)**2 + dr(3)**2
+                    v = xvp_cell(3+dir,pp,thread)
+#else
+                 do pp = pp_down, pp_up
+                    xvtemp(:) = xvp_dm(:,pp)
+                    dr(:) = xvtemp(1:3) - rc(:)
+                    r2 = dr(1)**2 + dr(2)**2 + dr(3)**2
+                    v = xvtemp(3+dir)
+#endif                    
+                    npart = npart + 1
 
-    return
+                    if (npart == 1) then
+                       rpos(1, 1, thread) = v
+                       rpos(2, 1, thread) = r2
+                       
+                    else if ((npart - 1) < nfind) then
+                       m = 1
+                       do while (m < npart)
+                          if (r2 >= rpos(2, m, thread)) exit
+                          m = m+1
+                       enddo
+                       
+                       do while (m < npart)
+                          vswap = rpos(1, m, thread)
+                          r2swap = rpos(2, m, thread)
+                          rpos(1, m, thread) = v
+                          rpos(2, m, thread) = r2
+                          v = vswap
+                          r2 = r2swap
+                          m = m+1
+                       enddo
+                       rpos(1, npart, thread) = v
+                       rpos(2, npart, thread) = r2
+                       
+                    else if (r2 < rpos(2, 1, thread)) then
+                       m = 2
+                       do while (m <= nfind)
+                          if (r2 >= rpos(2, m, thread)) exit
+                          m = m+1
+                       enddo
 
-end subroutine Gaussian_filter
+                       if (m == 2) then
+                          pb = .false.
+                       else if (rpos(2, 1, thread) == rpos(2, 2, thread)) then
+                          pb = .true.
+                       else if (pb) then
+                          pb = .false.
+                       endif
+
+                       do mm = 1, m-1
+                          vswap = rpos(1, m-mm, thread)
+                          r2swap = rpos(2, m-mm, thread)
+                          rpos(1, m-mm, thread) = v
+                          rpos(2, m-mm, thread) = r2
+                          v = vswap
+                          r2 = r2swap
+                       enddo
+
+                    else if (r2 == rpos(2, 1, thread)) then
+                       pb = .true.
+                    endif
+                 enddo !! pp
 #endif
+#ifdef NP_LINLOGMAX
+                 if (npart >= nfind .and. dmax < 0) then
+                    dmax = cell_search_r_max(ind)
+                    converged = .true.
+                 endif
+#else
+                 if (npart >= nfind) then
+                    dmax = sqrt(rpos(2, 1, thread))
+                    converged = .true.
+                 endif
+#endif                 
+              enddo !! ind
+
+#ifdef NP_LINLOGMAX
+              ipos(:npart, thread) =  (/ (ic, ic=1, npart) /)
+              call indexedsort(npart, rpos(2,:npart, thread), ipos(:npart, thread))
+              v = 0.0
+              r2 = 0.0
+              if (npart > 0) then
+                 do ind = 1, min(nfind,npart)
+                    v = v + rpos(1, ipos(ind, thread), thread)
+                 enddo
+                 r2 = sqrt(rpos(2, ipos(min(nfind, npart), thread), thread))
+#ifdef RADIUS
+                 momden(i, j, k) = r2
+#else
+                 momden(i, j, k) = v / real(min(nfind, npart))
 #endif
+                 if (npart > nfind) then
+                    if ( rpos(2, ipos(nfind+1, thread), thread) == rpos(2, ipos(nfind, thread), thread) ) then
+                       pb = .true.
+                    endif
+                 endif
+              else
+                 r2 = rnf_buf*sqrt(3.0)
+#ifdef RADIUS
+                 momden(i, j, k) = r2
+#endif
+              endif
+#else
+              v = 0.0
+              r2 = 0.0
+              if (npart > 0) then
+                 do ind = 1, min(nfind, npart)
+                    v = v + rpos(1, ind, thread)
+                 enddo
+                 r2 = sqrt(rpos(2, 1, thread))
+#ifdef RADIUS
+                 momden(i, j, k) = r2
+#else
+                 momden(i, j, k) = v / real(min(nfind, npart))
+#endif
+              else
+                 r2 = rnf_buf*sqrt(3.0)
+#ifdef RADIUS
+                 momden(i, j, k) = r2
+#endif
+              endif
+#endif
+              rsum = rsum + r2
+              if (.not. converged ) then
+                 num_notconverged = num_notconverged + 1
+              endif
+
+              if (r2 >= rnf_buf) then
+                 corner = corner + 1
+              endif
+
+              if (pb) then
+                 sameR = sameR + 1
+              endif
+
+           enddo !! i
+        enddo !! j
+     enddo !! k
+     !$omp end do  
+
+  else if (command == 2) then  
+     !$omp do
+     do k = 1, nc_node_dim
+        do j = 1, nc_node_dim
+           do i = 1, nc_node_dim
+
+              rc(1) = i - 0.5
+              rc(2) = j - 0.5
+              rc(3) = k - 0.5
+
+              npart = 0
+              converged = .false.
+              pb = .false.
+              dmax = -1.0
+
+              do ind = 1, num_ngbhs_h
+                 if (dmax >= 0 .and. cell_search_r_h(ind) >= dmax) exit
+                 ic = int((i-1)/mesh_scale_h) + 1 + cell_search_h(1, ind)
+                 jc = int((j-1)/mesh_scale_h) + 1 + cell_search_h(2, ind)
+                 kc = int((k-1)/mesh_scale_h) + 1 + cell_search_h(3, ind)
+
+                 if ( ic == hoc_nc_l_h .and. jc == hoc_nc_l_h .and. kc == hoc_nc_l_h ) then
+                    pp_down = pp_down0
+                    pp_up = hoc_h(ic,jc,kc)
+                 else if (ic == hoc_nc_l_h .and. jc == hoc_nc_l_h) then
+                    pp_down = hoc_h(hoc_nc_h_h, hoc_nc_h_h, kc-1) + 1
+                    pp_up = hoc_h(hoc_nc_l_h, hoc_nc_l_h, kc)
+                 else if (ic == hoc_nc_l_h) then
+                    pp_down = hoc_h(hoc_nc_h_h, jc-1, kc) + 1
+                    pp_up = hoc_h(hoc_nc_l_h, jc, kc)
+                 else
+                    pp_down = hoc_h(ic-1, jc, kc) + 1
+                    pp_up = hoc_h(ic, jc, kc)
+                 endif
+
+#ifdef NP_LINLOGMAX
+#ifdef NP_FAST
+                 if ( (pp_up - pp_down + 1) > max_npart_cell_search_h) then
+                    write(*,*) "ERROR: npart > max_npart_cell_search_h. Consider increasing max_npart_cell_search_h !!", max_npart_cell_search_h
+                    call mpi_abort(mpi_comm_world, ierr, ierr)
+                 endif
+
+                 xvp_cell_h(:,1:(pp_up - pp_down + 1),thread) = xvmp_h(:,pp_down:pp_up)
+
+                 do pp = 1, (pp_up - pp_down + 1)
+                    dr(1:3) = xvp_cell_h(1:3, pp, thread) - rc(1:3)
+                    xvp_cell_h(2+dir, pp, thread) = dr(1)**2 + dr(2)**2 + dr(3)**2
+                 enddo
+
+                 if (npart + pp_up - pp_down + 1 > max_npart_search_h) then
+                    write(*,*) "ERROR: npart > max_npart_search_h. Consider increasing max_npart_search_h !!", max_npart_search_h
+                    call mpi_abort(mpi_comm_world, ierr, ierr)
+                 endif
+
+                 do pp = 1, (pp_up - pp_down + 1)
+                    npart = npart + 1
+                    rpos_h(1:2, npart, thread) = xvp_cell_h(2+dir:3+dir, pp, thread)
+                 enddo
+#else
+                 if (npart + pp_up - pp_down + 1 > max_npart_search_h) then
+                    write(*,*) "ERROR: npart > max_npart_search_h. Consider increasing max_npart_search_h !!", max_npart_search_h
+                    call mpi_abort(mpi_comm_world, ierr, ierr)
+                 endif
+
+                 do pp = pp_down, pp_up
+                    xvtemp(1:6) = xvmp_h(1:6,pp)
+                    dr(:) = xvtemp(1:3) - rc(:)
+                    xvtemp(2+dir) = dr(1)**2 + dr(2)**2 + dr(3)**2
+                    npart = npart + 1
+                    rpos_h(1:2, npart, thread) = xvtemp(2+dir:3+dir)
+                 enddo
+#endif
+#else
+
+#ifdef NP_FAST
+                 if ( (pp_up - pp_down + 1) > max_npart_cell_search_h) then
+                    write(*,*) "ERROR: npart > max_npart_search_h. Consider increasing max_npart_search !!", max_npart_cell_search_h
+                    call mpi_abort(mpi_comm_world, ierr, ierr)
+                 endif
+
+                 xvp_cell_h(:,1:(pp_up - pp_down + 1), thread) = xvmp_h(:,pp_down:pp_up)
+
+                 do pp = 1,(pp_up - pp_down + 1)
+                    dr(:) = xvp_cell_h(1:3, pp, thread) - rc(:)
+                    r2 = dr(1)**2 + dr(2)**2 + dr(3)**2
+                    v = xvp_cell_h(3+dir, pp, thread)
+#else
+                 do pp = pp_down, pp_up
+                    xvtemp(:) = xvmp_h(:,pp)
+                    dr(:) = xvtemp(1:3) - rc(:)
+                    r2 = dr(1)**2 + dr(2)**2 + dr(3)**2
+                    v = xvtemp(3+dir)
+#endif                    
+                    npart = npart + 1
+
+                    if (npart == 1) then
+                       rpos_h(1, 1, thread) = v
+                       rpos_h(2, 1, thread) = r2
+                       
+                    else if ((npart - 1) < nfind) then
+                       m = 1
+                       do while (m < npart)
+                          if (r2 >= rpos(2, m, thread)) exit
+                          m = m+1
+                       enddo
+                       
+                       do while (m < npart)
+                          vswap = rpos_h(1, m, thread)
+                          r2swap = rpos_h(2, m, thread)
+                          rpos_h(1, m, thread) = v
+                          rpos_h(2, m, thread) = r2
+                          v = vswap
+                          r2 = r2swap
+                          m = m+1
+                       enddo
+                       rpos_h(1, npart, thread) = v
+                       rpos_h(2, npart, thread) = r2
+                       
+                    else if (r2 < rpos_h(2, 1, thread)) then
+                       m = 2
+                       do while (m <= nfind)
+                          if (r2 >= rpos_h(2, m, thread)) exit
+                          m = m+1
+                       enddo
+
+                       if (m == 2) then
+                          pb = .false.
+                       else if (rpos_h(2, 1, thread) == rpos_h(2, 2, thread)) then
+                          pb = .true.
+                       else if (pb) then
+                          pb = .false.
+                       endif
+
+                       do mm = 1, m-1
+                          vswap = rpos_h(1, m-mm, thread)
+                          r2swap = rpos_h(2, m-mm, thread)
+                          rpos_h(1, m-mm, thread) = v
+                          rpos_h(2, m-mm, thread) = r2
+                          v = vswap
+                          r2 = r2swap
+                       enddo
+
+                    else if (r2 == rpos_h(2, 1, thread)) then
+                       pb = .true.
+                    endif
+                 enddo !! pp
+#endif
+#ifdef NP_LINLOGMAX
+                 if (npart >= nfind .and. dmax < 0) then
+                    dmax = cell_search_r_max_h(ind)
+                    converged = .true.
+                 endif
+#else
+                 if (npart >= nfind) then
+                    dmax = sqrt(rpos_h(2, 1, thread))
+                    converged = .true.
+                 endif
+#endif                 
+              enddo !! ind
+
+#ifdef NP_LINLOGMAX
+              ipos_h(:npart, thread) =  (/ (ic, ic=1, npart) /)
+              call indexedsort(npart, rpos_h(2,:npart, thread), ipos_h(:npart, thread))
+              v = 0.0
+              r2 = 0.0
+              if (npart > 0) then
+                 do ind = 1, min(nfind,npart)
+                    v = v + rpos_h(1, ipos_h(ind, thread), thread)
+                 enddo
+                 r2 = sqrt(rpos_h(2, ipos_h(min(nfind, npart), thread), thread))
+#ifdef RADIUS
+                 momden(i, j, k) = r2
+#else
+                 momden(i, j, k) = v / real(min(nfind,npart))
+#endif
+                 if (npart > nfind) then
+                    if ( rpos_h(2, ipos_h(nfind+1, thread), thread) == rpos_h(2, ipos_h(nfind, thread), thread) ) then
+                       pb = .true.
+                    endif
+                 endif
+              else
+                 r2 = rnf_buf_h*sqrt(3.0)
+#ifdef RADIUS
+                 momden(i, j, k) = r2
+#endif
+              endif
+#else
+              v = 0.0
+              r2 = 0.0
+              if (npart > 0) then
+                 do ind = 1, min(nfind, npart)
+                    v = v + rpos_h(1, ind, thread)
+                 enddo
+                 r2 = sqrt(rpos_h(2, 1, thread))
+#ifdef RADIUS
+                 momden(i,j,k) = r2
+#else
+                 momden(i,j,k) = v / real(min(nfind, npart))
+#endif
+              else
+                 r2 = rnf_buf_h*sqrt(3.0)
+#ifdef RADIUS
+                 momden(i,j,k) = r2
+#endif
+              endif
+#endif
+              rsum = rsum + r2
+              if (.not. converged ) then
+                 num_notconverged = num_notconverged + 1
+              endif
+
+              if (r2 >= rnf_buf_h) then
+                 corner = corner + 1
+              endif
+
+              if (pb) then
+                 sameR = sameR + 1
+              endif
+
+           enddo !! i
+        enddo !! j
+     enddo !! k
+     !$omp end do  
+
+  endif !! command
+  !$omp end parallel
+
+  call mpi_reduce(num_notconverged, num2, 1, mpi_integer8, mpi_sum, 0, mpi_comm_world, ierr)
+  call mpi_reduce(sameR, num1, 1, mpi_integer8, mpi_sum, 0, mpi_comm_world, ierr)
+  call mpi_reduce(corner, num3, 1, mpi_integer8, mpi_sum, 0, mpi_comm_world, ierr)
+
+  call mpi_reduce(rsum, rsumt, 1, mpi_double_precision, mpi_sum, 0, mpi_comm_world, ierr)
+  rsum = rsumt / nc**3
+
+  time2 = mpi_wtime(ierr)
+
+  if (rank == 0) then
+     write(*,*) 'Finished velocity_density ...'
+
+     if (command == 0) write(*,*) 'command = neutrinos'
+     if (command == 1) write(*,*) 'command = dark matter'
+     if (command == 2) write(*,*) 'command = halos'
+
+     if (glook == g0) write(*,*) 'group = g0'
+     if (glook == g1) write(*,*) 'group = g1'
+
+     write(*,*) 'r_max mean = ', rsum
+
+     if (num2 /= 0) then
+        write(*,*) "WARNING: num_notconverged = ", num2, " ... consider increasing nfine_buf !!"
+        write(*,*) "nfind = ", nfind 
+     endif
+
+     if (num1 /= 0) then
+        write(*,*) 'WARNING: num sameR = ', num1
+     endif
+
+     if (num3 /= 0) then
+        write(*,*) 'WARNING: num in the corner = ', num3
+     endif
+
+     write(*,*) 'Time elapsed : ', time2 - time1
+     write(*,*) '--------------------------'
+  endif
+
+  return
+end subroutine velocity_density_V2
 
 ! -------------------------------------------------------------------------------------------------------
 
 subroutine buffer_momdensity 
-    !
-    ! Accumulate buffer from adjacent nodes into physical volume.
-    !
+  !
+  ! Accumulate buffer from adjacent nodes into physical volume.
+  !
 
-    implicit none
+  implicit none
+  
+  integer :: i
+  integer, dimension(mpi_status_size) :: status, sstatus, rstatus
+  integer :: tag, srequest, rrequest, sierr, rierr, ierr
+  integer, parameter :: num2send = (nc_node_dim + 2)**2
 
-    integer :: i
-    integer, dimension(mpi_status_size) :: status, sstatus, rstatus
-    integer :: tag, srequest, rrequest, sierr, rierr, ierr
-    integer, parameter :: num2send = (nc_node_dim + 2)**2
+  time1 = mpi_wtime(ierr)
 
-    real(8) time1, time2
-    time1 = mpi_wtime(ierr)
-
-        !
-        ! Pass +x
-        ! 
-
-        tag = 111
-
-        momden_send_buff(:, :) = momden(nc_node_dim+1, :, :)
-
-        call mpi_isend(momden_send_buff, num2send, mpi_real, cart_neighbor(6), &
-                   tag, mpi_comm_world, srequest, sierr)
-        call mpi_irecv(momden_recv_buff, num2send, mpi_real, cart_neighbor(5), &
-                   tag, mpi_comm_world, rrequest, rierr)
-        call mpi_wait(srequest, sstatus, sierr)
-        call mpi_wait(rrequest, rstatus, rierr)
-
-        momden(1, :, :) = momden(1, :, :) + momden_recv_buff(:, :)
-
-        !
-        ! Pass -x
-        ! 
-
-        tag = 112
-
-        momden_send_buff(:, :) = momden(0, :, :)
-
-        call mpi_isend(momden_send_buff, num2send, mpi_real, cart_neighbor(5), &
-                   tag, mpi_comm_world, srequest, sierr)
-        call mpi_irecv(momden_recv_buff, num2send, mpi_real, cart_neighbor(6), &
-                   tag, mpi_comm_world, rrequest, rierr)
-        call mpi_wait(srequest, sstatus, sierr)
-        call mpi_wait(rrequest, rstatus, rierr)
-
-        momden(nc_node_dim, :, :) = momden(nc_node_dim, :, :) + momden_recv_buff(:, :)
-
-        !
-        ! Pass +y
-        ! 
-
-        tag = 113
-
-        momden_send_buff(:, :) = momden(:, nc_node_dim+1, :)
-
-        call mpi_isend(momden_send_buff, num2send, mpi_real, cart_neighbor(4), &
-                   tag, mpi_comm_world, srequest, sierr)
-        call mpi_irecv(momden_recv_buff, num2send, mpi_real, cart_neighbor(3), &
-                   tag, mpi_comm_world, rrequest, rierr)
-        call mpi_wait(srequest, sstatus, sierr)
-        call mpi_wait(rrequest, rstatus, rierr)
-
-        momden(:, 1, :) = momden(:, 1, :) + momden_recv_buff(:, :)
-
-        !
-        ! Pass -y
-        ! 
-
-        tag = 114
-
-        momden_send_buff(:, :) = momden(:, 0, :)
-
-        call mpi_isend(momden_send_buff, num2send, mpi_real, cart_neighbor(3), &
-                   tag, mpi_comm_world, srequest, sierr)
-        call mpi_irecv(momden_recv_buff, num2send, mpi_real, cart_neighbor(4), &
-                   tag, mpi_comm_world, rrequest, rierr)
-        call mpi_wait(srequest, sstatus, sierr)
-        call mpi_wait(rrequest, rstatus, rierr)
-
-        momden(:, nc_node_dim, :) = momden(:, nc_node_dim, :) + momden_recv_buff(:, :)
-
-        !
-        ! Pass +z
-        ! 
-
-        tag = 115
-
-        momden_send_buff(:, :) = momden(:, :, nc_node_dim+1)
-
-        call mpi_isend(momden_send_buff, num2send, mpi_real, cart_neighbor(2), &
-                   tag, mpi_comm_world, srequest, sierr)
-        call mpi_irecv(momden_recv_buff, num2send, mpi_real, cart_neighbor(1), &
-                   tag, mpi_comm_world, rrequest, rierr)
-        call mpi_wait(srequest, sstatus, sierr)
-        call mpi_wait(rrequest, rstatus, rierr)
-
-        momden(:, :, 1) = momden(:, :, 1) + momden_recv_buff(:, :)
-
-        !
-        ! Pass -z
-        ! 
-
-        tag = 116
-
-        momden_send_buff(:, :) = momden(:, :, 0)
-
-        call mpi_isend(momden_send_buff, num2send, mpi_real, cart_neighbor(1), &
-                   tag, mpi_comm_world, srequest, sierr)
-        call mpi_irecv(momden_recv_buff, num2send, mpi_real, cart_neighbor(2), &
-                   tag, mpi_comm_world, rrequest, rierr)
-        call mpi_wait(srequest, sstatus, sierr)
-        call mpi_wait(rrequest, rstatus, rierr)
-
-        momden(:, :, nc_node_dim) = momden(:, :, nc_node_dim) + momden_recv_buff(:, :)
-
-    time2 = mpi_wtime(ierr)
-    if (rank == 0) write(*, *) "Finished buffer_momdensity ... elapsed time = ", time2-time1
-
-    return
-
+  !-----------------------------------------------------------
+  ! Pass +x
+  !-----------------------------------------------------------
+  
+  tag = 111
+  
+  momden_send_buff(:, :) = momden(nc_node_dim+1, :, :)
+  
+  call mpi_isend(momden_send_buff, num2send, mpi_real, cart_neighbor(6), &
+       tag, mpi_comm_world, srequest, sierr)
+  call mpi_irecv(momden_recv_buff, num2send, mpi_real, cart_neighbor(5), &
+       tag, mpi_comm_world, rrequest, rierr)
+  call mpi_wait(srequest, sstatus, sierr)
+  call mpi_wait(rrequest, rstatus, rierr)
+  
+  momden(1, :, :) = momden(1, :, :) + momden_recv_buff(:, :)
+  
+  !-----------------------------------------------------------
+  ! Pass -x
+  !-----------------------------------------------------------
+  
+  tag = 112
+  
+  momden_send_buff(:, :) = momden(0, :, :)
+  
+  call mpi_isend(momden_send_buff, num2send, mpi_real, cart_neighbor(5), &
+       tag, mpi_comm_world, srequest, sierr)
+  call mpi_irecv(momden_recv_buff, num2send, mpi_real, cart_neighbor(6), &
+       tag, mpi_comm_world, rrequest, rierr)
+  call mpi_wait(srequest, sstatus, sierr)
+  call mpi_wait(rrequest, rstatus, rierr)
+  
+  momden(nc_node_dim, :, :) = momden(nc_node_dim, :, :) + momden_recv_buff(:, :)
+  
+  !-----------------------------------------------------------
+  ! Pass +y
+  !-----------------------------------------------------------
+  
+  tag = 113
+  
+  momden_send_buff(:, :) = momden(:, nc_node_dim+1, :)
+  
+  call mpi_isend(momden_send_buff, num2send, mpi_real, cart_neighbor(4), &
+       tag, mpi_comm_world, srequest, sierr)
+  call mpi_irecv(momden_recv_buff, num2send, mpi_real, cart_neighbor(3), &
+       tag, mpi_comm_world, rrequest, rierr)
+  call mpi_wait(srequest, sstatus, sierr)
+  call mpi_wait(rrequest, rstatus, rierr)
+  
+  momden(:, 1, :) = momden(:, 1, :) + momden_recv_buff(:, :)
+  
+  !-----------------------------------------------------------
+  ! Pass -y
+  !-----------------------------------------------------------
+  
+  tag = 114
+  
+  momden_send_buff(:, :) = momden(:, 0, :)
+  
+  call mpi_isend(momden_send_buff, num2send, mpi_real, cart_neighbor(3), &
+       tag, mpi_comm_world, srequest, sierr)
+  call mpi_irecv(momden_recv_buff, num2send, mpi_real, cart_neighbor(4), &
+       tag, mpi_comm_world, rrequest, rierr)
+  call mpi_wait(srequest, sstatus, sierr)
+  call mpi_wait(rrequest, rstatus, rierr)
+  
+  momden(:, nc_node_dim, :) = momden(:, nc_node_dim, :) + momden_recv_buff(:, :)
+  
+  !-----------------------------------------------------------
+  ! Pass +z
+  !-----------------------------------------------------------
+  
+  tag = 115
+  
+  momden_send_buff(:, :) = momden(:, :, nc_node_dim+1)
+  
+  call mpi_isend(momden_send_buff, num2send, mpi_real, cart_neighbor(2), &
+       tag, mpi_comm_world, srequest, sierr)
+  call mpi_irecv(momden_recv_buff, num2send, mpi_real, cart_neighbor(1), &
+       tag, mpi_comm_world, rrequest, rierr)
+  call mpi_wait(srequest, sstatus, sierr)
+  call mpi_wait(rrequest, rstatus, rierr)
+  
+  momden(:, :, 1) = momden(:, :, 1) + momden_recv_buff(:, :)
+  
+  !-----------------------------------------------------------
+  ! Pass -z
+  !-----------------------------------------------------------
+  
+  tag = 116
+  
+  momden_send_buff(:, :) = momden(:, :, 0)
+  
+  call mpi_isend(momden_send_buff, num2send, mpi_real, cart_neighbor(1), &
+       tag, mpi_comm_world, srequest, sierr)
+  call mpi_irecv(momden_recv_buff, num2send, mpi_real, cart_neighbor(2), &
+       tag, mpi_comm_world, rrequest, rierr)
+  call mpi_wait(srequest, sstatus, sierr)
+  call mpi_wait(rrequest, rstatus, rierr)
+  
+  momden(:, :, nc_node_dim) = momden(:, :, nc_node_dim) + momden_recv_buff(:, :)
+  
+  time2 = mpi_wtime(ierr)
+  return
 end subroutine buffer_momdensity
 
 ! -------------------------------------------------------------------------------------------------------
 
-#ifdef MOMENTUM
-subroutine buffer_massdensity
-    !
-    ! Accumulate buffer from adjacent nodes into physical volume.
-    !
+subroutine writebuffer_momden
+  !
+  ! Accumulate buffer from physical volume to adjacent nodes.
+  !
 
-    implicit none
+  implicit none
+  
+  integer :: i
+  integer, dimension(mpi_status_size) :: status, sstatus, rstatus
+  integer :: tag, srequest, rrequest, sierr, rierr, ierr
+  integer, parameter :: num2send = (nc_node_dim + 2)**2
 
-    integer, dimension(mpi_status_size) :: status, sstatus, rstatus
-    integer :: tag, srequest, rrequest, sierr, rierr, ierr
-    integer, parameter :: num2send = (nc_node_dim + 2)**2
+  time1 = mpi_wtime(ierr)
 
-    real(8) time1, time2
-    time1 = mpi_wtime(ierr)
-
-    !
-    ! Pass +x
-    ! 
-
-    tag = 111
-
-    massden_send_buff(:, :) = massden(nc_node_dim+1, :, :)
-
-    call mpi_isend(massden_send_buff, num2send, mpi_real, cart_neighbor(6), &
-               tag, mpi_comm_world, srequest, sierr)
-    call mpi_irecv(massden_recv_buff, num2send, mpi_real, cart_neighbor(5), &
-               tag, mpi_comm_world, rrequest, rierr)
-    call mpi_wait(srequest, sstatus, sierr)
-    call mpi_wait(rrequest, rstatus, rierr)
-
-    massden(1, :, :) = massden(1, :, :) + massden_recv_buff(:, :)
-
-    !
-    ! Pass -x
-    ! 
-
-    tag = 112
-
-    massden_send_buff(:, :) = massden(0, :, :)
-
-    call mpi_isend(massden_send_buff, num2send, mpi_real, cart_neighbor(5), &
-               tag, mpi_comm_world, srequest, sierr)
-    call mpi_irecv(massden_recv_buff, num2send, mpi_real, cart_neighbor(6), &
-               tag, mpi_comm_world, rrequest, rierr)
-    call mpi_wait(srequest, sstatus, sierr)
-    call mpi_wait(rrequest, rstatus, rierr)
-
-    massden(nc_node_dim, :, :) = massden(nc_node_dim, :, :) + massden_recv_buff(:, :)
-
-    !
-    ! Pass +y
-    ! 
-
-    tag = 113
-
-    massden_send_buff(:, :) = massden(:, nc_node_dim+1, :)
-
-    call mpi_isend(massden_send_buff, num2send, mpi_real, cart_neighbor(4), &
-               tag, mpi_comm_world, srequest, sierr)
-    call mpi_irecv(massden_recv_buff, num2send, mpi_real, cart_neighbor(3), &
-               tag, mpi_comm_world, rrequest, rierr)
-    call mpi_wait(srequest, sstatus, sierr)
-    call mpi_wait(rrequest, rstatus, rierr)
-
-    massden(:, 1, :) = massden(:, 1, :) + massden_recv_buff(:, :)
-
-    !
-    ! Pass -y
-    ! 
-
-    tag = 114
-
-    massden_send_buff(:, :) = massden(:, 0, :)
-
-    call mpi_isend(massden_send_buff, num2send, mpi_real, cart_neighbor(3), &
-               tag, mpi_comm_world, srequest, sierr)
-    call mpi_irecv(massden_recv_buff, num2send, mpi_real, cart_neighbor(4), &
-               tag, mpi_comm_world, rrequest, rierr)
-    call mpi_wait(srequest, sstatus, sierr)
-    call mpi_wait(rrequest, rstatus, rierr)
-
-    massden(:, nc_node_dim, :) = massden(:, nc_node_dim, :) + massden_recv_buff(:, :)
-
-    !
-    ! Pass +z
-    ! 
-
-    tag = 115
-
-    massden_send_buff(:, :) = massden(:, :, nc_node_dim+1)
-
-    call mpi_isend(massden_send_buff, num2send, mpi_real, cart_neighbor(2), &
-               tag, mpi_comm_world, srequest, sierr)
-    call mpi_irecv(massden_recv_buff, num2send, mpi_real, cart_neighbor(1), &
-               tag, mpi_comm_world, rrequest, rierr)
-    call mpi_wait(srequest, sstatus, sierr)
-    call mpi_wait(rrequest, rstatus, rierr)
-
-    massden(:, :, 1) = massden(:, :, 1) + massden_recv_buff(:, :)
-
-    !
-    ! Pass -z
-    ! 
-
-    tag = 116
-
-    massden_send_buff(:, :) = massden(:, :, 0)
-
-    call mpi_isend(massden_send_buff, num2send, mpi_real, cart_neighbor(1), &
-               tag, mpi_comm_world, srequest, sierr)
-    call mpi_irecv(massden_recv_buff, num2send, mpi_real, cart_neighbor(2), &
-               tag, mpi_comm_world, rrequest, rierr)
-    call mpi_wait(srequest, sstatus, sierr)
-    call mpi_wait(rrequest, rstatus, rierr)
-
-    massden(:, :, nc_node_dim) = massden(:, :, nc_node_dim) + massden_recv_buff(:, :)
-
-    time2 = mpi_wtime(ierr)
-    if (rank == 0) write(*, *) "Finished buffer_massdensity ... elapsed time = ", time2-time1
-
-    return
-
-end subroutine buffer_massdensity
-#endif
+  !------------------------------------------------------------
+  ! Pass +x
+  !------------------------------------------------------------
+  
+  tag = 111
+  
+  momden_send_buff(:, :) = momden(nc_node_dim, :, :)
+  
+  call mpi_isend(momden_send_buff, num2send, mpi_real, cart_neighbor(6), &
+       tag, mpi_comm_world, srequest, sierr)
+  call mpi_irecv(momden_recv_buff, num2send, mpi_real, cart_neighbor(5), &
+       tag, mpi_comm_world, rrequest, rierr)
+  call mpi_wait(srequest, sstatus, sierr)
+  call mpi_wait(rrequest, rstatus, rierr)
+  
+  momden(0, :, :) = momden_recv_buff(:, :)
+  
+  !------------------------------------------------------------
+  ! Pass -x
+  !------------------------------------------------------------
+  
+  tag = 112
+  
+  momden_send_buff(:, :) = momden(1, :, :)
+  
+  call mpi_isend(momden_send_buff, num2send, mpi_real, cart_neighbor(5), &
+       tag, mpi_comm_world, srequest, sierr)
+  call mpi_irecv(momden_recv_buff, num2send, mpi_real, cart_neighbor(6), &
+       tag, mpi_comm_world, rrequest, rierr)
+  call mpi_wait(srequest, sstatus, sierr)
+  call mpi_wait(rrequest, rstatus, rierr)
+  
+  momden(nc_node_dim+1, :, :) = momden_recv_buff(:, :)
+  
+  !------------------------------------------------------------
+  ! Pass +y
+  !------------------------------------------------------------
+  
+  tag = 113
+  
+  momden_send_buff(:, :) = momden(:, nc_node_dim, :)
+  
+  call mpi_isend(momden_send_buff, num2send, mpi_real, cart_neighbor(4), &
+       tag, mpi_comm_world, srequest, sierr)
+  call mpi_irecv(momden_recv_buff, num2send, mpi_real, cart_neighbor(3), &
+       tag, mpi_comm_world, rrequest, rierr)
+  call mpi_wait(srequest, sstatus, sierr)
+  call mpi_wait(rrequest, rstatus, rierr)
+  
+  momden(:, 0, :) = momden_recv_buff(:, :)
+  
+  !------------------------------------------------------------
+  ! Pass -y
+  !------------------------------------------------------------
+  
+  tag = 114
+  
+  momden_send_buff(:, :) = momden(:, 1, :)
+  
+  call mpi_isend(momden_send_buff, num2send, mpi_real, cart_neighbor(3), &
+       tag, mpi_comm_world, srequest, sierr)
+  call mpi_irecv(momden_recv_buff, num2send, mpi_real, cart_neighbor(4), &
+       tag, mpi_comm_world, rrequest, rierr)
+  call mpi_wait(srequest, sstatus, sierr)
+  call mpi_wait(rrequest, rstatus, rierr)
+  
+  momden(:, nc_node_dim+1, :) = momden_recv_buff(:, :)
+  
+  !------------------------------------------------------------
+  ! Pass +z
+  !------------------------------------------------------------
+  
+  tag = 115
+  
+  momden_send_buff(:, :) = momden(:, :, nc_node_dim)
+  
+  call mpi_isend(momden_send_buff, num2send, mpi_real, cart_neighbor(2), &
+       tag, mpi_comm_world, srequest, sierr)
+  call mpi_irecv(momden_recv_buff, num2send, mpi_real, cart_neighbor(1), &
+       tag, mpi_comm_world, rrequest, rierr)
+  call mpi_wait(srequest, sstatus, sierr)
+  call mpi_wait(rrequest, rstatus, rierr)
+  
+  momden(:, :, 0) = momden_recv_buff(:, :)
+  
+  !------------------------------------------------------------
+  ! Pass -z
+  !------------------------------------------------------------
+  
+  tag = 116
+  
+  momden_send_buff(:, :) = momden(:, :, 1)
+  
+  call mpi_isend(momden_send_buff, num2send, mpi_real, cart_neighbor(1), &
+       tag, mpi_comm_world, srequest, sierr)
+  call mpi_irecv(momden_recv_buff, num2send, mpi_real, cart_neighbor(2), &
+       tag, mpi_comm_world, rrequest, rierr)
+  call mpi_wait(srequest, sstatus, sierr)
+  call mpi_wait(rrequest, rstatus, rierr)
+  
+  momden(:, :, nc_node_dim+1) = momden_recv_buff(:, :)
+  
+  time2 = mpi_wtime(ierr)
+  return
+end subroutine writebuffer_momden
 
 ! -------------------------------------------------------------------------------------------------------
 
@@ -3790,8 +5296,9 @@ end subroutine buffer_massdensity
     real :: k1r
 #endif
 
-    real(8) time1, time2
     time1 = mpi_wtime(ierr)
+    
+    if (rank == 0) write(*,*) 'Starting powerspectrum ... '
 
     pkt = 0.0
     pktsum = 0.0
@@ -3968,84 +5475,2296 @@ end subroutine buffer_massdensity
     call mpi_bcast(pk,3*nc,mpi_real,0,mpi_comm_world,ierr)
 
     time2 = mpi_wtime(ierr)
-    if (rank == 0) write(*, *) "Finished powerspectrum ... elapsed time = ", time2-time1
-
+    if (rank == 0) then
+       write(*,*) 'Finished powerspectrum ... '
+       write(*,*) 'Elapsed time = ', time2 - time1
+       write(*,*) '--------------------------'
+    endif
     return
 
   end subroutine powerspectrum
 
 ! -------------------------------------------------------------------------------------------------------
 
-subroutine writevelocityfield(command)
+subroutine writevelocityfield(command, component, cubeOrMomden)
+  !
+  ! Writes the velocity field for the given component
+  !
 
-    implicit none
+  implicit none
 
-    integer :: m, i, j, k, fstat
-    character(len=180) :: fn
-    character(len=7)   :: z_write
-    character(len=4)   :: rank_string
-    character(len=1)   :: dim_string
-    real :: vsim2phys, zcur
+  integer :: j, k, fstat
+  character(len=180) :: fn
+  character(len=7)   :: z_write
+  character(len=4)   :: rank_string
+  real :: vsim2phys, zcur
+  integer :: command, component, cubeOrMomden
 
-    integer :: command
+  !------------------------------------------------------------
+  ! Determine conversion to proper velocity [km/s]
+  !------------------------------------------------------------
 
-    !
-    ! Determine conversion to proper velocity [km/s]
-    !
+  if (rank == 0)  zcur = z_checkpoint(cur_checkpoint)
+  call mpi_bcast(zcur, 1, mpi_real, 0, mpi_comm_world, ierr)
 
-    if (rank == 0)  zcur = z_checkpoint(cur_checkpoint)
-    call mpi_bcast(zcur, 1, mpi_real, 0, mpi_comm_world, ierr)
+  vsim2phys = 300. * sqrt(omega_m) * box * (1. + zcur) / 2. / nc
 
-    vsim2phys = 300. * sqrt(omega_m) * box * (1. + zcur) / 2. / nc
+  !------------------------------------------------------------
+  ! Checkpoint and rank strings
+  !------------------------------------------------------------
 
-    if (rank == 0) write(*,*) "zcur = ", zcur, "vsim2phys = ", vsim2phys
+  write(z_write, '(f7.3)') zcur
+  z_write = adjustl(z_write)
+  
+  write(rank_string, '(i4)') rank
+  rank_string = adjustl(rank_string)
 
-    !
-    ! Checkpoint and rank strings
-    !
+  !------------------------------------------------------------
+  ! Write out velocity field for each dimension
+  !------------------------------------------------------------
 
-    write(z_write, '(f7.3)') zcur
-    z_write = adjustl(z_write)
+  if (command == 0) then
+     fn = '_nu.bin'
+  else if (command == 1) then
+     fn = '_dm.bin'
+  else if (command == 2) then
+     fn = '_halo.bin'
+  else if (command == 3) then
+     fn = '_dmlin.bin'
+  else if (command == 4) then
+     fn = '_halolin.bin'
+  else if (command == 5) then
+     fn = '_nudm.bin'
+  else if (command == 6) then
+     fn = '_nuh.bin'
+  else
+     fn = '.bin'
+  endif
 
-    write(rank_string, '(i4)') rank
-    rank_string = adjustl(rank_string)
+  fn = rank_string(1:len_trim(rank_string))//fn
 
-    !
-    ! Write out velocity field for each dimension
-    !
+  if (component == 1) then
+     fn = 'x'//fn
+  else if (component == 2) then
+     fn = 'y'//fn
+  else if (component == 3) then
+     fn = 'z'//fn
+  endif
 
-        m = cur_dimension 
+  fn = output_path//'node'//rank_string(1:len_trim(rank_string))//'/'//z_write(1:len_trim(z_write))//'vel'//fn
 
-        if (m == 1) dim_string = "x"
-        if (m == 2) dim_string = "y"
-        if (m == 3) dim_string = "z"
+  open(unit=11, file=fn, status="replace", iostat=fstat, access="stream") 
 
-        if (command == 0) then
-            fn = output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_write(1:len_trim(z_write))//&
-                 "vel"//dim_string//&
-                 rank_string(1:len_trim(rank_string))//"_nu.bin"
-        else
-            fn = output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_write(1:len_trim(z_write))//&
-                 "vel"//dim_string//&
-                 rank_string(1:len_trim(rank_string))//".bin"
-        endif
-
-        open(unit=11, file=fn, status="replace", iostat=fstat, access="stream") 
-
-        do k = 1, nc_node_dim
-            do j = 1, nc_node_dim
-
-                write(11) momden(1:nc_node_dim, j, k) * vsim2phys
-
-            enddo
+  if (cubeOrMomden == 0) then
+     do k = 1, nc_node_dim
+        do j = 1, nc_node_dim
+#ifndef RADIUS      
+           write(11) momden(1:nc_node_dim, j, k) * vsim2phys
+#else
+           write(11) momden(1:nc_node_dim, j, k)
+#endif
         enddo
+     enddo
 
-        close(11)
+  else if (cubeOrMomden == 1) then
+     do k = 1, nc_node_dim
+        do j = 1, nc_node_dim      
+           write(11) cube(1:nc_node_dim, j, k) * vsim2phys
+        enddo
+     enddo
+  endif
 
-    return
+  close(11)
 
+  if (rank == 0) then
+     write(*,*) 'Writing velocity field to file ...'
+     write(*,*) 'file : ', fn
+     write(*,*) '--------------------------'
+  endif
+
+  return
 end subroutine writevelocityfield
 
 ! -------------------------------------------------------------------------------------------------------
 
-end program cic_velpower 
+subroutine writedensityfield(command, cubeOrMomden)
+  !
+  ! Writes the density field 
+  !
+
+  implicit none
+
+  integer :: j, k, fstat
+  character(len=180) :: fn
+  character(len=7)   :: z_write
+  character(len=4)   :: rank_string
+  real :: zcur
+  integer :: command, cubeOrMomden
+
+  !------------------------------------------------------------
+  ! Determine redshift
+  !------------------------------------------------------------
+
+  if (rank == 0)  zcur = z_checkpoint(cur_checkpoint)
+  call mpi_bcast(zcur, 1, mpi_real, 0, mpi_comm_world, ierr)
+
+  !------------------------------------------------------------
+  ! Checkpoint and rank strings
+  !------------------------------------------------------------
+
+  write(z_write, '(f7.3)') zcur
+  z_write = adjustl(z_write)
+  
+  write(rank_string, '(i4)') rank
+  rank_string = adjustl(rank_string)
+
+  !------------------------------------------------------------
+  ! Write out density field for each dimension
+  !------------------------------------------------------------
+
+  if (command == 0) then
+     fn = '_nu.bin'
+  else if (command == 1) then
+     fn = '_dm.bin'
+  else if (command == 2) then
+     fn = '_halo.bin'
+  else if (command == 3) then
+     fn = '_dmlin.bin'
+  else if (command == 4) then
+     fn = '_halolin.bin'
+  else if (command == 5) then
+     fn = '_nudm.bin'
+  else if (command == 6) then
+     fn = '_nuh.bin'
+  else
+     fn = '.bin'
+  endif
+
+  fn = rank_string(1:len_trim(rank_string))//fn
+
+  fn = output_path//'node'//rank_string(1:len_trim(rank_string))//'/'//z_write(1:len_trim(z_write))//'den'//fn
+
+  open(unit=11, file=fn, status="replace", iostat=fstat, access="stream") 
+
+  if (cubeOrMomden == 0) then
+     do k = 1, nc_node_dim
+        do j = 1, nc_node_dim
+           write(11) momden(1:nc_node_dim, j, k)
+        enddo
+     enddo
+
+  else if (cubeOrMomden == 1) then
+     do k = 1, nc_node_dim
+        do j = 1, nc_node_dim      
+           write(11) cube(1:nc_node_dim, j, k)
+        enddo
+     enddo
+  endif
+
+  close(11)
+
+  if (rank == 0) then
+     write(*,*) 'Writing density field to file ...'
+     write(*,*) 'file : ', fn
+     write(*,*) '--------------------------'
+  endif
+
+  return
+end subroutine writedensityfield
+
+! -------------------------------------------------------------------------------------------------------
+
+#ifdef UCCFD
+subroutine densityfield(command, glook)
+#else
+subroutine densityfield_V2(command, glook)
+#endif
+  !
+  ! Compute the density field for the given species and given group
+  !
+
+  implicit none
+  real       :: mp,xvtemp(3),dx1(3),dx2(3)
+  integer    :: ic,jc,kc,pp,pp_up,pp_down,pp_down0,index1(3),index2(3),command, thread
+  integer(1) :: glook
+
+  time1 = mpi_wtime(ierr)
+
+  if (command == 0) then
+     mp = ncr**3 / real(np_groups_tot(glook))
+  else if (command == 1) then
+     mp = ncr**3 / real(np_groups_tot_dm(glook))
+  else if (command == 2) then
+     mp = ncr**3 / real(np_groups_tot_h(glook))
+  endif
+  
+  !------------------------------------------------------------
+  ! Initialize to zero + remake hoc
+  !------------------------------------------------------------
+
+  call remake_hoc(command, glook)
+
+  !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                 
+  do kt = 0, nc_node_dim+1
+     momden(:,:,kt) = 0.0
+  enddo
+  !$omp end parallel do
+
+  if (glook == g0) then
+     pp_down0 = 1
+  else if (glook == g1) then
+     if (command == 0) then
+        pp_down0 = max_np + 1 - np_groups(g1) - np_buf_groups(g1)
+     else if (command == 1) then
+        pp_down0 = max_np_dm + 1 - np_groups_dm(g1) - np_buf_groups_dm(g1)
+     else if (command == 2) then
+        pp_down0 = max_np_h + 1 - np_groups_h(g1) - np_buf_groups_h(g1)
+     endif
+  endif
+
+  !------------------------------------------------------------
+  ! Assign mass to grid cell
+  !------------------------------------------------------------
+
+  thread = 1
+
+  if (command == 0) then
+     
+     ! In principle, this could be omp-threaded
+     ! since fine mesh cells are included in coarse cells.
+    
+     do kc = 0, nm_node_dim+1 
+        !! we here assume nfine_buf > 0, with this, you avoid to have to call buffer_momdensity after density_field
+        !! if, in subroutine mesh_buffer, we ONLY send the nearest particles, this part would have to become do kc = 1, nc_node_dim
+        !! and we would have to call a buffer_momdensity at the end 
+
+        do jc = 0, nm_node_dim+1
+           do ic = 0, nm_node_dim+1
+              
+              if ( ic == hoc_nc_l .and. jc == hoc_nc_l .and. kc == hoc_nc_l ) then
+                 pp_down = pp_down0
+                 pp_up = hoc(ic,jc,kc)
+              else if (ic == hoc_nc_l .and. jc == hoc_nc_l) then
+                 pp_down = hoc(hoc_nc_h, hoc_nc_h, kc-1) + 1
+                 pp_up = hoc(hoc_nc_l, hoc_nc_l, kc)
+              else if (ic == hoc_nc_l) then
+                 pp_down = hoc(hoc_nc_h, jc-1, kc) + 1
+                 pp_up = hoc(hoc_nc_l, jc, kc)
+              else
+                 pp_down = hoc(ic-1, jc, kc) + 1
+                 pp_up = hoc(ic, jc, kc)
+              endif
+
+#ifdef NP_FAST
+              if ( (pp_up - pp_down + 1) > max_npart_cell_search) then
+                 write(*,*) "ERROR: npart > max_npart_cell_search. Consider increasing max_npart_cell_search !!", max_npart_cell_search
+                 call mpi_abort(mpi_comm_world, ierr, ierr)
+              endif
+
+              !! Copy the particles to a temporary array
+              xvp_cell(1:3,1:(pp_up - pp_down + 1),thread) = xvp(1:3,pp_down:pp_up)
+
+              do pp = 1,(pp_up - pp_down + 1)
+                 index1(1:3) = 1 + floor(xvp_cell(1:3, pp, thread) - 0.5)
+#else
+              do pp = pp_down, pp_up
+                 xvtemp(1:3) = xvp(1:3,pp) - 0.5
+                 index1(1:3) = 1 + floor(xvtemp(1:3))
+#endif
+                 index2(1:3) = 1 + index1(1:3)
+                 dx1(1:3) = real(index1(1:3)) - xvtemp(1:3)
+                 dx2(1:3) = 1.0 - dx1(1:3)
+
+                 if ( index1(1) >= 0 .and. index2(1) <= nc_node_dim + 1 .and. &
+                      index1(2) >= 0 .and. index2(2) <= nc_node_dim + 1 .and. &
+                      index1(3) >= 0 .and. index2(3) <= nc_node_dim + 1 ) then
+                    
+                    momden(index1(1),index1(2),index1(3)) = momden(index1(1),index1(2),index1(3)) +mp*dx1(1)*dx1(2)*dx1(3)
+                    momden(index1(1),index1(2),index2(3)) = momden(index1(1),index1(2),index2(3)) +mp*dx1(1)*dx1(2)*dx2(3)
+                    momden(index1(1),index2(2),index1(3)) = momden(index1(1),index2(2),index1(3)) +mp*dx1(1)*dx2(2)*dx1(3)
+                    momden(index1(1),index2(2),index2(3)) = momden(index1(1),index2(2),index2(3)) +mp*dx1(1)*dx2(2)*dx2(3)
+
+                    momden(index2(1),index1(2),index1(3)) = momden(index2(1),index1(2),index1(3)) +mp*dx2(1)*dx1(2)*dx1(3)
+                    momden(index2(1),index1(2),index2(3)) = momden(index2(1),index1(2),index2(3)) +mp*dx2(1)*dx1(2)*dx2(3)
+                    momden(index2(1),index2(2),index1(3)) = momden(index2(1),index2(2),index1(3)) +mp*dx2(1)*dx2(2)*dx1(3)
+                    momden(index2(1),index2(2),index2(3)) = momden(index2(1),index2(2),index2(3)) +mp*dx2(1)*dx2(2)*dx2(3)
+
+                 endif
+              enddo !!pp
+           enddo !! i
+        enddo !! j
+     enddo !! k
+
+  else if (command == 1) then
+     
+     do kc = 0, nm_node_dim+1
+        do jc = 0, nm_node_dim+1
+           do ic = 0, nm_node_dim+1
+              
+              if ( ic == hoc_nc_l .and. jc == hoc_nc_l .and. kc == hoc_nc_l ) then
+                 pp_down = pp_down0
+                 pp_up = hoc_dm(ic,jc,kc)
+              else if (ic == hoc_nc_l .and. jc == hoc_nc_l) then
+                 pp_down = hoc_dm(hoc_nc_h, hoc_nc_h, kc-1) + 1
+                 pp_up = hoc_dm(hoc_nc_l, hoc_nc_l, kc)
+              else if (ic == hoc_nc_l) then
+                 pp_down = hoc_dm(hoc_nc_h, jc-1, kc) + 1
+                 pp_up = hoc_dm(hoc_nc_l, jc, kc)
+              else
+                 pp_down = hoc_dm(ic-1, jc, kc) + 1
+                 pp_up = hoc_dm(ic, jc, kc)
+              endif
+
+#ifdef NP_FAST
+              if ( (pp_up - pp_down + 1) > max_npart_cell_search) then
+                 write(*,*) "ERROR: npart > max_npart_cell_search. Consider increasing max_npart_cell_search !!", max_npart_cell_search
+                 call mpi_abort(mpi_comm_world, ierr, ierr)
+              endif
+
+              xvp_cell(1:3,1:(pp_up - pp_down + 1),thread) = xvp_dm(1:3,pp_down:pp_up)
+
+              do pp = 1,(pp_up - pp_down + 1)
+                 index1(1:3) = 1 + floor(xvp_cell(1:3, pp, thread) - 0.5)
+#else
+              do pp = pp_down, pp_up
+                 xvtemp(1:3) = xvp_dm(1:3,pp) - 0.5
+                 index1(1:3) = 1 + floor(xvtemp(1:3))
+#endif
+                 index2(1:3) = 1 + index1(1:3)
+                 dx1(1:3) = real(index1(1:3)) - xvtemp(1:3)
+                 dx2(1:3) = 1.0 - dx1(1:3)
+
+                 if ( index1(1) >= 0 .and. index2(1) <= nc_node_dim + 1 .and. &
+                      index1(2) >= 0 .and. index2(2) <= nc_node_dim + 1 .and. &
+                      index1(3) >= 0 .and. index2(3) <= nc_node_dim + 1 ) then
+                    
+                    momden(index1(1),index1(2),index1(3)) = momden(index1(1),index1(2),index1(3)) +mp*dx1(1)*dx1(2)*dx1(3)
+                    momden(index1(1),index1(2),index2(3)) = momden(index1(1),index1(2),index2(3)) +mp*dx1(1)*dx1(2)*dx2(3)
+                    momden(index1(1),index2(2),index1(3)) = momden(index1(1),index2(2),index1(3)) +mp*dx1(1)*dx2(2)*dx1(3)
+                    momden(index1(1),index2(2),index2(3)) = momden(index1(1),index2(2),index2(3)) +mp*dx1(1)*dx2(2)*dx2(3)
+
+                    momden(index2(1),index1(2),index1(3)) = momden(index2(1),index1(2),index1(3)) +mp*dx2(1)*dx1(2)*dx1(3)
+                    momden(index2(1),index1(2),index2(3)) = momden(index2(1),index1(2),index2(3)) +mp*dx2(1)*dx1(2)*dx2(3)
+                    momden(index2(1),index2(2),index1(3)) = momden(index2(1),index2(2),index1(3)) +mp*dx2(1)*dx2(2)*dx1(3)
+                    momden(index2(1),index2(2),index2(3)) = momden(index2(1),index2(2),index2(3)) +mp*dx2(1)*dx2(2)*dx2(3)
+
+                 endif
+              enddo !!pp
+           enddo !! i
+        enddo !! j
+     enddo !! k
+
+  else if (command == 2) then
+     
+     do kc = 0, nm_node_dim_h+1
+        do jc = 0, nm_node_dim_h+1
+           do ic = 0, nm_node_dim_h+1
+              
+              if ( ic == hoc_nc_l_h .and. jc == hoc_nc_l_h .and. kc == hoc_nc_l_h ) then
+                 pp_down = pp_down0
+                 pp_up = hoc_h(ic,jc,kc)
+              else if (ic == hoc_nc_l_h .and. jc == hoc_nc_l_h) then
+                 pp_down = hoc_h(hoc_nc_h_h, hoc_nc_h_h, kc-1) + 1
+                 pp_up = hoc_h(hoc_nc_l_h, hoc_nc_l_h, kc)
+              else if (ic == hoc_nc_l_h) then
+                 pp_down = hoc_h(hoc_nc_h_h, jc-1, kc) + 1
+                 pp_up = hoc_h(hoc_nc_l_h, jc, kc)
+              else
+                 pp_down = hoc_h(ic-1, jc, kc) + 1
+                 pp_up = hoc_h(ic, jc, kc)
+              endif
+
+#ifdef NP_FAST
+              if ( (pp_up - pp_down + 1) > max_npart_cell_search_h) then
+                 write(*,*) "ERROR: npart > max_npart_search_h. Consider increasing max_npart_search !!", max_npart_cell_search_h
+                 call mpi_abort(mpi_comm_world, ierr, ierr)
+              endif
+
+              xvp_cell_h(:,1:(pp_up - pp_down + 1), thread) = xvmp_h(:,pp_down:pp_up)
+
+              do pp = 1,(pp_up - pp_down + 1)
+                 index1(1:3) = 1 + floor(xvp_cell_h(1:3, pp, thread) - 0.5)
+#else
+              do pp = pp_down, pp_up
+                 xvtemp(1:3) = xvmp_h(1:3,pp) - 0.5
+                 index1(1:3) = 1 + floor(xvtemp(1:3))
+#endif
+                 index2(1:3) = 1 + index1(1:3)
+                 dx1(1:3) = real(index1(1:3)) - xvtemp(1:3)
+                 dx2(1:3) = 1.0 - dx1(1:3)
+
+                 if ( index1(1) >= 0 .and. index2(1) <= nc_node_dim + 1 .and. &
+                      index1(2) >= 0 .and. index2(2) <= nc_node_dim + 1 .and. &
+                      index1(3) >= 0 .and. index2(3) <= nc_node_dim + 1 ) then
+                    
+                    momden(index1(1),index1(2),index1(3)) = momden(index1(1),index1(2),index1(3)) +mp*dx1(1)*dx1(2)*dx1(3)
+                    momden(index1(1),index1(2),index2(3)) = momden(index1(1),index1(2),index2(3)) +mp*dx1(1)*dx1(2)*dx2(3)
+                    momden(index1(1),index2(2),index1(3)) = momden(index1(1),index2(2),index1(3)) +mp*dx1(1)*dx2(2)*dx1(3)
+                    momden(index1(1),index2(2),index2(3)) = momden(index1(1),index2(2),index2(3)) +mp*dx1(1)*dx2(2)*dx2(3)
+
+                    momden(index2(1),index1(2),index1(3)) = momden(index2(1),index1(2),index1(3)) +mp*dx2(1)*dx1(2)*dx1(3)
+                    momden(index2(1),index1(2),index2(3)) = momden(index2(1),index1(2),index2(3)) +mp*dx2(1)*dx1(2)*dx2(3)
+                    momden(index2(1),index2(2),index1(3)) = momden(index2(1),index2(2),index1(3)) +mp*dx2(1)*dx2(2)*dx1(3)
+                    momden(index2(1),index2(2),index2(3)) = momden(index2(1),index2(2),index2(3)) +mp*dx2(1)*dx2(2)*dx2(3)
+
+                 endif
+              enddo !!pp
+           enddo !! i
+        enddo !! j
+     enddo !! k
+
+  endif !! command
+
+
+  time2 = mpi_wtime(ierr)
+
+  if (rank == 0) then
+     write(*,*) 'Finished densityfield ...'
+     write(*,*) 'Time elapsed : ', time2 - time1
+     write(*,*) '--------------------------'
+  endif
+  return
+
+#ifdef UCCFD
+end subroutine densityfield
+#else
+end subroutine densityfield_V2
+#endif
+
+! -------------------------------------------------------------------------------------------------------
+#ifdef UCCFD
+subroutine densityfield_V2(command, glook)
+#else
+subroutine densityfield(command, glook)
+#endif
+  !
+  ! Alternative method that does not use the coarse grid
+  !
+
+  implicit none
+  real       :: mp,xvtemp(3),dx1(3),dx2(3)
+  integer    :: pp,pp_up,pp_down,index1(3),index2(3),command
+  integer(1) :: glook
+
+  time1 = mpi_wtime(ierr)
+
+  if (command == 0) then
+     mp = ncr**3 / real(np_groups_tot(glook))
+  else if (command == 1) then
+     mp = ncr**3 / real(np_groups_tot_dm(glook))
+  else if (command == 2) then
+     mp = ncr**3 / real(np_groups_tot_h(glook))
+  endif
+  
+  !------------------------------------------------------------
+  ! Initialize to zero 
+  !------------------------------------------------------------
+
+  !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                 
+  do kt = 0, nc_node_dim+1
+     momden(:,:,kt) = 0.0
+  enddo
+  !$omp end parallel do
+
+  if (glook == g0) then
+     pp_down = 1
+     if (command == 0) then
+        pp_up = np_groups(g0) + np_buf_groups(g0)
+     else if (command == 1) then
+        pp_up = np_groups_dm(g0) + np_buf_groups_dm(g0)
+     else if (command == 2) then
+        pp_up = np_groups_h(g0) + np_buf_groups_h(g0)
+     endif
+
+  else if (glook == g1) then
+     if (command == 0) then
+        pp_down = max_np + 1 - np_groups(g1) - np_buf_groups(g1)
+        pp_up = max_np
+     else if (command == 1) then
+        pp_down = max_np_dm + 1 - np_groups_dm(g1) - np_buf_groups_dm(g1)
+        pp_up = max_np_dm
+     else if (command == 2) then
+        pp_down = max_np_h + 1 - np_groups_h(g1) - np_buf_groups_h(g1)
+        pp_up = max_np_h
+     endif
+  endif
+
+  !------------------------------------------------------------
+  ! Assign mass to grid cell
+  !------------------------------------------------------------
+
+  if (command == 0) then
+     
+     do pp = pp_down, pp_up
+        xvtemp(1:3) = xvp(1:3,pp) - 0.5
+        index1(1:3) = 1 + floor(xvtemp(1:3))
+        index2(1:3) = 1 + index1(1:3)
+        dx1(1:3) = real(index1(1:3)) - xvtemp(1:3)
+        dx2(1:3) = 1.0 - dx1(1:3)
+        
+        if ( index1(1) >= 0 .and. index2(1) <= nc_node_dim + 1 .and. &
+             index1(2) >= 0 .and. index2(2) <= nc_node_dim + 1 .and. &
+             index1(3) >= 0 .and. index2(3) <= nc_node_dim + 1 ) then
+           
+           momden(index1(1),index1(2),index1(3)) = momden(index1(1),index1(2),index1(3)) +mp*dx1(1)*dx1(2)*dx1(3)
+           momden(index1(1),index1(2),index2(3)) = momden(index1(1),index1(2),index2(3)) +mp*dx1(1)*dx1(2)*dx2(3)
+           momden(index1(1),index2(2),index1(3)) = momden(index1(1),index2(2),index1(3)) +mp*dx1(1)*dx2(2)*dx1(3)
+           momden(index1(1),index2(2),index2(3)) = momden(index1(1),index2(2),index2(3)) +mp*dx1(1)*dx2(2)*dx2(3)
+           
+           momden(index2(1),index1(2),index1(3)) = momden(index2(1),index1(2),index1(3)) +mp*dx2(1)*dx1(2)*dx1(3)
+           momden(index2(1),index1(2),index2(3)) = momden(index2(1),index1(2),index2(3)) +mp*dx2(1)*dx1(2)*dx2(3)
+           momden(index2(1),index2(2),index1(3)) = momden(index2(1),index2(2),index1(3)) +mp*dx2(1)*dx2(2)*dx1(3)
+           momden(index2(1),index2(2),index2(3)) = momden(index2(1),index2(2),index2(3)) +mp*dx2(1)*dx2(2)*dx2(3)
+
+        endif
+     enddo !!pp
+     
+  else if (command == 1) then
+     
+     do pp = pp_down, pp_up
+        xvtemp(1:3) = xvp_dm(1:3,pp) - 0.5
+        index1(1:3) = 1 + floor(xvtemp(1:3))
+        index2(1:3) = 1 + index1(1:3)
+        dx1(1:3) = real(index1(1:3)) - xvtemp(1:3)
+        dx2(1:3) = 1.0 - dx1(1:3)
+        
+        if ( index1(1) >= 0 .and. index2(1) <= nc_node_dim + 1 .and. &
+             index1(2) >= 0 .and. index2(2) <= nc_node_dim + 1 .and. &
+             index1(3) >= 0 .and. index2(3) <= nc_node_dim + 1 ) then
+           
+           momden(index1(1),index1(2),index1(3)) = momden(index1(1),index1(2),index1(3)) +mp*dx1(1)*dx1(2)*dx1(3)
+           momden(index1(1),index1(2),index2(3)) = momden(index1(1),index1(2),index2(3)) +mp*dx1(1)*dx1(2)*dx2(3)
+           momden(index1(1),index2(2),index1(3)) = momden(index1(1),index2(2),index1(3)) +mp*dx1(1)*dx2(2)*dx1(3)
+           momden(index1(1),index2(2),index2(3)) = momden(index1(1),index2(2),index2(3)) +mp*dx1(1)*dx2(2)*dx2(3)
+           
+           momden(index2(1),index1(2),index1(3)) = momden(index2(1),index1(2),index1(3)) +mp*dx2(1)*dx1(2)*dx1(3)
+           momden(index2(1),index1(2),index2(3)) = momden(index2(1),index1(2),index2(3)) +mp*dx2(1)*dx1(2)*dx2(3)
+           momden(index2(1),index2(2),index1(3)) = momden(index2(1),index2(2),index1(3)) +mp*dx2(1)*dx2(2)*dx1(3)
+           momden(index2(1),index2(2),index2(3)) = momden(index2(1),index2(2),index2(3)) +mp*dx2(1)*dx2(2)*dx2(3)
+
+        endif
+     enddo !!pp
+
+  else if (command == 2) then
+     
+     do pp = pp_down, pp_up
+        xvtemp(1:3) = xvmp_h(1:3,pp) - 0.5
+        index1(1:3) = 1 + floor(xvtemp(1:3))
+        index2(1:3) = 1 + index1(1:3)
+        dx1(1:3) = real(index1(1:3)) - xvtemp(1:3)
+        dx2(1:3) = 1.0 - dx1(1:3)
+        
+        if ( index1(1) >= 0 .and. index2(1) <= nc_node_dim + 1 .and. &
+             index1(2) >= 0 .and. index2(2) <= nc_node_dim + 1 .and. &
+             index1(3) >= 0 .and. index2(3) <= nc_node_dim + 1 ) then
+           
+           momden(index1(1),index1(2),index1(3)) = momden(index1(1),index1(2),index1(3)) +mp*dx1(1)*dx1(2)*dx1(3)
+           momden(index1(1),index1(2),index2(3)) = momden(index1(1),index1(2),index2(3)) +mp*dx1(1)*dx1(2)*dx2(3)
+           momden(index1(1),index2(2),index1(3)) = momden(index1(1),index2(2),index1(3)) +mp*dx1(1)*dx2(2)*dx1(3)
+           momden(index1(1),index2(2),index2(3)) = momden(index1(1),index2(2),index2(3)) +mp*dx1(1)*dx2(2)*dx2(3)
+           
+           momden(index2(1),index1(2),index1(3)) = momden(index2(1),index1(2),index1(3)) +mp*dx2(1)*dx1(2)*dx1(3)
+           momden(index2(1),index1(2),index2(3)) = momden(index2(1),index1(2),index2(3)) +mp*dx2(1)*dx1(2)*dx2(3)
+           momden(index2(1),index2(2),index1(3)) = momden(index2(1),index2(2),index1(3)) +mp*dx2(1)*dx2(2)*dx1(3)
+           momden(index2(1),index2(2),index2(3)) = momden(index2(1),index2(2),index2(3)) +mp*dx2(1)*dx2(2)*dx2(3)
+
+        endif
+     enddo !!pp
+     
+  endif !! command
+
+  time2 = mpi_wtime(ierr)
+
+  if (rank == 0) then
+     write(*,*) 'Finished densityfield_V2 ...'
+     write(*,*) 'Time elapsed : ', time2 - time1
+     write(*,*) '--------------------------'
+  endif
+  return
+
+#ifdef UCCFD
+end subroutine densityfield_V2
+#else
+end subroutine densityfield
+#endif
+
+! -------------------------------------------------------------------------------------------------------
+
+subroutine densitydarkmatter
+  !
+  ! Converts density field to density contrast field and apply Fourier transform
+  !
+
+  implicit none
+  integer :: k,j,i
+  real    :: d,dmin,dmax,sum_dm,sum_dm_local,dmint,dmaxt,z_write
+  real*8  :: dsum,dvar,dsumt,dvart
+
+  time1 = mpi_wtime(ierr)
+
+  !------------------------------------------------------------
+  ! Assign data
+  !------------------------------------------------------------
+
+  !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                
+  do kt = 1, nc_node_dim
+     cube(:,:,kt) = momden(1:nc_node_dim,1:nc_node_dim,kt)
+  enddo
+  !$omp end parallel do                                                                                                                          
+  
+  sum_dm_local=sum(cube)
+  call mpi_reduce(sum_dm_local,sum_dm,1,mpi_real,mpi_sum,0,mpi_comm_world,ierr)
+  if (rank == 0) print *,'Total mass=',sum_dm
+
+  !------------------------------------------------------------
+  ! Convert density field to delta field
+  !------------------------------------------------------------
+
+  dmin=0
+  dmax=0
+  dsum=0
+  dvar=0
+  
+  do k=1,nc_node_dim
+     do j=1,nc_node_dim
+        do i=1,nc_node_dim
+           cube(i,j,k)=cube(i,j,k)-1.0
+           d=cube(i,j,k)
+           dsum=dsum+d
+           dvar=dvar+d*d
+           dmin=min(dmin,d)
+           dmax=max(dmax,d)
+        enddo
+     enddo
+  enddo
+  
+  call mpi_reduce(dsum,dsumt,1,mpi_double_precision,mpi_sum,0,mpi_comm_world,ierr)
+  call mpi_reduce(dvar,dvart,1,mpi_double_precision,mpi_sum,0,mpi_comm_world,ierr)
+  call mpi_reduce(dmin,dmint,1,mpi_real,mpi_min,0,mpi_comm_world,ierr)
+  call mpi_reduce(dmax,dmaxt,1,mpi_real,mpi_max,0,mpi_comm_world,ierr)
+  
+  !------------------------------------------------------------    
+  ! Forward FFT delta field
+  !------------------------------------------------------------
+  
+  call cp_fftw(1)
+  
+  time2 = mpi_wtime(ierr)
+
+  if (rank == 0) then
+
+     dsum=dsumt/real(nc)**3
+     dvar=sqrt(dvart/real(nc)**3)
+
+     write(*,*) 'Finished densitydarkmatter ...'
+     write(*,*) 'Cube min     :',dmint
+     write(*,*) 'Cube max     :',dmaxt
+     write(*,*) 'Delta sum    :',real(dsum,8)
+     write(*,*) 'Delta var    :',real(dvar,8)
+     write(*,*) 'Time elapsed : ', time2 - time1
+     write(*,*) '--------------------------'
+  endif
+  return
+  
+end subroutine densitydarkmatter
+
+!----------------------------------------------------------------------------------
+
+subroutine veltransfer(command)
+  !
+  ! Apply a transfer function in Fourier space
+  ! command determines the transfer function to apply
+  ! (see below for more details)
+  !
+
+  implicit none
+  integer                           :: command
+
+  !! IT WOULD MAKE SENSE TO DEAL WITH THESE FILES IN A BETTER WAY...
+  character(*),     parameter       :: fntf0 = 'nu_transfer_out_z0.dat'
+  character(*),     parameter       :: fntf1 = 'nu_transfer_out_z1.dat'
+  character(*),     parameter       :: fntf10 = 'nu_transfer_out_z10.dat' 
+  character*30                      :: fntf
+  
+  character(*),     parameter       :: vfntf0 = 'nu_veltransfer_out_z0.dat'
+  character(*),     parameter       :: vfntf1 = 'nu_veltransfer_out_z1.dat'
+  character(*),     parameter       :: vfntf10 = 'nu_veltransfer_out_z10.dat' 
+  character*30                      :: vfntf
+
+  integer,          parameter       :: nk = 705, nucol = 6, dmcol = 2
+  real, dimension(7,nk)             :: tf, vtf
+
+  integer                           :: k, j, i, l, kg, jg, ig, mg, ioerr, ii, thread
+  real(4)                           :: kz, ky, kx, kr, interpHTF_nu,interpMTF, kphys, interpVTF, interpVTF_nu
+  integer                           :: dx, dxy, ind
+  
+  character*180                     :: fn
+  character(len=6)                  :: rank_s
+  real                              :: z_current, w1, w2, vsim2phys
+  
+  time1 = mpi_wtime(ierr)
+  if (rank == 0) write(*,*) 'Starting veltransfer ...'
+
+  !------------------------------------------------------------
+  ! Assign file names         
+  !------------------------------------------------------------
+
+  z_current = z_checkpoint(cur_checkpoint)
+  vsim2phys = 300. * sqrt(omega_m) * box * (1. + z_current) / 2. / nc
+
+  if (z_current == 10.0) then
+     fntf = fntf10
+     vfntf = vfntf10
+  else if (z_current == 1.0) then
+     fntf = fntf1
+     vfntf = vfntf1
+  else
+     fntf = fntf0
+     vfntf = vfntf0
+  endif
+
+  !------------------------------------------------------------
+  ! Read density transfer function         
+  !------------------------------------------------------------
+  
+  if (rank ==0) then
+     write(*,*) 'Reading ', fntf
+     open(11, file = fntf)
+     do k = 1,nk
+        read(11,*) tf(1,k), tf(2,k), tf(3,k), tf(4,k), tf(5,k), tf(6,k), tf(7,k)
+     end do
+     close(11)
+  end if
+
+  call mpi_bcast(tf, 7*nk, mpi_real, 0, mpi_comm_world, ierr)
+
+  !------------------------------------------------------------
+  ! Read velocity transfer function                                                                                                                      
+  !------------------------------------------------------------
+
+  if (rank == 0) then
+     write(*,*) 'Reading ',vfntf
+     open(11,file=vfntf)
+     do k=1,nk
+        read(11,*) vtf(1,k),vtf(2,k),vtf(3,k),vtf(4,k),vtf(5,k),vtf(6,k),vtf(7,k)
+     end do
+     close(11)
+
+     !------------------------------------------------------------
+     ! Put vtf in simulation's unit
+     !------------------------------------------------------------
+
+     do k=1,nk
+        do j = 2,7
+           vtf(j,k) = vtf(j,k) / vsim2phys
+        enddo
+     enddo
+
+  endif
+
+  call mpi_bcast(vtf, 7*nk, mpi_real, 0, mpi_comm_world, ierr)
+    
+  !------------------------------------------------------------
+  ! Multiply slab by the appropriate transfer function                                                                                              
+  !------------------------------------------------------------
+
+#ifndef SLAB
+  dx  = fsize(1)
+  dxy = dx * fsize(2)
+  ind = 0
+#endif
+#ifdef SLAB
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!                                                                                 
+!! DON'T USE THIS
+!! IT DOESN'T WORK
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  do k = 1, nc_slab
+     kg=k+nc_slab*rank
+     if (kg .lt. hc+2) then
+        kz=kg-1
+     else
+        kz=kg-1-nc
+     endif
+     kz=2*sin(pi*kz/ncr)
+     do j = 1, nc
+        if (j .lt. hc+2) then
+           ky=j-1
+        else
+           ky=j-1-nc
+        endif
+        ky=2*sin(pi*ky/ncr)
+        do i = 1, nc+2, 2
+           kx=(i-1)/2
+           kx=2*sin(pi*kx/ncr)
+#else
+  !$omp parallel default(shared) private(k, j, i, kg, mg, jg, ig, ind, kz, ky, kx, kphys, kr, interpMTF, interpHTF_nu, interpVTF, interpVTF_nu, w1, w2, ii) 
+  !!!omp parallel default(private) shared(nc_pen, mypadd, nc_node_dim, nc, dxy, dx, hc, box, pi, ncr, tf, nk, slab, slab2)
+  !$omp do schedule(dynamic) 
+  do k = 1, nc_pen+mypadd
+     ind = (k-1)*nc_node_dim*nc/2
+     do j = 1, nc_node_dim
+        do i = 1, nc, 2
+           kg = ind / dxy
+           mg = ind - kg * dxy
+           jg = mg / dx
+           ig = mg - jg * dx
+           kg = fstart(3) + kg
+           jg = fstart(2) + jg
+           ig = 2 * (fstart(1) + ig) - 1
+           ind = ind + 1
+           if (kg < hc+2) then
+              kz=kg-1
+           else
+              kz=kg-1-nc
+           endif
+           if (jg < hc+2) then
+              ky=jg-1
+           else
+              ky=jg-1-nc
+           endif
+           kx = (ig-1)/2
+           
+           kphys = 2*pi*sqrt(kx**2+ky**2+kz**2)/box
+           
+           kx = 2*sin(pi*kx/ncr)
+           ky = 2*sin(pi*ky/ncr)
+           kz = 2*sin(pi*kz/ncr)
+           
+#endif
+           kr = sqrt(kx**2+ky**2+kz**2)
+
+           !------------------------------------------------------------
+           ! Find appropriate velocity transfer function
+           !------------------------------------------------------------
+           
+           if (kphys <= vtf(1,1)) then
+              interpVTF = vtf(dmcol, 1)
+              interpVTF_nu = vtf(nucol, 1)
+           else if (kphys >= vtf(1, nk)) then
+              interpVTF = vtf(dmcol, nk)
+              interpVTF_nu = vtf(nucol, nk)
+           else
+              do ii = 1, nk-1
+                 if (kphys <= vtf(1,ii+1)) then
+                    w1 = vtf(1,ii+1) - kphys
+                    w2 = kphys - vtf(1,ii)
+                    interpVTF = (w1*vtf(dmcol,ii)+w2*vtf(dmcol,ii+1))/(vtf(1,ii+1)-vtf(1,ii))
+                    interpVTF_nu = (w1*vtf(nucol,ii)+w2*vtf(nucol,ii+1))/(vtf(1,ii+1)-vtf(1,ii))
+                    exit
+                 endif
+              enddo
+           endif
+           
+           !------------------------------------------------------------
+           ! Find appropriate density transfer function
+           !------------------------------------------------------------
+
+           if (kphys <= tf(1,1)) then
+              interpMTF = tf(dmcol, 1)
+              interpHTF_nu = tf(nucol, 1)
+           else if (kphys >= tf(1, nk)) then
+              interpMTF = tf(dmcol, nk)
+              interpHTF_nu = tf(nucol, nk)
+           else
+              do ii = 1, nk-1
+                 if (kphys <= tf(1,ii+1)) then
+                    w1 = tf(1,ii+1) - kphys
+                    w2 = kphys - tf(1,ii)
+                    interpMTF = (w1*tf(dmcol,ii)+w2*tf(dmcol,ii+1))/(tf(1,ii+1)-tf(1,ii))
+                    interpHTF_nu = (w1*tf(nucol,ii)+w2*tf(nucol,ii+1))/(tf(1,ii+1)-tf(1,ii))
+                    exit
+                 endif
+              enddo
+           endif
+           
+           if (kr == 0) then
+              kr = 0.000001
+           endif
+           
+           !------------------------------------------------------------
+           ! Apply transfer function
+           !------------------------------------------------------------
+
+           if (command == 0) then !! dm density => dm velocity potential                                                                       
+              slab(i:i+1, j, k) = (-1) * slab(i:i+1, j, k) * interpVTF/interpMTF / kr
+              
+           else if (command == 1) then !! dm velocity potential => nu velocity potential                                                         
+              slab(i:i+1, j, k) = (-1) * slab(i:i+1, j, k) * interpMTF/interpHTF_nu * interpVTF_nu/interpVTF
+              
+           else if (command == 2) then !! dm density => nu velocity potential                                                                     
+              slab(i:i+1, j, k) = (-1) * slab(i:i+1, j, k) * interpVTF_nu/interpMTF / kr
+              
+           else if (command == 3) then !! dm density => dm velocity
+              slab(i:i+1, j, k) = (-1) * slab(i:i+1, j, k) * interpVTF/interpMTF
+              
+           else if (command == 4) then !! dm density => nu velocity
+              slab(i:i+1, j, k) = (-1) * slab(i:i+1, j, k) * interpVTF_nu/interpMTF
+              
+           else if (command == 5) then !! dm velocity => nu velocity
+              slab(i:i+1, j, k) = (-1) * slab(i:i+1, j, k) * interpVTF_nu/interpVTF
+              
+           else if (command == 6) then !! nu density => nu velocity
+              slab(i:i+1, j, k) = (-1) * slab(i:i+1, j, k) * interpVTF_nu/interpHTF_nu
+              
+           else if (command == 7) then !! nu velocity => (dm-nu) relative velocity
+              slab(i:i+1, j, k) = (-1) * slab(i:i+1, j, k) * (interpVTF - interpVTF_nu)/interpVTF_nu
+              
+           end if
+        enddo !! i
+     enddo !! j
+  enddo !! k
+#ifndef SLAB
+  !$omp end do                                                                                                                                          
+  !$omp end parallel                                                                                                                                
+#endif
+
+  time2 = mpi_wtime(ierr)
+  
+  if (rank == 0) then
+     write(*,*) 'Finished veltransfer ...'
+     write(*,*) 'command      : ', command
+     write(*,*) 'Time elapsed : ', time2 - time1
+     write(*,*) '--------------------------'
+  endif
+
+end subroutine veltransfer
+
+! -------------------------------------------------------------------------------------------------------                                               
+
+subroutine numerical_gradient(dir, command)
+  !
+  ! Computes numerical gradient in direction dir
+  !
+
+  implicit none
+  integer ::  dir, command
+  integer :: kt, k, j, i 
+
+  ! slab contains dm or nu velocity potential (after veltransfer)                                                                                 
+  time2 = mpi_wtime(ierr)
+  
+  !------------------------------------------------------------
+  ! Fourier transform backward slab to cube
+  !------------------------------------------------------------                                                        
+  call cp_fftw(-1)
+
+  !------------------------------------------------------------
+  ! Stores cube in momden to compute gradient                                                      
+  !------------------------------------------------------------
+
+  !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                      
+  do kt = 0, nc_node_dim+1
+     momden(:,:,kt) = 0.0
+  enddo
+  !$omp end parallel do
+
+  !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                      
+  do kt = 1, nc_node_dim
+     momden(1:nc_node_dim,1:nc_node_dim,kt) = cube(:,:,kt)
+  enddo
+  !$omp end parallel do
+
+  call writebuffer_momden
+
+  !------------------------------------------------------------
+  ! Numerical gradient
+  !------------------------------------------------------------
+
+  if (dir == 1) then
+     !------------------------------------------------------------
+     ! Along X
+     !------------------------------------------------------------
+     !$omp parallel do num_threads(nt) default(shared) private(k,j,i)                                                                                
+     do k = 1,nc_node_dim
+        do j = 1,nc_node_dim
+           do i = 1,nc_node_dim
+              cube(i,j,k) = (momden(i+1,j,k)-momden(i-1,j,k))/2.
+           enddo
+        enddo
+     enddo
+     !$omp end parallel do                                                                                                                          
+  else if (dir == 2) then
+     !------------------------------------------------------------
+     ! Along Y
+     !------------------------------------------------------------
+     !$omp parallel do num_threads(nt) default(shared) private(k,j,i)                                                                               
+     do k = 1,nc_node_dim
+        do j = 1,nc_node_dim
+           do i = 1,nc_node_dim
+              cube(i,j,k) = (momden(i,j+1,k)-momden(i,j-1,k))/2.
+           enddo
+        enddo
+     enddo
+     !$omp end parallel do                                                                                                                          
+  else if (dir == 3) then
+     !------------------------------------------------------------
+     ! Along Z, in 2 steps for threading
+     !------------------------------------------------------------
+     !$omp parallel do num_threads(nt) default(shared) private(k,j,i)                                                                                 
+     do k = 1,nc_node_dim
+        do j = 1,nc_node_dim
+           do i = 1,nc_node_dim
+              cube(i,j,k) = momden(i,j,k+1)/2.
+           enddo
+        enddo
+     enddo
+     !$omp end parallel do                                                                                                                           
+     !$omp parallel do num_threads(nt) default(shared) private(k,j,i)                                                                                   
+     do k = 1,nc_node_dim
+        do j = 1,nc_node_dim
+           do i = 1,nc_node_dim
+              cube(i,j,k) = cube(i,j,k) - momden(i,j,k-1)/2.
+           enddo
+        enddo
+     enddo
+     !$omp end parallel do                                                                                                                           
+  endif
+
+  !------------------------------------------------------------
+  ! Writes velocity field to file if needed
+  !------------------------------------------------------------
+#ifdef write_vel
+  if (command >= 0) then
+     call writevelocityfield(command, dir, 1)
+  endif
+#endif
+
+  !------------------------------------------------------------
+  ! Fourier transform cube to slab
+  !------------------------------------------------------------
+  call cp_fftw(1)
+  
+  time2 = mpi_wtime(ierr)
+  
+  if (rank == 0) then
+     write(*,*) 'Finished Numerical_gradient ...'
+     write(*,*) 'Time elapsed : ', time2 - time1
+     write(*,*) '--------------------------'
+  endif
+
+end subroutine numerical_gradient
+
+! -------------------------------------------------------------------------------------------------------
+
+subroutine read_particles_files
+  !
+  ! Read all particles files
+  !
+
+  implicit none
+
+  !--------------------------------------------------------------------------------                                                            
+  ! Neutrinos                                                      
+  !--------------------------------------------------------------------------------
+     
+  call read_particles(0)
+  call pass_particles(0)
+  call order_xvp_groups(0)
+  call buffer_particles_groups(0,g0)
+  call buffer_particles_groups(0,g1)
+  call order_xvp_ll(0,g0,.false.)
+  call order_xvp_ll(0,g1,.false.)
+
+  !--------------------------------------------------------------------------------                                                            
+  ! Dark matter                                                      
+  !--------------------------------------------------------------------------------
+     
+  call read_particles(1)
+  call pass_particles(1)
+  call order_xvp_groups(1)
+  call buffer_particles_groups(1,g0)
+  call buffer_particles_groups(1,g1)
+  call order_xvp_ll(1,g0,.false.)
+  call order_xvp_ll(1,g1,.false.)
+
+  !--------------------------------------------------------------------------------                                                            
+  ! Halos                                                      
+  !--------------------------------------------------------------------------------
+     
+  call read_particles(2)
+  call pass_particles(2)
+  call order_xvp_groups(2)
+  call buffer_particles_groups(2,g0)
+  call buffer_particles_groups(2,g1)
+  call order_xvp_ll(2,g0,.false.)
+  call order_xvp_ll(2,g1,.false.)
+  
+  
+end subroutine read_particles_files
+
+! -------------------------------------------------------------------------------------------------------
+
+subroutine auto_power_loop(component)
+  !
+  ! Auto-power loop
+  !
+
+  implicit none
+  integer component
+
+  if (rank == 0) then
+     timeCheckpoint = mpi_wtime(ierr)
+     write(*,*) '****************************************************'
+     write(*,*) 'TIME = ', timeCheckpoint - timeStart
+     write(*,*) '****************************************************'
+     write(*,*) 'AUTO-POWER FOR COMPONENT : ', component
+     write(*,*) '****************************************************'
+  endif
+  
+  !--------------------------------------------------------------------------------                                                            
+  ! NEUTRINOS                                                                                                                                   
+  !--------------------------------------------------------------------------------
+  ! g0 nu --> slab --> slab2
+  ! g1 nu --> slab
+  !--------------------------------------------------------------------------------
+
+  if (computePS(0) .or. computePS(3)) then
+     call velocity_density_V2(0,g0,N_closest_auto_nu,component)
+     call darkmatter
+
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                     
+     do kt = 1, kt_stop
+        slab2(:,:,kt) = slab(:,:,kt)
+     enddo
+     !$omp end parallel do                                                                                                                            
+  endif
+
+  if (computePS(0)) then
+     call velocity_density_V2(0,g1,N_closest_auto_nu,component)
+     call darkmatter
+
+  !--------------------------------------------------------------------------------
+  ! g1 nu x g0 nu
+  !--------------------------------------------------------------------------------
+     call powerspectrum(slab, slab2, pk_all(component,:,:,0))
+     if (rank == 0) call writepowerspectra(0,1)
+  endif
+
+  !--------------------------------------------------------------------------------                                                            
+  ! DARK MATTER                                                                                                                                   
+  !--------------------------------------------------------------------------------
+  ! g0 dm --> slab
+  ! g0 dm - nu --> slab3
+  ! g0 dm --> slab2
+  ! g1 dm --> slab
+  !--------------------------------------------------------------------------------
+  
+  if (computePS(1) .or. computePS(3)) then
+     call velocity_density_V2(1,g0,N_closest_auto_dm,component)
+     call darkmatter
+  endif
+
+  if (computePS(3)) then
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                  
+     do kt = 1, kt_stop
+        slab3(:,:,kt) = slab(:,:,kt) - slab2(:,:,kt)
+     enddo
+     !$omp end parallel do
+  endif
+
+  if (computePS(1)) then
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                     
+     do kt = 1, kt_stop
+        slab2(:,:,kt) = slab(:,:,kt)
+     enddo
+     !$omp end parallel do                                                                                             
+  endif
+
+  if (computePS(1) .or. computePS(3)) then
+     call velocity_density_V2(1,g1,N_closest_auto_dm,component)
+     call darkmatter
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! g1 dm x g0 dm
+  !--------------------------------------------------------------------------------
+  if (computePS(1)) then
+     call powerspectrum(slab, slab2, pk_all(component,:,:,1))
+     if (rank == 0) call writepowerspectra(1,1)
+  endif
+
+  !--------------------------------------------------------------------------------                                                                
+  ! DARK MATTER - NEUTRINO RELATIVE VELOCITY                                                                                                       
+  !--------------------------------------------------------------------------------
+  ! g1 dm --> slab2
+  ! g1 nu --> slab
+  ! g1 dm - nu --> slab2
+  !--------------------------------------------------------------------------------
+       
+  if (computePS(3)) then
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                    
+     do kt = 1, kt_stop
+        slab2(:,:,kt) = slab(:,:,kt)
+     enddo
+     !$omp end parallel do                                                                                                                          
+  endif
+
+  if (computePS(3) .or. computePS(20)) then
+     call velocity_density_V2(0, g1, N_closest_auto_nu, component)
+     call darkmatter
+  endif
+
+  if (computePS(3)) then
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                  
+     do kt = 1, kt_stop
+        slab2(:,:,kt) = slab2(:,:,kt) - slab(:,:,kt)
+     enddo
+     !$omp end parallel do
+
+  !--------------------------------------------------------------------------------
+  ! g1 dm - nu x g0 dm - nu
+  !--------------------------------------------------------------------------------
+     call powerspectrum(slab2, slab3, pk_all(component,:,:,3))
+     if (rank == 0) call writepowerspectra(3,1)
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! g1 nu --> slab3
+  !--------------------------------------------------------------------------------
+
+  if (computePS(20)) then
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                      
+     do kt = 1, kt_stop
+        slab3(:,:,kt) = slab(:,:,kt)
+     enddo
+     !$omp end parallel do 
+  endif
+
+  !--------------------------------------------------------------------------------                                                            
+  ! HALOS                                                                                                                                   
+  !--------------------------------------------------------------------------------
+  ! g0 h --> slab --> slab2
+  ! g1 h --> slab
+  !--------------------------------------------------------------------------------
+
+  if (computePS(4) .or. computePS(20)) then
+     call velocity_density_V2(2, g0, N_closest_auto_h,component)
+     call darkmatter
+
+     !$omp parallel do num_threads(nt) default(shared) private(kt)
+     do kt = 1, kt_stop
+        slab2(:,:,kt) = slab(:,:,kt)
+     enddo
+     !$omp end parallel do 
+
+     call velocity_density_V2(2, g1, N_closest_auto_h,component)
+     call darkmatter
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! g1 h x g0 h
+  !--------------------------------------------------------------------------------
+  if (computePS(4)) then
+     call powerspectrum(slab, slab2, pk_all(component,:,:,4))
+     if (rank == 0) call writepowerspectra(4,1)
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! HALO - NEUTRINOS RELATIVE VELOCITY                                                                                                          
+  !--------------------------------------------------------------------------------
+  ! g1 h - nu --> slab3
+  ! g0 nu --> slab
+  ! g0 h - nu --> slab2
+  !--------------------------------------------------------------------------------
+
+  if (computePS(20)) then
+
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                       
+     do kt = 1, kt_stop
+        slab3(:,:,kt) = slab(:,:,kt) - slab3(:,:,kt)
+     enddo
+     !$omp end parallel do
+
+     call velocity_density_V2(0, g0, N_closest_auto_nu, component)
+     call darkmatter
+
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                       
+     do kt = 1, kt_stop
+        slab2(:,:,kt) = slab2(:,:,kt) - slab(:,:,kt)
+     enddo
+     !$omp end parallel do
+
+  !--------------------------------------------------------------------------------
+  ! g0 h - nu x g1 h - nu
+  !--------------------------------------------------------------------------------
+     call powerspectrum(slab2, slab3, pk_all(component,:,:,20))
+     if (rank == 0) call writepowerspectra(20,1)
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! DM^DM                                                                   
+  !--------------------------------------------------------------------------------
+  ! g0 dm^dm --> slab --> slab3
+  ! g1 dm^dm --> slab
+  !--------------------------------------------------------------------------------
+
+#ifdef compute_denPS
+  if (component == 1) then
+     call densityfield(1,g0)
+     call densitydarkmatter
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                      
+     do kt = 1, kt_stop
+        slab3(:,:,kt) = slab(:,:,kt)
+     enddo
+     !$omp end parallel do                                                                                                                        
+     call densityfield(1,g1)
+     call densitydarkmatter
+     call powerspectrum(slab, slab3, pk_all(component,:,:,6))
+     call writedenpowerspectra(6)
+  endif
+#endif
+
+
+  if (computePS(6) .or. computePS(17)) then
+     call densityfield(1, g0)
+     call densitydarkmatter
+     call veltransfer(0)
+     call numerical_gradient(component, -1)
+
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                      
+     do kt = 1, kt_stop
+        slab3(:,:,kt) = slab(:,:,kt)
+     enddo
+     !$omp end parallel do                                                                                                                        
+  endif
+
+  if (computePS(6)) then
+     call densityfield(1, g1)
+     call densitydarkmatter
+     call veltransfer(0)
+     call numerical_gradient(component, -1)
+
+  !--------------------------------------------------------------------------------
+  ! g1 dm^dm x g0 dm^dm
+  !--------------------------------------------------------------------------------
+     call powerspectrum(slab, slab3, pk_all(component,:,:,6))
+     if (rank == 0) call writepowerspectra(6,1)
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! NU^DM
+  !--------------------------------------------------------------------------------
+  ! g1 nu^dm --> slab --> slab2
+  ! g0 nu^dm --> slab
+  ! g0 dm^dm - nu^dm --> slab3
+  !--------------------------------------------------------------------------------
+
+  if (computePS(9) .or. computePS(17)) then
+     call densityfield(1, g1)
+     call densitydarkmatter
+     call veltransfer(2)
+     call numerical_gradient(component, -1)
+
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                      
+     do kt = 1, kt_stop
+        slab2(:,:,kt) = slab(:,:,kt)
+     enddo
+     !$omp end parallel do            
+
+     call densityfield(1, g0)
+     call densitydarkmatter
+     call veltransfer(2)
+     call numerical_gradient(component, -1)
+  endif
+  
+  if (computePS(17)) then
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                      
+     do kt = 1, kt_stop
+        slab3(:,:,kt) = slab3(:,:,kt) - slab(:,:,kt)
+     enddo
+     !$omp end parallel do
+  endif
+      
+  !--------------------------------------------------------------------------------
+  ! g0 nu^dm x g1 nu^dm
+  !--------------------------------------------------------------------------------
+  if (computePS(9)) then
+     call powerspectrum(slab, slab2, pk_all(component,:,:,9))
+     if (rank == 0) call writepowerspectra(9,1)
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! DM^DM - NU^DM RELATIVE VELOCITY
+  !--------------------------------------------------------------------------------
+  ! g1 dm^dm --> slab
+  ! g1 dm^dm - nu^dm --> slab
+  !--------------------------------------------------------------------------------
+
+  if (computePS(17)) then
+     call densityfield(1, g1)
+     call densitydarkmatter
+     call veltransfer(0)
+     call numerical_gradient(component, -1)
+
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                      
+     do kt = 1, kt_stop
+        slab(:,:,kt) = slab(:,:,kt) - slab2(:,:,kt)
+     enddo
+     !$omp end parallel do                                                                                                                   
+
+  !--------------------------------------------------------------------------------
+  ! g1 dm^dm - nu^dm x g0 dm^dm - nu^dm
+  !--------------------------------------------------------------------------------
+     call powerspectrum(slab, slab3, pk_all(component,:,:,17))
+     if (rank == 0) call writepowerspectra(17,1)
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! DM^H
+  !--------------------------------------------------------------------------------
+  ! g0 dm^h --> slab --> slab3
+  ! g1 dm^h --> slab
+  !--------------------------------------------------------------------------------
+
+#ifdef compute_denPS
+  if (component == 1) then
+     call densityfield(2,g0)
+     call densitydarkmatter
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                      
+     do kt = 1, kt_stop
+        slab3(:,:,kt) = slab(:,:,kt)
+     enddo
+     !$omp end parallel do                                                                                                                        
+     call densityfield(2,g1)
+     call densitydarkmatter
+     call powerspectrum(slab, slab3, pk_all(component,:,:,7))
+     call writedenpowerspectra(7)
+  endif
+#endif
+
+  if (computePS(7) .or. computePS(16)) then
+     call densityfield(2, g0)
+     call densitydarkmatter
+     call veltransfer(0)
+     call numerical_gradient(component, -1)
+  
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                      
+     do kt = 1, kt_stop
+        slab3(:,:,kt) = slab(:,:,kt)
+     enddo
+     !$omp end parallel do           
+  endif
+
+  if (computePS(7)) then
+     call densityfield(2, g1)
+     call densitydarkmatter
+     call veltransfer(0)
+     call numerical_gradient(component, -1)
+     
+  !--------------------------------------------------------------------------------
+  ! g1 dm^h x g0 dm^h
+  !--------------------------------------------------------------------------------
+     call powerspectrum(slab, slab3, pk_all(component,:,:,7))
+     if (rank == 0) call writepowerspectra(7,1)
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! NU^H
+  !--------------------------------------------------------------------------------
+  ! g1 nu^h --> slab --> slab2
+  ! g0 nu^h --> slab
+  ! g0 dm^h - nu^h --> slab3
+  !--------------------------------------------------------------------------------
+
+  if (computePS(8) .or. computePS(16)) then
+     call densityfield(2, g1)
+     call densitydarkmatter
+     call veltransfer(2)
+     call numerical_gradient(component, -1)
+  
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                      
+     do kt = 1, kt_stop
+        slab2(:,:,kt) = slab(:,:,kt)
+     enddo
+     !$omp end parallel do
+
+     call densityfield(2, g0)
+     call densitydarkmatter
+     call veltransfer(2)
+     call numerical_gradient(component, -1)
+  endif
+     
+  if (computePS(16)) then
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                      
+     do kt = 1, kt_stop
+        slab3(:,:,kt) = slab3(:,:,kt) - slab(:,:,kt)
+     enddo
+     !$omp end parallel do 
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! g0 nu^h x g1 nu^h
+  !--------------------------------------------------------------------------------
+  if (computePS(8)) then
+     call powerspectrum(slab, slab2, pk_all(component,:,:,8))
+     if (rank == 0) call writepowerspectra(8,1)
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! DM^H - NU^H RELATIVE VELOCITY
+  !--------------------------------------------------------------------------------
+  ! g1 dm^h --> slab
+  ! g1 dm^h - nu^h --> slab
+  !--------------------------------------------------------------------------------
+
+  if (computePS(16)) then
+     call densityfield(2, g1)
+     call densitydarkmatter
+     call veltransfer(0)
+     call numerical_gradient(component, -1)
+
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                      
+     do kt = 1, kt_stop
+        slab(:,:,kt) = slab(:,:,kt) - slab2(:,:,kt)
+     enddo
+     !$omp end parallel do                                                                                                                   
+
+  !--------------------------------------------------------------------------------
+  ! g1 dm^h - nu^h x g0 dm^h - nu^h
+  !--------------------------------------------------------------------------------
+     call powerspectrum(slab, slab3, pk_all(component,:,:,16))
+     if (rank == 0) call writepowerspectra(16,1)
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! NU^NU
+  !--------------------------------------------------------------------------------
+  ! g0 nu^nu --> slab --> slab3
+  ! g1 nu^nu --> slab
+  !--------------------------------------------------------------------------------
+
+#ifdef compute_denPS
+  if (component == 1) then
+     call densityfield(0,g0)
+     call densitydarkmatter
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                      
+     do kt = 1, kt_stop
+        slab3(:,:,kt) = slab(:,:,kt)
+     enddo
+     !$omp end parallel do                                                                                                                        
+     call densityfield(0,g1)
+     call densitydarkmatter
+     call powerspectrum(slab, slab3, pk_all(component,:,:,5))
+     call writedenpowerspectra(5)
+  endif
+#endif
+
+
+  if (computePS(5)) then
+     call densityfield(1, g0)
+     call densitydarkmatter
+     call veltransfer(0)
+     call numerical_gradient(component, -1)
+     
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                      
+     do kt = 1, kt_stop
+        slab3(:,:,kt) = slab(:,:,kt)
+     enddo
+     !$omp end parallel do                                                                                                                        
+     
+     call densityfield(1, g1)
+     call densitydarkmatter
+     call veltransfer(0)
+     call numerical_gradient(component, -1)
+
+  !--------------------------------------------------------------------------------
+  ! g1 nu^nu x g0 nu^nu
+  !--------------------------------------------------------------------------------
+     call powerspectrum(slab, slab3, pk_all(component,:,:,5))
+     if (rank == 0) call writepowerspectra(5,1)
+  endif
+
+end subroutine auto_power_loop
+
+! -------------------------------------------------------------------------------------------------------
+
+subroutine auto_power_vtf
+  !
+  ! Auto-power, linear, without gradient 
+  !
+  implicit none
+
+  if (rank == 0) then
+     timeCheckpoint = mpi_wtime(ierr)
+     write(*,*) '****************************************************'
+     write(*,*) 'TIME = ', timeCheckpoint - timeStart
+     write(*,*) '****************************************************'
+     write(*,*) 'VTF AUTO-POWER'
+     write(*,*) '****************************************************'
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! DM^DM
+  !--------------------------------------------------------------------------------
+  ! g0 dm^dm --> slab --> slab3
+  ! g1 dm^dm --> slab
+  !--------------------------------------------------------------------------------
+
+  if (computePS(24) .or. computePS(28) .or. computePS(29)) then
+     call densityfield(1, g0)
+     call densitydarkmatter
+     call veltransfer(3)
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                      
+     do kt = 1, kt_stop
+        slab3(:,:,kt) = slab(:,:,kt)
+     enddo
+     !$omp end parallel do                                                                                                                        
+
+     call densityfield(1, g1)
+     call densitydarkmatter
+     call veltransfer(3)
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! g1 dm^dm x g0 dm^dm
+  !--------------------------------------------------------------------------------
+  if (computePS(24)) then
+     call powerspectrum(slab, slab3, pk_all(1,:,:,24))
+     if (rank == 0) call writepowerspectra(24,1)
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! NU^DM
+  !--------------------------------------------------------------------------------
+  ! g1 nu^dm --> slab --> slab2
+  ! g0 nu^dm --> slab
+  !--------------------------------------------------------------------------------
+
+  if (computePS(28) .or. computePS(29)) then
+     call veltransfer(5)
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                      
+     do kt = 1, kt_stop
+        slab2(:,:,kt) = slab(:,:,kt)
+     enddo
+     !$omp end parallel do
+     
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                      
+     do kt = 1, kt_stop
+        slab(:,:,kt) = slab3(:,:,kt)
+     enddo
+     !$omp end parallel do
+     call veltransfer(5)
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! g0 nu^dm x g1 nu^dm
+  !--------------------------------------------------------------------------------
+  if (computePS(28)) then
+     call powerspectrum(slab, slab2, pk_all(1,:,:,28))
+     if (rank == 0) call writepowerspectra(28,1)
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! DM^DM - NU^DM RELATIVE VELOCITY
+  !--------------------------------------------------------------------------------
+  ! g0 dm^dm - nu^dm --> slab --> slab3
+  ! g1 dm^dm - nu^dm --> slab
+  !--------------------------------------------------------------------------------
+
+  if (computePS(29)) then
+     call veltransfer(7)
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                      
+     do kt = 1, kt_stop
+        slab3(:,:,kt) = slab(:,:,kt)
+     enddo
+     !$omp end parallel do
+     
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                      
+     do kt = 1, kt_stop
+        slab(:,:,kt) = slab2(:,:,kt)
+     enddo
+     !$omp end parallel do
+     call veltransfer(7)
+
+  !--------------------------------------------------------------------------------
+  ! g1 dm^dm - nu^dm x g0 dm^dm - nu^dm
+  !--------------------------------------------------------------------------------
+     call powerspectrum(slab, slab3, pk_all(1,:,:,29))
+     if (rank == 0) call writepowerspectra(29,1)
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! DM^H
+  !--------------------------------------------------------------------------------
+  ! g0 dm^h --> slab --> slab3
+  ! g1 dm^h --> slab
+  !--------------------------------------------------------------------------------
+
+  if (computePS(26) .or. computePS(30) .or. computePS(31)) then
+     call densityfield(2, g0)
+     call densitydarkmatter
+     call veltransfer(3)
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                      
+     do kt = 1, kt_stop
+        slab3(:,:,kt) = slab(:,:,kt)
+     enddo
+     !$omp end parallel do                                                                                                                        
+
+     call densityfield(2, g1)
+     call densitydarkmatter
+     call veltransfer(3)
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! g1 dm^h x g0 dm^h
+  !--------------------------------------------------------------------------------
+  if (computePS(26)) then
+     call powerspectrum(slab, slab3, pk_all(1,:,:,26))
+     if (rank == 0) call writepowerspectra(26,1)
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! NU^H
+  !--------------------------------------------------------------------------------
+  ! g1 nu^h --> slab --> slab2
+  ! g0 nu^h --> slab
+  !--------------------------------------------------------------------------------
+
+  if (computePS(30) .or. computePS(31)) then
+     call veltransfer(5)
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                      
+     do kt = 1, kt_stop
+        slab2(:,:,kt) = slab(:,:,kt)
+     enddo
+     !$omp end parallel do
+     
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                      
+     do kt = 1, kt_stop
+        slab(:,:,kt) = slab3(:,:,kt)
+     enddo
+     !$omp end parallel do
+     call veltransfer(5)
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! g0 nu^h x g1 nu^h
+  !--------------------------------------------------------------------------------
+  if (computePS(30)) then
+     call powerspectrum(slab, slab2, pk_all(1,:,:,30))
+     if (rank == 0) call writepowerspectra(30,1)
+  endif
+ 
+  !--------------------------------------------------------------------------------
+  ! DM^H - NU^H RELATIVE VELOCITY
+  !--------------------------------------------------------------------------------
+  ! g0 dm^h - nu^h --> slab --> slab3
+  ! g1 dm^h - nu^h --> slab
+  !--------------------------------------------------------------------------------
+
+  if (computePS(31)) then
+     call veltransfer(7)
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                      
+     do kt = 1, kt_stop
+        slab3(:,:,kt) = slab(:,:,kt)
+     enddo
+     !$omp end parallel do
+     
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                      
+     do kt = 1, kt_stop
+        slab(:,:,kt) = slab2(:,:,kt)
+     enddo
+     !$omp end parallel do
+     call veltransfer(7)
+     
+  !--------------------------------------------------------------------------------
+  ! g1 dm^h - nu^h x g0 dm^h - nu^h
+  !--------------------------------------------------------------------------------
+     call powerspectrum(slab, slab3, pk_all(1,:,:,31))
+     if (rank == 0) call writepowerspectra(31,1)
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! NU^NU
+  !--------------------------------------------------------------------------------
+  ! g0 nu^nu --> slab --> slab3
+  ! g1 nu^nu --> slab
+  !--------------------------------------------------------------------------------
+
+  if (computePS(23)) then
+     call densityfield(0, g0)
+     call densitydarkmatter
+     call veltransfer(6)
+     
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                      
+     do kt = 1, kt_stop
+        slab3(:,:,kt) = slab(:,:,kt)
+     enddo
+     !$omp end parallel do                                                                                                                        
+     
+     call densityfield(0, g1)
+     call densitydarkmatter
+     call veltransfer(6)
+     
+  !--------------------------------------------------------------------------------
+  ! g1 nu^nu x g0 nu^nu
+  !--------------------------------------------------------------------------------
+     call powerspectrum(slab, slab3, pk_all(1,:,:,23))
+     if (rank == 0) call writepowerspectra(23,1)
+  endif
+  
+end subroutine auto_power_vtf
+
+! -------------------------------------------------------------------------------------------------------
+
+subroutine cross_power_loop(component)
+  !
+  ! Cross-power loop
+  !
+  implicit none
+  integer component
+
+  if (rank == 0) then
+     timeCheckpoint = mpi_wtime(ierr)
+     write(*,*) '****************************************************'
+     write(*,*) 'TIME = ', timeCheckpoint - timeStart
+     write(*,*) '****************************************************'
+     write(*,*) 'CROSS-POWER LOOP FOR COMPONENT : ', component
+     write(*,*) '****************************************************'
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! NEUTRINOS
+  !--------------------------------------------------------------------------------
+  ! nu --> slab --> slab2
+  !--------------------------------------------------------------------------------
+
+  if (computePS(2) .or. computePS(22) .or. computePS(32) .or. computePS(14) &
+       .or. computePS(15) .or. computePS(19) .or. computePS(18)) then 
+
+     call velocity_density_V2(0,g0,N_closest_nu,component)
+#ifdef write_vel
+     call writevelocityfield(0, component, 0)
+#endif
+     call darkmatter
+
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                      
+     do kt = 1, kt_stop
+        slab2(:,:,kt) = slab(:,:,kt)
+     enddo
+     !$omp end parallel do                                                                                                                           
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! DARK MATTER
+  !--------------------------------------------------------------------------------
+  ! dm --> slab --> slab3
+  !--------------------------------------------------------------------------------
+
+  if (computePS(2) .or. computePS(10) .or. computePS(12) .or. computePS(33) &
+       .or. computePS(13) .or. computePS(19) .or. computePS(18)) then
+
+     call velocity_density_V2(1,g0,N_closest_dm,component)
+#ifdef write_vel
+     call writevelocityfield(1, component, 0)
+#endif
+     call darkmatter
+  
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                      
+     do kt = 1, kt_stop
+        slab3(:,:,kt) = slab(:,:,kt)
+     enddo
+     !$omp end parallel do                                                                                                                 
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! HALOS
+  !--------------------------------------------------------------------------------
+  ! h --> slab
+  !--------------------------------------------------------------------------------
+
+  if (computePS(10) .or. computePS(22)) then
+
+     call velocity_density_V2(2,g0,N_closest_h,component)
+#ifdef write_vel
+     call writevelocityfield(2, component, 0)
+#endif
+     call darkmatter
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! Cross PS
+  !--------------------------------------------------------------------------------
+  ! dm x nu
+  ! dm x halo
+  ! nu x halo
+  !--------------------------------------------------------------------------------
+
+  if (computePS(2)) then
+     call powerspectrum(slab3, slab2, pk_all(component,:,:, 2))
+     if (rank == 0) call writepowerspectra(2,1)
+  endif
+  if (computePS(10)) then
+     call powerspectrum(slab3, slab, pk_all(component,:,:, 10))
+     if (rank == 0) call writepowerspectra(10,1)
+  endif
+  if (computePS(22)) then
+     call powerspectrum(slab2, slab, pk_all(component,:,:, 22))
+     if (rank == 0) call writepowerspectra(22,1)
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! DM^H
+  !--------------------------------------------------------------------------------
+  ! dm^h --> slab
+  !--------------------------------------------------------------------------------
+  
+  if (computePS(12) .or. computePS(32)) then
+     call densityfield(2, g0)
+#ifdef write_den
+     if (component == 1) then
+        call writedensityfield(2,0)
+     endif
+#endif
+     call densitydarkmatter
+     call veltransfer(0)
+     call numerical_gradient(component, 4)
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! Cross PS
+  !--------------------------------------------------------------------------------
+  ! dm^h x dm
+  ! dm^h x nu
+  !--------------------------------------------------------------------------------
+
+  if (computePS(12)) then
+     call powerspectrum(slab, slab3, pk_all(component,:,:,12))
+     if (rank == 0) call writepowerspectra(12,1)
+  endif
+  if (computePS(32)) then
+     call powerspectrum(slab, slab2, pk_all(component,:,:,32))
+     if (rank == 0) call writepowerspectra(32,1)
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! NU^H
+  !--------------------------------------------------------------------------------
+  ! nu^h --> slab
+  !--------------------------------------------------------------------------------
+
+  if (computePS(14) .or. computePS(33)) then
+     call densityfield(2, g0)
+     call densitydarkmatter
+     call veltransfer(2)
+     call numerical_gradient(component, 6)
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! Cross PS
+  !--------------------------------------------------------------------------------
+  ! nu^h x dm
+  ! nu^h x nu
+  !--------------------------------------------------------------------------------
+
+  if (computePS(33)) then
+     call powerspectrum(slab, slab3, pk_all(component,:,:,33))
+     if (rank == 0) call writepowerspectra(33,1)
+  endif
+  if (computePS(14)) then
+     call powerspectrum(slab, slab2, pk_all(component,:,:,14))
+     if (rank == 0) call writepowerspectra(14,1)
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! DM^DM
+  !--------------------------------------------------------------------------------
+  ! dm^dm --> slab
+  !--------------------------------------------------------------------------------
+
+  if (computePS(13)) then
+     call densityfield(1, g0)
+#ifdef write_den
+     if (component == 1) then
+        call writedensityfield(1,0)
+     endif
+#endif
+     call densitydarkmatter
+     call veltransfer(0)
+     call numerical_gradient(component, 3)
+
+  !--------------------------------------------------------------------------------
+  ! Cross PS
+  !--------------------------------------------------------------------------------
+  ! dm^dm x dm
+  !--------------------------------------------------------------------------------
+
+     call powerspectrum(slab, slab3, pk_all(component,:,:,13))
+     if (rank == 0) call writepowerspectra(13,1)
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! NU^DM
+  !--------------------------------------------------------------------------------
+  ! nu^dm --> slab
+  !--------------------------------------------------------------------------------
+
+  if (computePS(15) .or. computePS(19)) then
+     call densityfield(1, g0)
+     call densitydarkmatter
+     call veltransfer(2)
+     call numerical_gradient(component, 5)
+
+  !--------------------------------------------------------------------------------
+  ! Cross PS
+  !--------------------------------------------------------------------------------
+  ! nu^dm x nu
+  !--------------------------------------------------------------------------------
+
+     call powerspectrum(slab, slab2, pk_all(component,:,:,15))
+     if (rank == 0) call writepowerspectra(15,1)
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! DM - NU RELATIVE VELOCITY
+  !--------------------------------------------------------------------------------
+  ! dm - nu --> slab3
+  !--------------------------------------------------------------------------------
+
+  if (computePS(18) .or. computePS(19)) then
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                            
+     do kt = 1, kt_stop
+        slab3(:,:,kt) = slab3(:,:,kt) - slab2(:,:,kt)
+     enddo
+     !$omp end parallel do
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! DM^DM - NU^DM RELATIVE VELOCITY
+  !--------------------------------------------------------------------------------
+  ! nu^dm --> slab2
+  ! dm^dm --> slab
+  ! dm^dm - nu^dm --> slab2
+  !--------------------------------------------------------------------------------
+
+  if (computePS(19)) then
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                            
+     do kt = 1, kt_stop
+        slab2(:,:,kt) = slab(:,:,kt)
+     enddo
+     !$omp end parallel do
+     
+     call densityfield(1, g0)
+     call densitydarkmatter
+     call veltransfer(0)
+     call numerical_gradient(component, -1)
+     
+     !$omp parallel do num_threads(nt) default(shared) private(kt)
+     do kt = 1, kt_stop
+        slab2(:,:,kt) = slab(:,:,kt) - slab2(:,:,kt)
+     enddo
+     !$omp end parallel do
+
+  !--------------------------------------------------------------------------------
+  ! Cross PS
+  !--------------------------------------------------------------------------------
+  ! (dm^dm - nu^dm) x (dm - nu)
+  !--------------------------------------------------------------------------------
+
+     call powerspectrum(slab2, slab3, pk_all(component,:,:,19))
+     if (rank == 0) call writepowerspectra(19,1)
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! NU^H
+  !--------------------------------------------------------------------------------
+  ! nu^h --> slab --> slab2
+  !--------------------------------------------------------------------------------
+
+  if (computePS(18) .or. computePS(21) .or. computePS(34)) then
+     call densityfield(2, g0)
+     call densitydarkmatter
+     call veltransfer(2)
+     call numerical_gradient(component, -1)
+
+     !$omp parallel do num_threads(nt) default(shared) private(kt)
+     do kt = 1, kt_stop
+        slab2(:,:,kt) = slab(:,:,kt)
+     enddo
+     !$omp end parallel do
+
+  !--------------------------------------------------------------------------------
+  ! DM^H
+  !--------------------------------------------------------------------------------
+  ! dm^h --> slab
+  !--------------------------------------------------------------------------------
+
+     call densityfield(2, g0)
+     call densitydarkmatter
+     call veltransfer(0)
+     call numerical_gradient(component, -1)
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! Cross PS
+  !--------------------------------------------------------------------------------
+  ! dm^h x nu^h
+  !--------------------------------------------------------------------------------
+
+  if (computePS(34)) then
+     call powerspectrum(slab, slab2, pk_all(component,:,:,34))
+     if (rank == 0) call writepowerspectra(34,1)
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! DM^H - NU^H RELATIVE VELOCITY
+  !--------------------------------------------------------------------------------
+  ! dm^h - nu^h --> slab2
+  !--------------------------------------------------------------------------------
+
+  if (computePS(18) .or. computePS(21)) then
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                             
+     do kt = 1, kt_stop
+        slab2(:,:,kt) = slab(:,:,kt) - slab2(:,:,kt)
+     enddo
+     !$omp end parallel do
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! Cross PS
+  !--------------------------------------------------------------------------------
+  ! (dm^h - nu^h) x (dm - nu)
+  !--------------------------------------------------------------------------------
+
+  if (computePS(18)) then
+     call powerspectrum(slab2, slab3, pk_all(component,:,:,18))
+     if (rank == 0) call writepowerspectra(18,1)
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! HALO - NU RELATIVE VELOCITY
+  !--------------------------------------------------------------------------------
+  ! nu --> slab --> slab3
+  ! h --> slab
+  ! h - nu --> slab3
+  !--------------------------------------------------------------------------------
+
+  if (computePS(21)) then
+     call velocity_density_V2(0,g0,N_closest_nu,component)
+     call darkmatter
+     
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                             
+     do kt = 1, kt_stop
+        slab3(:,:,kt) = slab(:,:,kt)
+     enddo
+     !$omp end parallel do
+  endif
+
+  if (computePS(21) .or. computePS(11)) then
+     call velocity_density_V2(2,g0,N_closest_h,component)
+     call darkmatter
+  endif
+
+  if (computePS(21)) then
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                     
+     do kt = 1, kt_stop
+        slab3(:,:,kt) = slab(:,:,kt) - slab3(:,:,kt) 
+     enddo
+     !$omp end parallel do
+
+  !--------------------------------------------------------------------------------
+  ! Cross PS
+  !--------------------------------------------------------------------------------
+  ! (dm^h - nu^h) x (h - nu)
+  ! h --> slab2
+  !--------------------------------------------------------------------------------
+
+     call powerspectrum(slab2, slab3, pk_all(component,:,:,21))
+     if (rank == 0) call writepowerspectra(21,1)
+  endif
+
+  if (computePS(11)) then
+     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                     
+     do kt = 1, kt_stop
+        slab2(:,:,kt) = slab(:,:,kt) 
+     enddo
+     !$omp end parallel do
+
+  !--------------------------------------------------------------------------------
+  ! DM^H
+  !--------------------------------------------------------------------------------
+  ! dm^h --> slab
+  !--------------------------------------------------------------------------------
+
+     call densityfield(2, g0)
+     call densitydarkmatter
+     call veltransfer(0)
+     call numerical_gradient(component, -1)
+
+  !--------------------------------------------------------------------------------
+  ! Cross PS
+  !--------------------------------------------------------------------------------
+  ! h x dm^h
+  !--------------------------------------------------------------------------------
+
+     call powerspectrum(slab2, slab, pk_all(component,:,:,11))
+     if (rank == 0) call writepowerspectra(11,1)
+  endif
+
+end subroutine cross_power_loop
+
+! -------------------------------------------------------------------------------------------------------
+
+subroutine cross_power_density
+  !
+  ! Loop for xpower spectra for density
+  !
+  implicit none
+
+  if (rank == 0) then
+     timeCheckpoint = mpi_wtime(ierr)
+     write(*,*) '****************************************************'
+     write(*,*) 'TIME = ', timeCheckpoint - timeStart
+     write(*,*) '****************************************************'
+     write(*,*) 'CROSS-POWER LOOP FOR DENSITY'
+     write(*,*) '****************************************************'
+  endif
+
+  !--------------------------------------------------------------------------------
+  ! Neutrinos
+  !--------------------------------------------------------------------------------
+
+  call densityfield(0,g0)
+  call densitydarkmatter
+  !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                          
+  do kt = 1, kt_stop
+     slab3(:,:,kt) = slab(:,:,kt)
+  enddo
+  !$omp end parallel do                                                                                                                                  
+
+  !--------------------------------------------------------------------------------
+  ! Dark matter
+  !--------------------------------------------------------------------------------
+
+  call densityfield(1,g0)
+  call densitydarkmatter
+  !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                          
+  do kt = 1, kt_stop
+     slab2(:,:,kt) = slab(:,:,kt)
+  enddo
+  !$omp end parallel do                                                                                                                                  
+
+  !--------------------------------------------------------------------------------
+  ! Halos
+  !--------------------------------------------------------------------------------
+
+  call densityfield(2,g0)
+  call densitydarkmatter
+
+
+  !--------------------------------------------------------------------------------
+  ! Cross power spectra
+  !--------------------------------------------------------------------------------
+  ! dm x nu
+  ! dm x halo
+  !--------------------------------------------------------------------------------
+
+  call powerspectrum(slab2, slab3, pk_all(1,:,:,2))
+  call writedenpowerspectra(2)
+
+  call powerspectrum(slab2, slab, pk_all(1,:,:,10))
+  call writedenpowerspectra(10)
+
+
+end subroutine cross_power_density
+
+end program cic_velpower_halo

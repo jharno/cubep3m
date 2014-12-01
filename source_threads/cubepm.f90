@@ -217,6 +217,9 @@ call mpi_barrier(mpi_comm_world,ierr)
 #ifdef ZOOMCHECK
     call zoomcheckpoint
 #endif
+#ifdef BOXDUMP
+    call boxcheckpoint
+#endif
 
 #ifdef CHECKPOINT_KILL
     !! Determine if it is time to write a checkpoint before being killed

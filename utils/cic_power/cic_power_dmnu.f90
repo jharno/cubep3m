@@ -51,7 +51,7 @@ program cic_power_dmnu
 #endif
 
   !! Threading
-  integer(4), parameter :: nt = 8
+  integer(4), parameter :: nt = 16
 
   logical, parameter :: correct_kernel=.false.
   character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints_nu'
@@ -172,6 +172,8 @@ program cic_power_dmnu
   integer, parameter :: kt_stop = nc_pen+2
 #endif
 
+  real(8) globaltime1, globaltime2
+
   !! Equivalence arrays to save memory
 #ifdef SLAB
   equivalence (den,slab_work,recv_cube,xp_buf)
@@ -204,7 +206,10 @@ program cic_power_dmnu
     firstfftw=.true.  ! initialize fftw so that it generates the plans
   
     call read_checkpoint_list
-  
+ 
+    !! Start clock
+    globaltime1 = mpi_wtime(ierr)
+ 
     do cur_checkpoint = 1, num_checkpoints
         
         call initvar
@@ -345,6 +350,10 @@ program cic_power_dmnu
         if (rank == 0) call writepowerspectra(5)
 
     enddo
+
+    !! Output timing stats
+    globaltime2 = mpi_wtime(ierr)
+    if (rank == 0) write(*,*) "ELAPSED PROGRAM TIME: ", globaltime2-globaltime1
   
     call cp_fftw(0)
     call mpi_finalize(ierr)
@@ -626,7 +635,11 @@ contains
         enddo
         !! Convert global halo coordinates to local node coordinates
         do j=1 , np_local_h
+#ifdef COARSE_HACK
+            xvmp_h(1:3, j) = xvmp_h(1:3, j) - slab_coord(:)*nc_node_dim*coarsen_factor
+#else
             xvmp_h(1:3, j) = xvmp_h(1:3, j) - slab_coord(:)*nc_node_dim
+#endif
         enddo
         !! Tally up total mass in halos
         call mpi_allreduce(mh_total_local, mh_total, 1, mpi_real8, mpi_sum, mpi_comm_world, ierr)
@@ -636,15 +649,15 @@ contains
 #ifdef COARSE_HACK
     if (command == 0) then
         do j=1, np_local
-            xvp(1:6,j) = xvp(1:6,j)/coarsen_factor
+            xvp(1:3,j) = xvp(1:3,j)/coarsen_factor
         enddo
     else if (command == 1) then
         do j=1, np_local_dm
-            xvp_dm(1:6,j) = xvp_dm(1:6,j)/coarsen_factor
+            xvp_dm(1:3,j) = xvp_dm(1:3,j)/coarsen_factor
         enddo
     else
         do j=1, np_local_h
-            xvmp_h(1:6,j) = xvmp_h(1:6,j)/coarsen_factor
+            xvmp_h(1:3,j) = xvmp_h(1:3,j)/coarsen_factor
         enddo
     endif
 #endif

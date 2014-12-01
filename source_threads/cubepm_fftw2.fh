@@ -19,6 +19,9 @@ logical, dimension(cores) :: firstfftw2
 integer(4) :: wc_counter, count_i,count_f,count_r,nts, np_local
 real(4) :: a, a_mid, t, tau, dt, dt_old, dt_gas, mass_p, dt_f_acc, dt_vmax, da, dt_c_acc, freeze
 real(4) :: shake_offset(3), cur_sep, dt_pp_acc,dt_pp_ext_acc, dt_max_v, kill_time
+#ifdef BOXDUMP
+integer(4), dimension(nsubcubex*nsubcubey*nsubcubez) :: nsubcuberanks
+#endif
 
 ! :: checkpoint and projection variables
 
@@ -153,6 +156,10 @@ common / divarp / PID
 common / drvar / f_mesh_mass
 #else
 common / drvar / rho_pxy, rho_pxz, rho_pyz, rp_buf, f_mesh_mass
+#endif
+
+#ifdef BOXDUMP
+common / bdvar / nsubcuberanks
 #endif
 
 common / ivar / slab_rank, num_projections, num_checkpoints, &

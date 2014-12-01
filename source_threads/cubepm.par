@@ -94,6 +94,16 @@ real(4), parameter      :: dt_pp_scale = 0.05
 ! arbitrary pp bias (set to increase the force interaction)
 real(4), parameter      :: pp_bias = 1.00 !0.85 !0.1 !0.4642
 
+#ifdef BOXDUMP
+!! size of subrectangle to write particle data
+integer, parameter :: nsubcubex = min(2, nodes_dim)
+integer, parameter :: nsubcubey = min(2, nodes_dim)
+integer, parameter :: nsubcubez = min(2, nodes_dim)
+integer, parameter :: writeBoxEverySteps = 4
+real, parameter :: writeBoxBelowZ = 2.0
+real, parameter :: writeBoxAboveA = 1./(1.+writeBoxBelowZ) 
+#endif
+
 ! testing flags
 
 logical, parameter :: ngp_fmesh_force = .true. 
