@@ -138,23 +138,53 @@ program dist_init
   real, dimension(0:nc_node_dim+1,0:nc_node_dim+1) :: phi_buf
 
   !! Particles arrays for subroutine dm
+#ifdef ZIP
+  real, parameter :: dbuf = 1.4
+  integer, parameter :: mesh_scale = 4
+  integer, parameter :: max_np = int(dbuf*np_node_dim)*np_node_dim**2
+  integer, parameter :: np_buffer = max_np - np_node_dim**3
+  real, dimension(6,np_node_dim,np_node_dim,np_node_dim) :: xvp_grid
+  real, dimension(6,max_np) :: xvp
+  real, dimension(6,np_buffer) :: xp_buf
+  real, dimension(6*np_buffer) :: send_buf, recv_buf
+  integer, parameter :: nm_node_dim = nc_node_dim / mesh_scale
+  integer(4), dimension(nm_node_dim, nm_node_dim, nm_node_dim) :: hoc
+  integer(4) :: ll(max_np)
+#ifdef SLAB
+  real, dimension(nc+2,nc,nc_slab) :: slab_cache
+#else
+  real, dimension(nc, nc_node_dim, nc_pen+2) :: slab_cache
+#endif
+#else
 #ifdef openmp
   real, dimension(6,np_node_dim,np_node_dim,num_threads) :: xvp
 #else
   real, dimension(6,np_node_dim,np_node_dim,1) :: xvp
+#endif
 #endif
 
   !! Timing variables
   real(8) :: sec1, sec2
 
   !! Equivalence arrays to save memory
-  equivalence (phi,slab_work,recv_cube) 
+#ifdef ZIP
+  equivalence (phi,slab_work,recv_cube,send_buf)
+  equivalence (slab,cube,xp_buf,hoc)
+  equivalence (slab_cache, ll, recv_buf)
+  equivalence (xvp, xvp_grid)
+#else
+  equivalence (phi,slab_work,recv_cube)
   equivalence (slab,cube)
+#endif
 
   !! Common block
-  common /rvar/ tf, pkm, pkn, phi_buf, xvp
+  common /rvar/ tf, pkm, pkn, phi_buf
   common / equiv1 / phi
   common / equiv2 / slab
+#ifdef ZIP
+  common / equiv3 / slab_cache
+#endif
+  common / xvar / xvp
 
   call mpi_initialize
 
@@ -179,12 +209,25 @@ program dist_init
   call deltafield
   call potentialfield
 
+#ifdef ZIP
+#ifdef VELTRANSFER
+  call dm_zip(0)
+  call veltransfer
+  call dm_zip(1)
+#else
+  call dm_zip
+#endif
+  call pass_particles
+  call link_list
+  call zip_checkpoint
+#else
 #ifdef VELTRANSFER
   call dm(0)
   call veltransfer
   call dm(1)
 #else
   call dm
+#endif
 #endif
 
   if (rank == 0) call writepowerspectra
@@ -1197,6 +1240,9 @@ end subroutine di_fftw
     call cpu_time(time1)
 
     if (correct_kernel) then
+#ifdef ZIP
+      slab_cache = slab
+#else
       !! write delta to disk so we can build kernel
       if (rank == 0) write(*,*) 'Caching Delta on disk'
       write(rank_s,'(i6)') rank
@@ -1217,6 +1263,7 @@ end subroutine di_fftw
         write(11) slab(:,:,k)
       enddo
       close(11)
+#endif
     else
       slab_work=slab
     endif
@@ -1421,8 +1468,10 @@ end subroutine di_fftw
       if (rank==0) print *,'total delta=',phi8tot
 #endif
 
+#ifdef ZIP
+      slab_work = slab_cache
+#else
       open(11,file=fn,status='old',iostat=ioerr,access='stream')
-
       if (ioerr /= 0) then
         print *,'error opening Delta cache file:',fn
         stop
@@ -1435,6 +1484,7 @@ end subroutine di_fftw
         read(11) slab_work(:,:,k)
       enddo
       close(11)
+#endif
 
     endif
 
@@ -1550,7 +1600,7 @@ subroutine veltransfer
     ind = 0
 #endif
 #ifdef SLAB
-    !$omp parallel default(shared) private(k, j, i, kz, ky,kx, kphys, kr, interpMTF, interpVTF, w1, w2, ii)
+    !$omp parallel default(shared) private(k, j, i, kg, kz, ky,kx, kphys, kr, interpMTF, interpVTF, w1, w2, ii)
     !$omp do schedule(dynamic)
     do k = 1, nc_slab
         kg=k+nc_slab*rank
@@ -1707,6 +1757,7 @@ end function linear_interpolate
 #endif
 
 !!------------------------------------------------------------------!!
+#ifndef ZIP
     !! Dark matter data
     !! xvp(1:3) = x,y,z in grid units from 0 to nc
     !! xvp(4:6) = vx,vy,vz in km/s
@@ -1994,7 +2045,762 @@ end function linear_interpolate
     if (rank == 0) write(*,"(f8.2,a)") time2,'  Called dm'
     return
   end subroutine dm
+!!------------------------------------------------------------------!!
+#else
+#ifdef VELTRANSFER
+  subroutine dm_zip(COMMAND)
+#else
+  subroutine dm_zip
+#endif
+    implicit none
+    integer :: i,j,k,ioerr
+    integer(8) :: pos_out
+    integer :: i1,j1,k1,lb,ub
+    real    :: d,dmin,dmax,sum_dm,sum_dm_local,dmint,dmaxt,vf
+    real*8  :: dsum,dvar,dsumt,dvart
+    real, dimension(3) :: dis,x
+    real*8, dimension(3) :: xav
+    character*250 :: fn
+!! for more than 1+1e6 processes this will have to be increased
+    character(len=6) :: rank_s
+    character(len=7) :: z_s
+    integer(4), dimension(11) :: header_garbage
+    integer(4), parameter :: xsize1 = 4*3*np_node_dim**2
+    integer(4), parameter :: xsize2 = 2*xsize1
+#ifdef NEUTRINOS
+    real(4), parameter :: mfac = 180.8892437/mass_neutrino/scalefactor/3.0**0.5
+    real(4), parameter :: ffac = 50.2476/mass_neutrino/scalefactor !ckT/m =50.25
+#endif
 
+#ifdef VELTRANSFER
+    integer :: COMMAND
+#endif
+#ifdef NEUTRINOS
+    integer :: l
+    real(4) :: rnum1,rnum2,rnum3,rnum4
+#endif
+
+    real time1,time2
+    call cpu_time(time1)
+
+#ifdef NEUTRINOS
+    !! Read cdfTable
+    if (rank == 0) then
+        write(*,*) 'Reading ',cdfTable
+        open(12, file=cdfTable)
+        do k = 1, nv
+        read(12,*) cdf(1,k), cdf(2,k)
+        enddo
+        close(12)
+    endif
+    call mpi_bcast(cdf, 2*nv, mpi_real, 0, mpi_comm_world, ierr)
+#endif
+
+    !! Displace particles
+    !! Finite-difference potential to get displacement field
+    vf=vfactor(scalefactor)
+
+#ifndef NEUTRINOS
+    !$omp parallel default(shared) private(k,k1,j,j1,i,i1)
+#else
+    !$omp parallel default(shared) private(k,k1,j,j1,i,i1,l,rnum1,rnum2,rnum3,rnum4)
+#endif
+#ifdef VELTRANSFER
+    if (COMMAND == 0) then
+        !! First time we call dm We only need the positions
+        !$omp do schedule(dynamic)
+        do k=1,np_node_dim
+            k1=(nc/np)*(k-1)+1
+            do j=1,np_node_dim
+                j1=(nc/np)*(j-1)+1
+                do i=1,np_node_dim
+                    i1=(nc/np)*(i-1)+1
+                    xvp_grid(1,i,j,k)=(phi(i1-1,j1,k1)-phi(i1+1,j1,k1))/2./(4.*pi)+(i1-0.5)
+                    xvp_grid(2,i,j,k)=(phi(i1,j1-1,k1)-phi(i1,j1+1,k1))/2./(4.*pi)+(j1-0.5)
+                    xvp_grid(3,i,j,k)=(phi(i1,j1,k1-1)-phi(i1,j1,k1+1))/2./(4.*pi)+(k1-0.5)
+                enddo
+            enddo
+        enddo
+        !$omp end do
+    else
+        !! Second time we call dm we want velocity
+#ifdef NEUTRINOS
+        !$omp do schedule(static,1) ordered
+#else
+        !$omp do schedule(dynamic)
+#endif
+        do k=1,np_node_dim
+            k1=(nc/np)*(k-1)+1
+#ifdef NEUTRINOS
+            !$omp ordered
+            call random_number(xvp_grid(4:6,:,:,k))
+            !$omp end ordered
+#endif
+            do j=1,np_node_dim
+                j1=(nc/np)*(j-1)+1
+                do i=1,np_node_dim
+                    i1=(nc/np)*(i-1)+1
+#ifdef NEUTRINOS
+                    rnum1 = xvp_grid(4,i,j,k)
+                    rnum2 = xvp_grid(5,i,j,k)
+                    rnum3 = xvp_grid(6,i,j,k)
+#endif
+                    xvp_grid(4,i,j,k)=(phi(i1-1,j1,k1)-phi(i1+1,j1,k1))/2./(4.*pi)
+                    xvp_grid(5,i,j,k)=(phi(i1,j1-1,k1)-phi(i1,j1+1,k1))/2./(4.*pi)
+                    xvp_grid(6,i,j,k)=(phi(i1,j1,k1-1)-phi(i1,j1,k1+1))/2./(4.*pi)
+#ifdef NEUTRINOS
+                    !! Convert to fermi-dirac
+                    do l=1,nv
+                       if (cdf(2,l).GT.rnum1) then
+                          rnum4 = cdf(2,l)-rnum1
+                          if ( (l.NE.1) .AND. (rnum1-cdf(2,l-1) .LT. rnum4) ) then
+                             rnum1 = cdf(1,l-1)
+                          else
+                             rnum1 = cdf(1,l)
+                          endif
+                          exit
+                       endif
+                    enddo
+
+                    !! Convert to fermi-dirac with units rnum1<-rnum1*c*(kT/m)
+                    rnum1 = rnum1 * ffac
+                    rnum2 = rnum2*2.0-1.0 !convert to range 1,-1
+                    rnum3 = rnum3*2.0*pi  !convert to range 0,2pi
+
+                    xvp_grid(4,i,j,k)=xvp_grid(4,i,j,k) + rnum1*(1.0-rnum2**2)**0.5*cos(rnum3)*Vphys2sim
+                    xvp_grid(5,i,j,k)=xvp_grid(5,i,j,k) + rnum1*(1.0-rnum2**2)**0.5*sin(rnum3)*Vphys2sim
+                    xvp_grid(6,i,j,k)=xvp_grid(6,i,j,k) + rnum1*rnum2*Vphys2sim
+#endif
+                enddo
+            enddo
+        enddo
+        !$omp end do
+    endif
+#else
+#ifdef NEUTRINOS
+    !$omp do schedule(static,1) ordered
+#else
+    !$omp do schedule(dynamic)
+#endif
+    do k=1,np_node_dim
+        k1=(nc/np)*(k-1)+1
+        pos_out = 1 + sizeof(np_local) + sizeof(header_garbage) + xsize2*(k-1)
+#ifdef NEUTRINOS
+        !$omp ordered
+        call random_number(xvp_grid(4:6,:,:,k))
+        !$omp end ordered
+#endif
+        do j=1,np_node_dim
+            j1=(nc/np)*(j-1)+1
+            do i=1,np_node_dim
+                i1=(nc/np)*(i-1)+1
+#ifdef NEUTRINOS
+                 rnum1 = xvp_grid(4,i,j,k)
+                 rnum2 = xvp_grid(5,i,j,k)
+                 rnum3 = xvp_grid(6,i,j,k)
+#endif
+                 xvp_grid(4,i,j,k)=(phi(i1-1,j1,k1)-phi(i1+1,j1,k1))/2./(4.*pi)
+                 xvp_grid(5,i,j,k)=(phi(i1,j1-1,k1)-phi(i1,j1+1,k1))/2./(4.*pi)
+                 xvp_grid(6,i,j,k)=(phi(i1,j1,k1-1)-phi(i1,j1,k1+1))/2./(4.*pi)
+                 xvp_grid(1,i,j,k)=xvp_grid(4,i,j,k)+(i1-0.5)
+                 xvp_grid(2,i,j,k)=xvp_grid(5,i,j,k)+(j1-0.5)
+                 xvp_grid(3,i,j,k)=xvp_grid(6,i,j,k)+(k1-0.5)
+                 xvp_grid(4,i,j,k)=xvp_grid(4,i,j,k)*vf
+                 xvp_grid(5,i,j,k)=xvp_grid(5,i,j,k)*vf
+                 xvp_grid(6,i,j,k)=xvp_grid(6,i,j,k)*vf
+#ifdef NEUTRINOS
+                 !! Convert to fermi-dirac
+                 do l=1,nv
+                    if (cdf(2,l).GT.rnum1) then
+                       rnum4 = cdf(2,l)-rnum1
+                       if ( (l.NE.1) .AND. (rnum1-cdf(2,l-1) .LT. rnum4) ) then
+                          rnum1 = cdf(1,l-1)
+                       else
+                          rnum1 = cdf(1,l)
+                       endif
+                       exit
+                    endif
+                 enddo
+
+                 !! Convert to fermi-dirac with units rnum1<-rnum1*c*(kT/m)
+                 rnum1 = rnum1 * ffac
+                 rnum2 = rnum2*2.0-1.0 !convert to range 1,-1
+                 rnum3 = rnum3*2.0*pi  !convert to range 0,2pi
+                 xvp_grid(4,i,j,k)=xvp_grid(4,i,j,k) + rnum1*(1.0-rnum2**2)**0.5*cos(rnum3)*Vphys2sim
+                 xvp_grid(5,i,j,k)=xvp_grid(5,i,j,k) + rnum1*(1.0-rnum2**2)**0.5*sin(rnum3)*Vphys2sim
+                 xvp_grid(6,i,j,k)=xvp_grid(6,i,j,k) + rnum1*rnum2*Vphys2sim
+#endif
+            enddo
+        enddo
+    enddo
+    !$omp end do 
+#endif
+    !$omp end parallel
+
+    call cpu_time(time2)
+    time2=(time2-time1)
+
+    if (rank == 0) write(*,"(f8.2,a)") time2,'  Called dm'
+    return
+
+end subroutine dm_zip
+
+!!--------------------------------------------------------------!!
+
+subroutine pass_particles
+    !
+    ! Pass particles that may have been displaced out of their local volume to
+    ! their corresponding node.
+    !
+
+    implicit none
+
+    integer i,pp,np_buf,np_exit,npo,npi
+    integer(8) :: np_final
+    real x(6),lb,ub
+    integer, dimension(mpi_status_size) :: status,sstatus,rstatus
+    integer :: tag,srequest,rrequest,sierr,rierr
+    real(4), parameter :: eps = 1.0e-03
+
+    real(8) time1, time2
+    time1 = mpi_wtime(ierr)
+
+    np_local = np_node_dim**3
+
+    !
+    ! Identify particles within the buffer
+    !
+
+    lb = 0.
+    ub = real(nc_node_dim)
+
+    np_buf = 0
+    pp = 1
+
+    do
+
+        if (pp > np_local) exit
+
+        x = xvp(:, pp)
+
+        !! See if it lies within the buffer
+        if (x(1) < lb .or. x(1) >= ub .or. x(2) < lb .or. x(2) >= ub .or. &
+            x(3) < lb .or. x(3) >= ub ) then
+
+            !! Make sure we aren't exceeding the maximum
+            np_buf = np_buf + 1
+
+            if (np_buf > np_buffer) then
+                print *, rank, 'np_buffer =', np_buffer, 'exceeded - np_buf =', np_buf
+                call mpi_abort(mpi_comm_world, ierr, ierr)
+            endif
+
+            xp_buf(:, np_buf) = xvp(:, pp)
+            xvp(:, pp)        = xvp(:, np_local)
+            np_local          = np_local - 1
+
+            cycle
+
+        endif
+
+        pp = pp + 1
+
+    enddo
+
+    call mpi_reduce(np_buf, np_exit, 1, mpi_integer, mpi_sum, 0, mpi_comm_world, ierr)
+
+    if (rank == 0) print *,'Total exiting particles = ',np_exit
+
+    !
+    ! Pass +x
+    !
+
+    !! Find particles that need to be passed
+
+    tag = 11
+    npo = 0
+    pp  = 1
+    do
+      if (pp > np_buf) exit
+      if (xp_buf(1, pp) >= ub) then
+        npo = npo + 1
+        send_buf((npo-1)*6+1:npo*6) = xp_buf(:, pp)
+        xp_buf(:, pp) = xp_buf(:, np_buf)
+        np_buf = np_buf - 1
+        cycle
+      endif
+      pp = pp + 1
+    enddo
+
+#ifdef DEBUG
+    do i = 0, nodes-1
+      if (rank == i) print *, rank, 'np_out=', npo
+      call mpi_barrier(mpi_comm_world, ierr)
+    enddo
+#endif 
+
+    npi = npo
+
+    call mpi_sendrecv_replace(npi, 1, mpi_integer, cart_neighbor(6), &
+                              tag, cart_neighbor(5), tag, mpi_comm_world, &
+                              status, ierr)
+
+    call mpi_isend(send_buf, npo*6, mpi_real, cart_neighbor(6), &
+                   tag, mpi_comm_world, srequest, sierr)
+    call mpi_irecv(recv_buf, npi*6, mpi_real, cart_neighbor(5), &
+                   tag, mpi_comm_world, rrequest, rierr)
+    call mpi_wait(srequest, sstatus, sierr)
+    call mpi_wait(rrequest, rstatus, rierr)
+
+    do pp = 1, npi
+      xp_buf(:, np_buf + pp) = recv_buf((pp-1)*6+1:pp*6)
+      xp_buf(1, np_buf + pp) = max(xp_buf(1, np_buf+pp) - ub, lb)
+    enddo
+
+    pp = 1
+
+    do
+      if (pp > npi) exit
+      x = xp_buf(:, np_buf + pp)
+      if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
+          x(3) >= lb .and. x(3) < ub ) then
+        np_local = np_local + 1
+        xvp(:, np_local) = x
+        xp_buf(:, np_buf+pp) = xp_buf(:, np_buf+npi)
+        npi = npi - 1
+        cycle
+      endif
+      pp = pp + 1
+    enddo
+
+    np_buf = np_buf + npi
+
+    !
+    ! Pass -x
+    !
+
+    tag = 12
+    npo = 0
+    pp  = 1
+    do
+      if (pp > np_buf) exit
+      if (xp_buf(1, pp) < lb) then
+        npo = npo + 1
+        send_buf((npo-1)*6+1:npo*6) = xp_buf(:, pp)
+        xp_buf(:, pp) = xp_buf(:, np_buf)
+        np_buf = np_buf - 1
+        cycle
+      endif
+      pp = pp + 1
+    enddo
+
+    npi = npo
+
+    call mpi_sendrecv_replace(npi, 1, mpi_integer, cart_neighbor(5), &
+                              tag, cart_neighbor(6), tag, mpi_comm_world, &
+                              status, ierr)
+
+    call mpi_isend(send_buf, npo*6, mpi_real, cart_neighbor(5), &
+                   tag, mpi_comm_world, srequest, sierr)
+    call mpi_irecv(recv_buf, npi*6, mpi_real, cart_neighbor(6), &
+                   tag, mpi_comm_world, rrequest, rierr)
+    call mpi_wait(srequest, sstatus, sierr)
+    call mpi_wait(rrequest, rstatus, rierr)
+
+    do pp = 1, npi
+      xp_buf(:, np_buf+pp) = recv_buf((pp-1)*6+1:pp*6)
+      xp_buf(1, np_buf+pp) = min(xp_buf(1,np_buf+pp) + ub, ub-eps)
+    enddo
+
+    pp = 1
+    do
+      if (pp > npi) exit
+      x = xp_buf(:, np_buf+pp)
+      if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
+          x(3) >= lb .and. x(3) < ub ) then
+        np_local = np_local + 1
+        xvp(:, np_local) = x
+        xp_buf(:, np_buf+pp) = xp_buf(:, np_buf+npi)
+        npi = npi - 1
+        cycle
+      endif
+      pp = pp + 1
+    enddo
+
+    np_buf = np_buf + npi
+
+    !
+    ! Pass +y
+    !
+
+    tag = 13
+    npo = 0
+    pp  = 1
+    do
+      if (pp > np_buf) exit
+      if (xp_buf(2, pp) >= ub) then
+        npo = npo + 1
+        send_buf((npo-1)*6+1:npo*6) = xp_buf(:, pp)
+        xp_buf(:, pp) = xp_buf(:, np_buf)
+        np_buf = np_buf - 1
+        cycle
+      endif
+      pp = pp + 1
+    enddo
+
+    npi = npo
+
+    call mpi_sendrecv_replace(npi, 1, mpi_integer, cart_neighbor(4), &
+                              tag, cart_neighbor(3), tag, mpi_comm_world, &
+                              status, ierr)
+
+    call mpi_isend(send_buf, npo*6, mpi_real, cart_neighbor(4), &
+                   tag, mpi_comm_world, srequest, sierr)
+    call mpi_irecv(recv_buf, npi*6, mpi_real, cart_neighbor(3), &
+                   tag, mpi_comm_world, rrequest, rierr)
+    call mpi_wait(srequest, sstatus, sierr)
+    call mpi_wait(rrequest, rstatus, rierr)
+
+    do pp = 1, npi
+      xp_buf(:, np_buf+pp) = recv_buf((pp-1)*6+1:pp*6)
+      xp_buf(2, np_buf+pp) = max(xp_buf(2, np_buf+pp)-ub, lb)
+    enddo
+
+    pp = 1
+    do
+      if (pp > npi) exit
+      x = xp_buf(:, np_buf+pp)
+      if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
+          x(3) >= lb .and. x(3) < ub ) then
+        np_local = np_local + 1
+        xvp(:, np_local) = x
+        xp_buf(:, np_buf+pp) = xp_buf(:, np_buf+npi)
+        npi = npi-1
+        cycle
+      endif
+      pp = pp + 1
+    enddo
+
+    np_buf = np_buf + npi
+
+    !
+    ! Pass -y
+    !
+
+    tag = 14
+    npo = 0
+    pp  = 1
+    do
+      if (pp > np_buf) exit
+      if (xp_buf(2,pp) < lb) then
+        npo = npo+1
+        send_buf((npo-1)*6+1:npo*6) = xp_buf(:, pp)
+        xp_buf(:, pp) = xp_buf(:, np_buf)
+        np_buf = np_buf - 1
+        cycle
+      endif
+      pp = pp + 1
+    enddo
+
+    npi = npo
+
+    call mpi_sendrecv_replace(npi, 1, mpi_integer, cart_neighbor(3), &
+                              tag, cart_neighbor(4), tag, mpi_comm_world, &
+                              status, ierr)
+
+    call mpi_isend(send_buf, npo*6, mpi_real, cart_neighbor(3), &
+                   tag, mpi_comm_world, srequest, sierr)
+    call mpi_irecv(recv_buf, npi*6, mpi_real, cart_neighbor(4), &
+                   tag, mpi_comm_world, rrequest, rierr)
+    call mpi_wait(srequest, sstatus, sierr)
+    call mpi_wait(rrequest, rstatus, rierr)
+
+    do pp = 1, npi
+      xp_buf(:, np_buf+pp) = recv_buf((pp-1)*6+1:pp*6)
+      xp_buf(2, np_buf+pp) = min(xp_buf(2, np_buf+pp)+ub, ub-eps)
+    enddo
+
+    pp = 1
+    do
+      if (pp > npi) exit
+      x = xp_buf(:, np_buf+pp)
+      if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
+          x(3) >= lb .and. x(3) < ub ) then
+        np_local = np_local+1
+        xvp(:, np_local) = x
+        xp_buf(:, np_buf+pp) = xp_buf(:, np_buf+npi)
+        npi=npi-1
+        cycle
+      endif
+      pp = pp + 1
+    enddo
+
+    np_buf = np_buf + npi
+
+    !
+    ! Pass +z
+    !
+
+    tag = 15
+    npo = 0
+    pp  = 1
+    do
+      if (pp > np_buf) exit
+      if (xp_buf(3, pp) >= ub) then
+        npo = npo + 1
+        send_buf((npo-1)*6+1:npo*6) = xp_buf(:, pp)
+        xp_buf(:, pp) = xp_buf(:, np_buf)
+        np_buf = np_buf - 1
+        cycle
+      endif
+      pp = pp + 1
+    enddo
+
+    npi = npo
+
+    call mpi_sendrecv_replace(npi,1,mpi_integer,cart_neighbor(2), &
+                              tag,cart_neighbor(1),tag,mpi_comm_world, &
+                              status,ierr)
+
+    call mpi_isend(send_buf,npo*6,mpi_real,cart_neighbor(2), &
+                   tag,mpi_comm_world,srequest,sierr)
+    call mpi_irecv(recv_buf,npi*6,mpi_real,cart_neighbor(1), &
+                   tag,mpi_comm_world,rrequest,rierr)
+    call mpi_wait(srequest,sstatus,sierr)
+    call mpi_wait(rrequest,rstatus,rierr)
+
+    do pp=1,npi
+      xp_buf(:,np_buf+pp)=recv_buf((pp-1)*6+1:pp*6)
+      xp_buf(3,np_buf+pp)=max(xp_buf(3,np_buf+pp)-ub,lb)
+    enddo
+
+    pp=1
+    do
+      if (pp > npi) exit
+      x=xp_buf(:,np_buf+pp)
+      if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
+          x(3) >= lb .and. x(3) < ub ) then
+        np_local=np_local+1
+        xvp(:,np_local)=x
+        xp_buf(:,np_buf+pp)=xp_buf(:,np_buf+npi)
+        npi=npi-1
+        cycle
+      endif
+      pp=pp+1
+    enddo
+
+    np_buf=np_buf+npi
+
+    !
+    ! Pass -z
+    !
+
+    tag=16
+    npo=0
+    pp=1
+    do
+      if (pp > np_buf) exit
+      if (xp_buf(3,pp) < lb) then
+        npo=npo+1
+        send_buf((npo-1)*6+1:npo*6)=xp_buf(:,pp)
+        xp_buf(:,pp)=xp_buf(:,np_buf)
+        np_buf=np_buf-1
+        cycle
+      endif
+      pp=pp+1
+    enddo
+
+    npi = npo
+
+    call mpi_sendrecv_replace(npi,1,mpi_integer,cart_neighbor(1), &
+                              tag,cart_neighbor(2),tag,mpi_comm_world, &
+                              status,ierr)
+
+    call mpi_isend(send_buf,npo*6,mpi_real,cart_neighbor(1), &
+                   tag,mpi_comm_world,srequest,sierr)
+    call mpi_irecv(recv_buf,npi*6,mpi_real,cart_neighbor(2), &
+                   tag,mpi_comm_world,rrequest,rierr)
+    call mpi_wait(srequest,sstatus,sierr)
+    call mpi_wait(rrequest,rstatus,rierr)
+
+    do pp=1,npi
+      xp_buf(:,np_buf+pp)=recv_buf((pp-1)*6+1:pp*6)
+      xp_buf(3,np_buf+pp)=min(xp_buf(3,np_buf+pp)+ub,ub-eps)
+    enddo
+
+    pp=1
+    do
+      if (pp > npi) exit
+      x=xp_buf(:,np_buf+pp)
+      if (x(1) >= lb .and. x(1) < ub .and. x(2) >= lb .and. x(2) < ub .and. &
+          x(3) >= lb .and. x(3) < ub ) then
+        np_local=np_local+1
+        xvp(:,np_local)=x
+        xp_buf(:,np_buf+pp)=xp_buf(:,np_buf+npi)
+        npi=npi-1
+        cycle
+      endif
+      pp=pp+1
+    enddo
+
+    np_buf=np_buf+npi
+
+  call mpi_reduce(np_buf,np_exit,1,mpi_integer,mpi_sum,0, mpi_comm_world,ierr)
+  call mpi_reduce(int(np_local,kind=8),np_final,1,mpi_integer8,mpi_sum,0,  mpi_comm_world,ierr)
+
+  if (rank == 0) then
+    if (np_final /= int(np,kind=8)**3) then
+        print *,'ERROR: total number of particles incorrect after passing'
+    endif
+  endif
+
+  !! Check for particles out of bounds
+  do i=1,np_local
+    if (xvp(1,i) < 0 .or. xvp(1,i) >= nc_node_dim .or. &
+         xvp(2,i) < 0 .or. xvp(2,i) >= nc_node_dim .or. &
+         xvp(3,i) < 0 .or. xvp(3,i) >= nc_node_dim) then
+       print *,'particle out of bounds',rank,i,xvp(:3,i),nc_node_dim
+    endif
+  enddo
+
+    time2 = mpi_wtime(ierr)
+    if (rank == 0) write(*,*) 'total buffered particles =', np_exit
+    if (rank == 0) write(*,*) 'total particles          =', np_final
+    if (rank == 0) write(*, *) "Finished pass_particles ... elapsed time = ", time2-time1
+
+    return
+
+end subroutine pass_particles
+
+!!--------------------------------------------------------------!!
+
+subroutine link_list
+    !
+    ! Construct a link list on the scale nm_node_dim which is coarsed by a
+    ! factor of mesh_scale w.r.t. to nc_node_dim.
+    !
+
+    implicit none
+
+    integer(4) :: i, j, k, pp
+    real(8) :: sec1, sec2
+
+    sec1 = mpi_wtime(ierr)
+
+    ll(:) = 0
+    do k = 1, nm_node_dim 
+        hoc(:, :, k) = 0
+    enddo
+
+    pp = 1
+    do
+        if (pp > np_local) exit
+        i = floor(xvp(1, pp)/mesh_scale) + 1
+        j = floor(xvp(2, pp)/mesh_scale) + 1
+        k = floor(xvp(3, pp)/mesh_scale) + 1
+        if (i < 1 .or. i > nm_node_dim .or. &
+            j < 1 .or. j > nm_node_dim .or. &
+            k < 1 .or. k > nm_node_dim) then
+            write(*,*) "WARNING: LinkList Particle Deleted: ", xvp(1:3,pp)
+            xvp(:,pp) = xvp(:,np_local)
+            np_local = np_local - 1
+            cycle
+        else
+            ll(pp) = hoc(i, j, k)
+            hoc(i, j, k) = pp
+        endif
+        pp = pp + 1
+    enddo
+
+    sec2 = mpi_wtime(ierr)
+    if (rank == 0) write(*,*) "Finished link_list ... elapsed time = ", sec2 - sec1
+
+end subroutine link_list
+
+!!--------------------------------------------------------------!!
+
+subroutine zip_checkpoint
+    !
+    ! Outputs particle positions and velocities using the zip checkpoint
+    ! technique.
+    !
+    
+    implicit none
+
+    character (len=200) :: fdm_zip1,fdm_zip2,fdm_zip3
+    character (len=6) :: rank_s
+    character (len=7) :: z_s
+    integer(4), dimension(11) :: header_garbage
+    integer(4), parameter :: v_resolution = 16384
+    integer(4) :: rhoc_i4
+    real(4) :: vmax, vmax_local, v_r2i
+    real(4) :: shake_offset(3)
+    integer :: k, j, i, pp
+    integer :: fstat
+
+    real(8) :: sec1, sec2
+    sec1 = mpi_wtime(ierr)
+
+    vmax_local = maxval(abs(xvp(4:6,1:np_local)))
+    call mpi_allreduce(vmax_local, vmax, 1, mpi_real, mpi_max, mpi_comm_world, ierr)
+    v_r2i = v_resolution/vmax
+
+    write(z_s,'(f7.3)') redshift
+    z_s=adjustl(z_s)
+
+    write(rank_s,'(i6)') rank
+    rank_s=adjustl(rank_s)
+
+#ifdef NEUTRINOS
+    fdm_zip1=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip1_'//rank_s(1:len_trim(rank_s))//'_nu.dat'
+    fdm_zip2=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip2_'//rank_s(1:len_trim(rank_s))//'_nu.dat'
+    fdm_zip3=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip3_'//rank_s(1:len_trim(rank_s))//'_nu.dat'
+#else
+    fdm_zip1=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip1_'//rank_s(1:len_trim(rank_s))//'.dat'
+    fdm_zip2=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip2_'//rank_s(1:len_trim(rank_s))//'.dat'
+    fdm_zip3=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip3_'//rank_s(1:len_trim(rank_s))//'.dat'
+#endif
+    open(unit=11, file=fdm_zip1, status="replace", iostat=fstat, access="stream", buffered='yes')
+    open(unit=12, file=fdm_zip2, status="replace", iostat=fstat, access="stream", buffered='yes')
+    open(unit=13, file=fdm_zip3, status="replace", iostat=fstat, access="stream", buffered='yes')
+
+    header_garbage(:) = 0
+    shake_offset(:) = 0
+    write(11) np_local, header_garbage, v_r2i, shake_offset
+
+    do k = 1, nm_node_dim
+        do j = 1, nm_node_dim
+            do i = 1, nm_node_dim 
+                rhoc_i4 = 0
+                pp = hoc(i,j,k)
+                do while (pp > 0)
+                    rhoc_i4 = rhoc_i4 + 1
+                    write(11) int(mod(xvp(1:3,pp)/mesh_scale,1.)*256,kind=1)
+                    write(11) int(xvp(4:6,pp)*v_r2i,kind=2)
+                    pp = ll(pp)
+                enddo
+                if (rhoc_i4 < 255) then
+                    write(12) int(rhoc_i4,kind=1) ! write density in int1
+                else
+                    write(12) int(255,kind=1)
+                    write(13) rhoc_i4
+                endif
+            enddo
+        enddo
+    enddo
+
+    close(11)
+    close(12)
+    close(13)
+
+    sec2 = mpi_wtime(ierr)
+    if (rank == 0) then
+        write(*,*) "vmax, v_r2i = ", vmax, v_r2i
+        write(*,*) "Finished zip_checkpoint ... elapsed time = ", sec2 - sec1
+    endif
+
+end subroutine zip_checkpoint
+#endif
 !!--------------------------------------------------------------!!
 
   subroutine powerspectrum(pk)
@@ -2169,6 +2975,9 @@ end function linear_interpolate
     do k=1,nc_pen+2
 #endif
        slab(:,:,k)=0
+#ifdef ZIP
+       slab_cache(:,:,k)=0
+#endif
     enddo
     !$omp end do
     !$omp do
