@@ -18,7 +18,7 @@ srfac = 1
 
 # Set this true if using P3DFFT for pencil decomposition
 pencil = True
-pencil_ICs = False 
+pencil_ICs = True 
 
 # Set this true if using ZIP checkpointing method
 zip = True
@@ -58,6 +58,9 @@ pp_range    = 2
 nlist       = 5 * (nc_halo_max + 1)**3
 max_maxima  = 5 * nc_halo_max**3
 max_halo_np = 5 * (nc_halo_max + 1)**3
+
+dbuf_ICs       = 1.4
+mesh_scale_ICs = 4
 
 # ---------------------------------------------------------------------
 # MAIN CUBEP3M CODE
@@ -384,17 +387,14 @@ if pencil_ICs:
 
 if neutrinos and zip:
 
-    dbuf = 1.4
-    mesh_scale = 4
-
     #
     # Sizes of some arrays are different depending on ratio_nudm_dim 
     #
     
     np_node_dim_dm = np_node_dim / ratio_nudm_dim
-    nm_node_dim = nc_node_dim / mesh_scale
-    max_np    = int(dbuf*np_node_dim)*np_node_dim**2
-    max_np_dm = int(dbuf*np_node_dim_dm)*np_node_dim_dm**2    
+    nm_node_dim = nc_node_dim / mesh_scale_ICs
+    max_np    = int(dbuf_ICs*np_node_dim)*np_node_dim**2
+    max_np_dm = int(dbuf_ICs*np_node_dim_dm)*np_node_dim_dm**2    
     np_buffer    = max_np - np_node_dim**3
     np_buffer_dm = max_np_dm - np_node_dim_dm**3
 
@@ -462,39 +462,41 @@ if neutrinos and zip:
     for i in xrange(2):
 
         if i == 0:
+            bb = "NEUTRINO EXECUTABLE"
             b1 = bytes_eq1
             b2 = bytes_eq2
             b3 = bytes_eq3
 
         if i == 1:
+            bb = "DARK MATTER EXECUTABLE"
             b1 = bytes_eq1_dm
             b2 = bytes_eq2_dm
             b3 = bytes_eq3_dm
 
         if b1 != phi:
-            print " *** Adjust common block for phi, slab_work, recv_cube, and send_buf *** "
+            print " *** Adjust common block for phi, slab_work, recv_cube, and send_buf in " + bb + " *** "
             print "     phi       = ", phi
             print "     slab_work = ", slab_work
             print "     recv_cube = ", recv_cube
             if i == 0:
-                print "     send_buf_nu = ", send_buf
+                print "   send_buf_nu = ", send_buf
             else:
-                print "     send_buf_dm = ", send_buf_dm
+                print "   send_buf_dm = ", send_buf_dm
             print
 
         if b2 != slab:
-            print " *** Adjust common block for slab, cube, and xp_buf *** "
+            print " *** Adjust common block for slab, cube, and xp_buf in " + bb + " *** "
             print "     slab = ", slab
             print "     cube = ", cube
             if i == 0:
-                print "    xp_buf_nu = ", xp_buf
+                print "xp_buf_nu = ", xp_buf
             else:
-                print "    xp_buf_dm = ", xp_buf_dm
+                print "xp_buf_dm = ", xp_buf_dm
             print "      hoc = ", hoc
             print
 
         if b3 != slab_cache:
-            print " *** Adjust common block for slab_cache, ll, and recv_buf *** " 
+            print " *** Adjust common block for slab_cache, ll, and recv_buf in " + bb + " *** " 
             print "     slab_cache = ", slab_cache
             if i == 0:
                 print "          ll_nu = ", ll
