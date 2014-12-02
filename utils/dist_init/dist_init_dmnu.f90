@@ -53,18 +53,18 @@ program dist_init
 #endif
 
   !! NEUTRINO sims may use this:
-  integer, parameter      :: nk=612
+  integer, parameter      :: nk=611
 !fntf depends on redshift which could vary for neutrinos and dm
 #ifdef NEUTRINOS
-  character(*), parameter :: fntf = 'sim_mnu0p2_transfer_out_z10.dat'
+  character(*), parameter :: fntf = 'sim_mnu0p05_transfer_out_z5.dat'
 #else
-  character(*), parameter :: fntf = 'sim_mnu0p2_transfer_out_z10.dat'
+  character(*), parameter :: fntf = 'sim_mnu0p05_transfer_out_z5.dat'
 #endif
 #ifdef VELTRANSFER
 #ifdef NEUTRINOS
-  character(*), parameter :: vfntf = 'sim_mnu0p2_veltransfer_out_z10.dat'
+  character(*), parameter :: vfntf = 'sim_mnu0p05_veltransfer_out_z5.dat'
 #else
-  character(*), parameter :: vfntf = 'sim_mnu0p2_veltransfer_out_z10.dat'
+  character(*), parameter :: vfntf = 'sim_mnu0p05_veltransfer_out_z5.dat'
 #endif
   real(4), parameter :: Vphys2sim = 1.0/(300. * sqrt(omega_m) * box * (1. + redshift) / 2. / nc)!(180.8892437/mass_neutrino)/(box*300.0*(omega_m)**0.5/2.0/nc)
 #endif
