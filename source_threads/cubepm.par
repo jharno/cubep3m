@@ -63,6 +63,9 @@ integer(4), parameter   :: restart_checkpoint = 1 ! line number in input/checkpo
 
 logical, parameter :: restart_kill = .false. !! Only matters if CHECKPOINT_KILL flag used
 character(*), parameter :: reskill_prefix = '0.000'
+#ifdef ZIP
+logical, parameter :: restart_kill_zip = .true. !! Set false if killed during particle_pass
+#endif
 
 !! Will checkpoint with this amount of time (in seconds) remaining if CHECKPOINT_KILL flag is used.
 real(4), parameter :: kill_remaining = 30.*60.

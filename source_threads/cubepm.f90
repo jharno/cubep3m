@@ -239,63 +239,55 @@ call mpi_barrier(mpi_comm_world,ierr)
 
       dt_old = 0.0
       call update_position
-
-#ifdef MOVE_GRID_BACK
-      call move_grid_back
+!#ifdef MOVE_GRID_BACK
+!      call move_grid_back
+!#endif
+#ifdef ZIP
+    call move_grid_back
+    call link_list
+    call particle_pass
+    call delete_particles
+    call link_list
 #endif
 
-      !dt = 0.0
 
 #ifdef CHECKPOINT_KILL
       if (kill_step .eqv. .true. .and. kill_step_done .eqv. .false.) then
-
         sec1a = mpi_wtime(ierr)
         if (rank == 0) write(*,*) "STARTING CHECKPOINT_KILL: ", sec1a
-
+#ifndef ZIP
         call checkpoint_kill
-
+#else
+        call checkpoint_kill(.true.)
+#endif
         sec2a = mpi_wtime(ierr)
         if (rank == 0) write(*,*) "STOPPING CHECKPOINT_KILL: ", sec2a
         if (rank == 0) write(*,*) "ELAPSED CHECKPOINT_KILL TIME: ", sec2a-sec1a
-
         kill_step_done = .true. ! Don't want to keep doing this
-
       endif
 #endif
 
       if (checkpoint_step) then
-
         sec1a = mpi_wtime(ierr)
         if (rank == 0) write(*,*) "STARTING CHECKPOINT: ", sec1a
-
         call checkpoint
         if (rank == 0) write(*,*) 'finished checkpoint',t_elapsed(wc_counter)
-
         sec2a = mpi_wtime(ierr)
         if (rank == 0) write(*,*) "STOPPING CHECKPOINT: ", sec2a
         if (rank == 0) write(*,*) "ELAPSED CHECKPOINT TIME: ", sec2a-sec1a
-
       endif
 
       if (projection_step.or.halofind_step) then
-
-!! Update ll and pass particles
-
         call link_list
         call particle_pass
-
         if (halofind_step) then
-
           sec1a = mpi_wtime(ierr)
           if (rank == 0) write(*,*) "STARTING HALOFIND: ", sec1a
-
           call halofind
           if (rank == 0) write(*,*) 'finished halofind',t_elapsed(wc_counter)
-
           sec2a = mpi_wtime(ierr)
           if (rank == 0) write(*,*) "STOPPING HALOFIND: ", sec2a
           if (rank == 0) write(*,*) "ELAPSED HALOFIND TIME: ", sec2a-sec1a
-
         endif
 
         if (projection_step) then
@@ -320,18 +312,17 @@ call mpi_barrier(mpi_comm_world,ierr)
            stop
         endif
 
-
-
-!! Clean up ghost particles
-
+        !! Clean up ghost particles
         call delete_particles
 
       endif
+
       dt = 0.0
 
     endif
 
     if (nts == max_nts .or. final_step .or. a .gt. 1.0) exit
+
   enddo
 
 
