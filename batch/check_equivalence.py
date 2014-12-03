@@ -18,7 +18,8 @@ srfac = 1
 
 # Set this true if using P3DFFT for pencil decomposition
 pencil = True
-pencil_ICs = True 
+pencil_ICs = True
+slab_fftw3_ICs = False 
 
 # Set this true if using ZIP checkpointing method
 zip = True
@@ -378,12 +379,21 @@ slab        = 4 * (nc + 2) * nc * nc_slab
 slab_work   = 4 * (nc + 2) * nc * nc_slab
 phi         = 4 * (nc_node_dim + 2)**3
 phi_buf     = 4 * (nc_node_dim + 2)**2
+slab_cmplx  = 0
 
 # Changes if P3DFFT is used instead of slab decomposition on the fine mesh.
 if pencil_ICs:
     recv_cube   = 4 * nc_node_dim**2 * nc_pen * nodes_pen
     slab        = 4 * nc * nc_node_dim * (nc_pen+2)
     slab_work   = 4 * nc * nc_node_dim * (nc_pen+2)
+
+# Consistency check
+if pencil_ICs and slab_fftw3_ICs:
+    print "You can only pick one of pencil_ICs/slab_fftw3_ICs !!"
+    exit()
+
+if slab_fftw3_ICs: 
+    slab_cmplx = 2 * slab
 
 if neutrinos and zip:
 
@@ -416,14 +426,20 @@ if neutrinos and zip:
 
     bytes_eq1    = max(phi, slab_work, recv_cube, send_buf)
     bytes_eq1_dm = max(phi, slab_work, recv_cube, send_buf_dm)
-    bytes_eq2    = max(slab, cube, xp_buf, hoc)
-    bytes_eq2_dm = max(slab, cube, xp_buf_dm, hoc)
+    if not slab_fftw3_ICs:
+        bytes_eq2    = max(slab, cube, xp_buf, hoc)
+        bytes_eq2_dm = max(slab, cube, xp_buf_dm, hoc)
+    else:
+        bytes_eq2    = max(cube, xp_buf, hoc)
+        bytes_eq2_dm = max(cube, xp_buf_dm, hoc)
     bytes_eq3    = max(slab_cache, ll, recv_buf)
     bytes_eq3_dm = max(slab_cache, ll_dm, recv_buf_dm)
     bytes_eq4    = xvp
     bytes_eq4_dm = xvp_dm
     bytes_oth    = phi_buf
-
+    if slab_fftw3_ICs:
+        bytes_oth += slab_cmplx
+        
     #
     # Determine memory usage of large P3DFFT arrays if applicable
     #
@@ -484,16 +500,27 @@ if neutrinos and zip:
                 print "   send_buf_dm = ", send_buf_dm
             print
 
-        if b2 != slab:
-            print " *** Adjust common block for slab, cube, and xp_buf in " + bb + " *** "
-            print "     slab = ", slab
-            print "     cube = ", cube
-            if i == 0:
-                print "xp_buf_nu = ", xp_buf
-            else:
-                print "xp_buf_dm = ", xp_buf_dm
-            print "      hoc = ", hoc
-            print
+        if not slab_fftw3_ICs :
+            if b2 != slab:
+                print " *** Adjust common block for slab, cube, hoc, and xp_buf in " + bb + " *** "
+                print "     slab = ", slab
+                print "     cube = ", cube
+                if i == 0:
+                    print "xp_buf_nu = ", xp_buf
+                else:
+                    print "xp_buf_dm = ", xp_buf_dm
+                print "      hoc = ", hoc
+                print
+        else:
+            if b2 != cube:
+                print " *** Adjust common block for cube, hoc, and xp_buf in " + bb + " *** "
+                print "     cube = ", cube
+                if i == 0:
+                    print "xp_buf_nu = ", xp_buf
+                else:
+                    print "xp_buf_dm = ", xp_buf_dm
+                print "      hoc = ", hoc
+                print
 
         if b3 != slab_cache:
             print " *** Adjust common block for slab_cache, ll, and recv_buf in " + bb + " *** " 
@@ -515,8 +542,13 @@ else:
     #
 
     bytes_eq1 = max(phi, slab_work, recv_cube)
-    bytes_eq2 = max(slab, cube)
+    if not slab_fftw3_ICs:
+        bytes_eq2 = max(slab, cube)
+    else:
+        bytes_eq2 = max(slab_cmplx, slab)
     bytes_oth = phi_buf + xvp
+    if slab_fftw3_ICs:
+        bytes_oth += cube
 
     #
     # Determine memory usage of large P3DFFT arrays if applicable
@@ -558,9 +590,10 @@ else:
         print "     recv_cube = ", recv_cube
         print
 
-    if bytes_eq2 != slab:
-        print " *** Adjust common block for slab and cube *** "
-        print "     slab = ", slab
-        print "     cube = ", cube
-        print
+    if not slab_fftw3_ICs:
+        if bytes_eq2 != slab:
+            print " *** Adjust common block for slab and cube *** "
+            print "     slab = ", slab
+            print "     cube = ", cube
+            print
 

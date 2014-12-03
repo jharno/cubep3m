@@ -10,10 +10,17 @@ program dist_init
 
   use omp_lib
 
+#ifdef SFFTW3
+  use, intrinsic :: iso_c_binding
+#endif
+
   implicit none
 
   include 'mpif.h'
   include '../../parameters'
+#ifdef SFFTW3
+  include 'fftw3-mpi.f03'
+#endif
 
   integer, parameter  :: num_threads = cores*nested_threads 
 #ifdef NEUTRINOS
@@ -99,7 +106,11 @@ program dist_init
 
   integer(4) :: np_local,wc_counter, count_i,count_f,count_r
   logical :: firstfftw
+#ifdef SFFTW3
+  type(C_PTR) :: plan, iplan
+#else
   integer(8) :: plan, iplan
+#endif
 
 ! :: simulation variables
  
@@ -130,6 +141,9 @@ program dist_init
 #ifdef SLAB
   real, dimension(nc+2,nc,nc_slab) :: slab, slab_work
   real, dimension(nc_node_dim,nc_node_dim,nc_slab,0:nodes_slab-1) :: recv_cube
+#ifdef SFFTW3
+  complex(4), dimension(nc+2,nc,nc_slab) :: slab_cmplx
+#endif
 #else
   real, dimension(nc, nc_node_dim, nc_pen+2) :: slab, slab_work
   real, dimension(nc_node_dim, nc_node_dim, nc_pen, 0:nodes_pen-1)      :: recv_cube
@@ -168,21 +182,39 @@ program dist_init
 
   !! Equivalence arrays to save memory
 #ifdef ZIP
+
   equivalence (phi,slab_work,recv_cube,send_buf)
-  equivalence (slab,cube,xp_buf,hoc)
-  equivalence (slab_cache, ll, recv_buf)
-  equivalence (xvp, xvp_grid)
+#ifdef SFFTW3
+  equivalence (cube,xp_buf,hoc)
+  equivalence (slab_cmplx,slab)
 #else
+  equivalence (slab,cube,xp_buf,hoc)
+#endif
+  equivalence (slab_cache,ll,recv_buf)
+  equivalence (xvp, xvp_grid)
+
+#else
+
   equivalence (phi,slab_work,recv_cube)
+#ifdef SFFTW3
+  equivalence (slab_cmplx,slab)
+#else
   equivalence (slab,cube)
+#endif
+
 #endif
 
   !! Common block
   common /rvar/ tf, pkm, pkn, phi_buf
   common / equiv1 / phi
-  common / equiv2 / slab
 #ifdef ZIP
-  common / equiv3 / slab_cache
+  common / equiv2 / slab_cache
+#endif
+#ifdef SFFTW3
+  common / equiv3 / cube
+  common / equiv4 / slab_cmplx
+#else
+  common / equiv3 / slab
 #endif
   common / xvar / xvp
 
@@ -584,10 +616,19 @@ subroutine di_fftw(command)
 #ifndef SLAB
     use p3dfft
 #endif
+
+#ifdef SFFTW3
+    use, intrinsic :: iso_c_binding
+#endif
+
     implicit none
 #ifdef SLAB
+#ifdef SFFTW3
+    include 'fftw3-mpi.f03'
+#else
     include 'fftw_f77.i'
-    integer(4), parameter :: order=FFTW_NORMAL_ORDER
+    integer(4), parameter :: order = FFTW_NORMAL_ORDER
+#endif
 #endif
 
     integer(4) :: i
@@ -604,10 +645,14 @@ subroutine di_fftw(command)
 
     if (firstfftw) then
 #ifdef SLAB
-      call rfftw3d_f77_mpi_create_plan(plan,mpi_comm_world,nc, &
-            nc,nc, FFTW_REAL_TO_COMPLEX, FFTW_ESTIMATE) !_MEASURE)
-      call rfftw3d_f77_mpi_create_plan(iplan,mpi_comm_world,nc, &
-            nc,nc, FFTW_COMPLEX_TO_REAL, FFTW_ESTIMATE) !_MEASURE)
+#ifdef SFFTW3
+      call fftwf_mpi_init
+      plan  = fftwf_mpi_plan_dft_r2c_3d(nc, nc, nc, slab, slab_cmplx, mpi_comm_world, FFTW_ESTIMATE)
+      iplan = fftwf_mpi_plan_dft_c2r_3d(nc, nc, nc, slab_cmplx, slab, mpi_comm_world, FFTW_ESTIMATE)
+#else
+      call rfftw3d_f77_mpi_create_plan(plan,mpi_comm_world,nc, nc,nc, FFTW_REAL_TO_COMPLEX, FFTW_ESTIMATE)
+      call rfftw3d_f77_mpi_create_plan(iplan,mpi_comm_world,nc, nc,nc, FFTW_COMPLEX_TO_REAL, FFTW_ESTIMATE)
+#endif
 #else
         pen_dims = (/dim_y,dim_z/)
         call p3dfft_setup(pen_dims, nc, nc, nc, .true.)
@@ -648,13 +693,21 @@ subroutine di_fftw(command)
 
     if (command > 0) then
 #ifdef SLAB
-         call rfftwnd_f77_mpi(plan,1,slab,slab_work,1,order)
+#ifdef SFFTW3
+        call sfftw_execute_dft_r2c(plan, slab, slab_cmplx) 
+#else
+        call rfftwnd_f77_mpi(plan,1,slab,slab_work,1,order)
+#endif
 #else
         call ftran_r2c(slab, slab, "fft")
 #endif
     else
 #ifdef SLAB
+#ifdef SFFTW3
+        call sfftw_execute_dft_c2r(iplan, slab_cmplx, slab)
+#else
         call rfftwnd_f77_mpi(iplan,1,slab,slab_work,1,order)
+#endif
 #else
         call btran_c2r(slab, slab, "tff")
 #endif
@@ -680,8 +733,14 @@ subroutine di_fftw(command)
 
 ! if command = 0 we delete the plans
 #ifdef SLAB
+#ifdef SFFTW3
+        call sfftw_destroy_plan(plan)
+        call sfftw_destroy_plan(iplan)
+        call fftwf_mpi_cleanup
+#else
         call rfftwnd_f77_mpi_destroy_plan(iplan)
         call rfftwnd_f77_mpi_destroy_plan(plan)
+#endif
 #else
         call p3dfft_clean
 #endif
