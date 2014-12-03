@@ -19,6 +19,8 @@
 !! * Optional flags:
 !!   -DNGP: Uses NGP interpolation for binning of the power spectrum. 
 !!   -DSLAB: Alternatively run with FFTW slab decomposition instead of P3DFFT pencil decomposition.
+!!   -DLOGBIN: Use this to compute power spectrum with logarithmically spaced bins. Can change number of bins below.
+!!   -DZIP: This option reads in zip checkpoint files from cubep3m.
 !!   -DCOARSE_HACK: Enables a hack to coarsen the grid for which the particles are interpolated to.
 !!                  Must be used in conjunction to a change made in the parameters file (see below).
 !!   -DKAISER: Adjusts for redshift space distortions.
@@ -107,6 +109,15 @@ program cic_crossvel
   integer(4), parameter :: nodes = nodes_dim * nodes_dim * nodes_dim
   integer(4), parameter :: nodes_slab = nodes_dim * nodes_dim
   integer(4), parameter :: nc_slab = nc / nodes
+
+#ifdef ZIP
+  integer(4), parameter :: mesh_scale_sim = 4
+#ifdef COARSE_HACK
+  integer(4), parameter :: ncoarse_node_dim = nc_node_dim / mesh_scale_sim * coarsen_factor
+#else
+  integer(4), parameter :: ncoarse_node_dim = nc_node_dim / mesh_scale_sim
+#endif
+#endif
 
   !! For storage of dark matter particles (usually small since r_n_1_3 generally > 1)
   integer(4), parameter :: max_np_dm = max_np / ratio_nudm_dim**3
@@ -1505,8 +1516,19 @@ subroutine read_particles(command)
     integer j, fstat
     character(len=7) :: z_string
     character(len=4) :: rank_string
-    character(len=100) :: check_name
+    character(len=200) :: check_name
     integer(4) :: command
+
+#ifdef ZIP
+    character(len=200) :: f_zip1, f_zip2, f_zip3
+    integer :: fstat1, fstat2, fstat3
+    real(4) :: v_r2i,shake_offset(3)
+    integer(1) :: xi1(4,3), rhoc_i1(4), test_i1
+    integer(4) :: xi4(3), rhoc_i4, np_uzip, np_dm, ii, jj, kk, l
+    integer(2) :: vi2(3)
+    equivalence(xi1, xi4)
+    equivalence(rhoc_i4, rhoc_i1)
+#endif
 
     !! These are unnecessary headers from the checkpoint
     real(4) :: a, t, tau, dt_f_acc, dt_c_acc, dt_pp_acc, mass_p
@@ -1537,6 +1559,17 @@ subroutine read_particles(command)
     rank_string=adjustl(rank_string)
 
     if (command == 0) then
+#ifdef ZIP
+        if(z_write .eq. z_i) then
+            f_zip1=ic_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'zip1_'//rank_string(1:len_trim(rank_string))//'_nu.dat'
+            f_zip2=ic_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'zip2_'//rank_string(1:len_trim(rank_string))//'_nu.dat'
+            f_zip3=ic_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'zip3_'//rank_string(1:len_trim(rank_string))//'_nu.dat'
+        else
+            f_zip1=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'zip1_'//rank_string(1:len_trim(rank_string))//'_nu.dat'
+            f_zip2=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'zip2_'//rank_string(1:len_trim(rank_string))//'_nu.dat'
+            f_zip3=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'zip3_'//rank_string(1:len_trim(rank_string))//'_nu.dat'
+        endif
+#else
         if(z_write .eq. z_i) then
            check_name=ic_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'xv'// &
                    rank_string(1:len_trim(rank_string))//'_nu.dat'
@@ -1544,7 +1577,19 @@ subroutine read_particles(command)
            check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'xv'// &
                    rank_string(1:len_trim(rank_string))//'_nu.dat'
         endif
+#endif
     else if (command == 1) then
+#ifdef ZIP
+        if(z_write .eq. z_i) then
+            f_zip1=ic_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'zip1_'//rank_string(1:len_trim(rank_string))//'.dat'
+            f_zip2=ic_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'zip2_'//rank_string(1:len_trim(rank_string))//'.dat'
+            f_zip3=ic_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'zip3_'//rank_string(1:len_trim(rank_string))//'.dat'
+        else
+            f_zip1=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'zip1_'//rank_string(1:len_trim(rank_string))//'.dat'
+            f_zip2=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'zip2_'//rank_string(1:len_trim(rank_string))//'.dat'
+            f_zip3=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'zip3_'//rank_string(1:len_trim(rank_string))//'.dat'
+        endif
+#else
         if(z_write .eq. z_i) then
            check_name=ic_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'xv'// &
                    rank_string(1:len_trim(rank_string))//'.dat'
@@ -1552,29 +1597,53 @@ subroutine read_particles(command)
            check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'xv'// &
                    rank_string(1:len_trim(rank_string))//'.dat'
         endif
+#endif
     else if (command == 2) then
         check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'halo'//&
                    rank_string(1:len_trim(rank_string))//'.dat'
     endif
 
-    !! Open the file    
-
-    open(unit=21,file=check_name,status="old",iostat=fstat,access="stream")
-
-    !! Check for opening error
-    if (fstat /= 0) then
-      write(*,*) 'ERROR: Cannot open checkpoint position file'
-      write(*,*) 'rank', rank, ' file: ',check_name
-      call mpi_abort(mpi_comm_world, ierr, ierr)
+    !! open checkpoint    
+#ifdef ZIP
+    if (command == 0 .or. command == 1) then
+        open(11, file=f_zip1, status="old", iostat=fstat1, access="stream", buffered='yes')
+        open(12, file=f_zip2, status="old", iostat=fstat2, access="stream", buffered='yes')
+        open(13, file=f_zip3, status="old", iostat=fstat3, access="stream", buffered='yes')
+        if (fstat1 /= 0 .or. fstat2 /= 0 .or. fstat3 /= 0) then
+          write(*,*) 'error opening zip checkpoint'
+          write(*,*) 'rank',rank,'files:',f_zip1,f_zip2,f_zip3
+          call mpi_abort(mpi_comm_world,ierr,ierr)
+        endif
+    else
+        open(unit=21,file=check_name,status="old",iostat=fstat,access="stream")
+        if (fstat /= 0) then
+          write(*,*) 'error opening checkpoint'
+          write(*,*) 'rank',rank,'file:',check_name
+          call mpi_abort(mpi_comm_world,ierr,ierr)
+        endif
     endif
+#else
+    open(unit=21,file=check_name,status="old",iostat=fstat,access="stream")
+    if (fstat /= 0) then
+      write(*,*) 'error opening checkpoint'
+      write(*,*) 'rank',rank,'file:',check_name
+      call mpi_abort(mpi_comm_world,ierr,ierr)
+    endif
+#endif
 
     !! Read in checkpoint header data
     if (command == 0) then
-        read(21) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint, &
-                   sim_projection,sim_halofind,mass_p
+#ifdef ZIP
+        read(11) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint,sim_projection,sim_halofind,mass_p,v_r2i,shake_offset
+#else
+        read(21) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint,sim_projection,sim_halofind,mass_p
+#endif
     else if (command == 1) then
-        read(21) np_local_dm,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint, &
-                   sim_projection,sim_halofind,mass_p
+#ifdef ZIP
+        read(11) np_local_dm,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint,sim_projection,sim_halofind,mass_p,v_r2i,shake_offset
+#else
+        read(21) np_local_dm,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint,sim_projection,sim_halofind,mass_p
+#endif
     else
         read(21) np_local_h,t, tau
     endif
@@ -1602,29 +1671,78 @@ subroutine read_particles(command)
 
     !! Tally up total number of particles
     if (command == 0) then
-        call mpi_reduce(int(np_local, kind=8), np_total, 1, mpi_integer8, &
-                         mpi_sum, 0, mpi_comm_world, ierr)
+        call mpi_reduce(int(np_local, kind=8), np_total, 1, mpi_integer8, mpi_sum, 0, mpi_comm_world, ierr)
     else if (command == 1) then
-        call mpi_reduce(int(np_local_dm, kind=8), np_total, 1, mpi_integer8, &
-                         mpi_sum, 0, mpi_comm_world, ierr)
+        call mpi_reduce(int(np_local_dm, kind=8), np_total, 1, mpi_integer8, mpi_sum, 0, mpi_comm_world, ierr)
     else
-        call mpi_reduce(int(np_local_h, kind=8), np_total, 1, mpi_integer8, &
-                        mpi_sum, 0, mpi_comm_world, ierr)
-        call mpi_allreduce(int(np_local_h,kind=8), np_h, 1, mpi_integer8, mpi_sum, &
-                           mpi_comm_world, ierr)
+        call mpi_reduce(int(np_local_h, kind=8), np_total, 1, mpi_integer8, mpi_sum, 0, mpi_comm_world, ierr)
+        call mpi_allreduce(int(np_local_h,kind=8), np_h, 1, mpi_integer8, mpi_sum, mpi_comm_world, ierr)
     endif
 
     if (rank == 0) write(*,*) 'Total number of particles = ', np_total
 
-    if (command == 0) then
+    if (command == 0) then !! Neutrinos
+
+#ifdef ZIP
+        np_uzip = 0
+        do kk = 1, ncoarse_node_dim
+            do jj = 1, ncoarse_node_dim
+                do ii = 1, ncoarse_node_dim
+                    rhoc_i4 = 0 ; xi4 = 0
+                    read(12) rhoc_i1(1)
+                    if (rhoc_i4==255) read(13) rhoc_i4
+                    do l = 1, rhoc_i4
+                        np_uzip = np_uzip + 1
+                        read(11) xi1(1,:), vi2
+                        xvp(1:3, np_uzip) = mesh_scale_sim * ( xi4/256. + (/ii,jj,kk/) - 1 )
+                        xvp(4:6, np_uzip) = vi2 / v_r2i
+                    enddo
+                enddo
+            enddo
+        enddo
+        close(11) ; close(12) ; close(13)
+        if (np_uzip /= np_local) then
+            write(*,*) "ERROR: Inconsistency in neutrino zip checkpoint ", np_local, np_uzip
+            call mpi_abort(mpi_comm_world, ierr, ierr)
+        endif
+#else
         do j=1, np_local
             read(21) xvp(:,j)
         enddo
-    else if (command == 1) then
+#endif
+
+    else if (command == 1) then !! Dark matter
+
+#ifdef ZIP
+        np_uzip = 0
+        do kk = 1, ncoarse_node_dim
+            do jj = 1, ncoarse_node_dim
+                do ii = 1, ncoarse_node_dim
+                    rhoc_i4 = 0 ; xi4 = 0
+                    read(12) rhoc_i1(1)
+                    if (rhoc_i4==255) read(13) rhoc_i4
+                    do l = 1, rhoc_i4
+                        np_uzip = np_uzip + 1
+                        read(11) xi1(1,:), vi2
+                        xvp_dm(1:3, np_uzip) = mesh_scale_sim * ( xi4/256. + (/ii,jj,kk/) - 1 )
+                        xvp_dm(4:6, np_uzip) = vi2 / v_r2i
+                    enddo
+                enddo
+            enddo
+        enddo
+        close(11) ; close(12) ; close(13)
+        if (np_uzip /= np_local_dm) then
+            write(*,*) "ERROR: Inconsistency in dm zip checkpoint ", np_local_dm, np_uzip
+            call mpi_abort(mpi_comm_world, ierr, ierr)
+        endif
+#else
         do j=1, np_local_dm
             read(21) xvp_dm(:,j)
         enddo
-    else
+#endif
+
+    else !! Halos
+
         !! Read halo global coordinates and velocities
         do j=1, np_local_h
             read(21) xvmp_h(1:3, j)
