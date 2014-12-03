@@ -91,7 +91,11 @@ real, parameter         :: sep_inc=0.1
 !! particle-particle interaction parameters
 
 ! softening length (if (|r1-r2| < rsoft) then no force)
-real(4), parameter      :: rsoft = 0.1 !0.02
+#ifdef TH2
+real(4), parameter      :: rsoft = 0.3
+#else
+real(4), parameter      :: rsoft = 0.1
+#endif
 ! arbitrary timescale limiting parameter :: dt_max_pp=sqrt(dt_pp_scale*rsoft/max_pp_acceleration)
 real(4), parameter      :: dt_pp_scale = 0.05
 ! arbitrary pp bias (set to increase the force interaction)
@@ -137,7 +141,11 @@ real(4), parameter      :: halo_odc = 200.
 
 ! maximum number of particles in one halo (used if HPID flag enabled)
 
+#ifdef TH2
+integer(4), parameter :: ngrid_max = 650
+#else
 integer(4), parameter :: ngrid_max = 240
+#endif
 
 ! lower density peak threshold for determining which peaks should be inspected
 ! as halos
