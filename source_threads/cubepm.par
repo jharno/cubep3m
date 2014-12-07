@@ -63,6 +63,9 @@ integer(4), parameter   :: restart_checkpoint = 1 ! line number in input/checkpo
 
 logical, parameter :: restart_kill = .false. !! Only matters if CHECKPOINT_KILL flag used
 character(*), parameter :: reskill_prefix = '0.000'
+#ifdef ZIP
+logical, parameter :: restart_kill_zip = .true. !! Set false if killed during particle_pass
+#endif
 
 !! Will checkpoint with this amount of time (in seconds) remaining if CHECKPOINT_KILL flag is used.
 real(4), parameter :: kill_remaining = 30.*60.
@@ -88,11 +91,25 @@ real, parameter         :: sep_inc=0.1
 !! particle-particle interaction parameters
 
 ! softening length (if (|r1-r2| < rsoft) then no force)
-real(4), parameter      :: rsoft = 0.1 !0.02
+#ifdef TH2
+real(4), parameter      :: rsoft = 0.3
+#else
+real(4), parameter      :: rsoft = 0.1
+#endif
 ! arbitrary timescale limiting parameter :: dt_max_pp=sqrt(dt_pp_scale*rsoft/max_pp_acceleration)
 real(4), parameter      :: dt_pp_scale = 0.05
 ! arbitrary pp bias (set to increase the force interaction)
 real(4), parameter      :: pp_bias = 1.00 !0.85 !0.1 !0.4642
+
+#ifdef BOXDUMP
+!! size of subrectangle to write particle data
+integer, parameter :: nsubcubex = min(2, nodes_dim)
+integer, parameter :: nsubcubey = min(2, nodes_dim)
+integer, parameter :: nsubcubez = min(2, nodes_dim)
+integer, parameter :: writeBoxEverySteps = 4
+real, parameter :: writeBoxBelowZ = 2.0
+real, parameter :: writeBoxAboveA = 1./(1.+writeBoxBelowZ) 
+#endif
 
 ! testing flags
 
@@ -124,7 +141,11 @@ real(4), parameter      :: halo_odc = 200.
 
 ! maximum number of particles in one halo (used if HPID flag enabled)
 
+#ifdef TH2
+integer(4), parameter :: ngrid_max = 650
+#else
 integer(4), parameter :: ngrid_max = 240
+#endif
 
 ! lower density peak threshold for determining which peaks should be inspected
 ! as halos

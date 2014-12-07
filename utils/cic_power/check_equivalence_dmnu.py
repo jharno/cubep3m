@@ -6,7 +6,7 @@ import numpy
 nodes_dim      = 2
 tiles_node_dim = 6
 nf_tile        = 240 
-density_buffer = 1.5
+density_buffer = 1.8
 ratio_nudm_dim = 2
 max_np_h       = 1000000 
 
@@ -16,12 +16,15 @@ groups = True
 # Set this true if using HALOMASS algorithm
 halomass = False 
 
+# Set this true if using SPLITHALOS algorithm 
+splithalos = True
+
 # Set this true if using P3DFFT for pencil decomposition
 pencil = True 
 
 # Set this true if using -DCOARSE_HACK and choose appropriate value of coarsen_factor
-coarse_hack = False 
-coarsen_factor = 2
+coarse_hack = True 
+coarsen_factor = 4
 
 # Usually won't need to change these
 nf_cutoff   = 16
@@ -124,7 +127,7 @@ if maxeq2 != slab:
 
 # Third statement (slab2, send_buf)
 slab2 = slab
-if halomass:
+if halomass or splithalos:
     send_buf = 4 * 4 * np_buffer
 else:
     send_buf = 4 * 3 * np_buffer
@@ -143,7 +146,7 @@ if maxeq3 != slab2:
 #
 
 xvp_dm = xvp / ratio_nudm_dim**3
-if halomass: xvp_h  = 4 * 4 * max_np_h
+if halomass or splithalos: xvp_h  = 4 * 4 * max_np_h
 else: xvp_h  = 4 * 3 * max_np_h
 if groups : GID = max_np
 else: GID = 0

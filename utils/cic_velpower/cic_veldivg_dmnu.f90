@@ -19,13 +19,20 @@
 !! * Optional flags:
 !!   -DNGP: Uses NGP interpolation for binning of the power spectrum. 
 !!   -DSLAB: Alternatively run with FFTW slab decomposition instead of P3DFFT pencil decomposition.
+!!   -DLOGBIN: Use this to compute power spectrum with logarithmically spaced bins. Can change number of bins below.
+!!   -DZIP: This option reads in zip checkpoint files from cubep3m.
 !!   -DCOARSE_HACK: Enables a hack to coarsen the grid for which the particles are interpolated to.
 !!                  Must be used in conjunction to a change made in the parameters file (see below).
 !!   -DKAISER: Adjusts for redshift space distortions.
 !!   -DDEBUG: Output useful debugging information.
 !!   -DCURL: Enable the computation of the curl component of absolute fields (not relative fields). 
 !!           This serves mainly as a consistency check since curl = total - divergence
-!!   -Dwrite_vel: Writes velocity fields to binary files (be careful, this may be a lot!)
+!!   -DMOMENTUM: Use this to compute neutrino velocity field by dividing the momentum density field
+!!               by the mass density field. Only do this for neutrinos since they do not have many empty cells.
+!!   -DRECONSTRUCT_DIVG: Compute cross-correlations between divergence fields and reconstructed velocity fields
+!!                       using transfer functions. (Can use as a consistency check)
+!!   -Dwrite_vel_groups: Writes velocity fields to binary files for different groups
+!!   -Dwrite_vel: Writes velocity fields to bianry files only if total population
 
 program cic_crossvel
 
@@ -49,13 +56,25 @@ program cic_crossvel
   logical, parameter :: turn_off_halos = .false.  !! Can set this True if halo portion is slow
     
   !! Threading
-  integer(4), parameter :: nt = 8
+  integer(4), parameter :: nt = 16
 
   !! Number of nearest particles from grid centre to determine average velocity
-  integer, parameter :: N_closest_nu = 1
+  integer, parameter :: N_closest_nu = 8
   integer, parameter :: N_closest_dm = 1
   integer, parameter :: N_closest_h  = 1
   integer, parameter :: max_N_closest = max(N_closest_nu, N_closest_dm, N_closest_h) + 1 
+
+  !! Matter and velocity transfer functions for redshifts 0, 1, and 10
+  character(*), parameter :: cubepm_batch=cubepm_root//'batch/'
+  character(*), parameter :: fntf0 = cubepm_batch//'sim_mnu0p05_transfer_out_z0.dat'
+  character(*), parameter :: fntf1 = fntf0
+  character(*), parameter :: fntf10 = fntf0
+  character(*), parameter :: vfntf0 = cubepm_batch//'sim_mnu0p05_veltransfer_out_z0.dat'
+  character(*), parameter :: vfntf1 = vfntf0
+  character(*), parameter :: vfntf10 = vfntf0
+  integer, parameter :: nk = 611
+  integer, parameter :: dmcol = 2
+  integer, parameter :: nucol = 6
 
   !! nc is the number of cells per box length
   integer, parameter :: hc=nc/2
@@ -91,6 +110,15 @@ program cic_crossvel
   integer(4), parameter :: nodes_slab = nodes_dim * nodes_dim
   integer(4), parameter :: nc_slab = nc / nodes
 
+#ifdef ZIP
+  integer(4), parameter :: mesh_scale_sim = 4
+#ifdef COARSE_HACK
+  integer(4), parameter :: ncoarse_node_dim = nc_node_dim / mesh_scale_sim * coarsen_factor
+#else
+  integer(4), parameter :: ncoarse_node_dim = nc_node_dim / mesh_scale_sim
+#endif
+#endif
+
   !! For storage of dark matter particles (usually small since r_n_1_3 generally > 1)
   integer(4), parameter :: max_np_dm = max_np / ratio_nudm_dim**3
   integer(4), parameter :: max_np_h = 1000000
@@ -120,6 +148,9 @@ program cic_crossvel
   !! Power spectrum arrays
   real, dimension(3, 3, nc, 6) :: pkvel, pkcurl
   real, dimension(3, nc, 6) :: pkdivg
+  real, dimension(4, 3, nc, 2) :: pkrec
+  real, dimension(3, 3, nc, 3, 2) :: pkrec2
+  real, dimension(3, 3, nc, 2) :: pkrec3
   real, dimension(3, nc) :: pkdm
 
   !! For pencils decomposition:
@@ -150,6 +181,9 @@ program cic_crossvel
 #ifdef CURL
   real, dimension(0:nc_node_dim+1, 0:nc_node_dim+1, 0:nc_node_dim+1) :: velden3
 #endif
+#ifdef MOMENTUM
+  real, dimension(0:nc_node_dim+1, 0:nc_node_dim+1, 0:nc_node_dim+1) :: velden4
+#endif
   real, dimension(0:nc_node_dim+1, 0:nc_node_dim+1) :: velden_send_buff
   real, dimension(0:nc_node_dim+1, 0:nc_node_dim+1) :: velden_recv_buff
 
@@ -157,8 +191,8 @@ program cic_crossvel
   real, dimension(nc_node_dim, nc_node_dim, nc_node_dim) :: veldivg
 
   !! Parameters for linked list
-  integer(4), parameter :: nfine_buf = 16
-  integer(4), parameter :: mesh_scale = 4
+  integer(4), parameter :: nfine_buf = 8
+  integer(4), parameter :: mesh_scale = 1
   integer(4), parameter :: nc_buf = nfine_buf / mesh_scale
   integer(4), parameter :: nm_node_dim = nc_node_dim / mesh_scale
   integer(4), parameter :: hoc_nc_l = 1 - nc_buf
@@ -166,7 +200,7 @@ program cic_crossvel
   integer(4), parameter :: hoc_pass_depth = 2*nc_buf
   real(4), parameter    :: rnf_buf = real(nfine_buf)
   integer(4), parameter :: num_ngbhs = (2*nc_buf+1)**3
-  integer(4), parameter :: nfine_buf_h = 128
+  integer(4), parameter :: nfine_buf_h = 64 
   integer(4), parameter :: mesh_scale_h = 8
   integer(4), parameter :: nc_buf_h = nfine_buf_h / mesh_scale_h
   integer(4), parameter :: nm_node_dim_h = nc_node_dim / mesh_scale_h
@@ -196,6 +230,7 @@ program cic_crossvel
 #ifdef CURL
   integer(4), dimension(3, 2) :: curlcom 
 #endif
+  integer(4), dimension(4,2) :: recom
 
   !! For threading 
   integer :: kt
@@ -204,6 +239,8 @@ program cic_crossvel
 #else
   integer, parameter :: kt_stop = nc_pen+2
 #endif
+
+  real(8) globaltime1, globaltime2
 
   !! Equivalence arrays to save memory
   !! Must make sure that ONLY the largest array in each equivalence statement is on the common block. 
@@ -224,11 +261,14 @@ program cic_crossvel
 #else
   common xvp, xvp_dm, xvmp_h, recv_cube, velden, velden2, hoc, veldivg, slab2, velden_send_buff, velden_recv_buff
 #endif
-  common /pvar/ pkdm, pkdivg, pkcurl, pkvel 
+  common /pvar/ pkdm, pkrec, pkrec2, pkrec3, pkdivg, pkcurl, pkvel 
 #ifdef CURL
   common /cvar/ velden3
 #else
   common /cvar/ slab
+#endif
+#ifdef MOMENTUM
+  common /mvar/ velden4
 #endif
 
 ! -------------------------------------------------------------------------------------------------------
@@ -244,6 +284,9 @@ program cic_crossvel
   firstfftw = .true.  ! initialize fftw so that it generates the plans
 
   call read_checkpoint_list
+
+  !! Start clock
+  globaltime1 = mpi_wtime(ierr)
 
   do cur_checkpoint = 1, num_checkpoints
 
@@ -315,13 +358,13 @@ program cic_crossvel
 
         if (rank == 0) write(*,*) "Computing neutrino total velocity for dim = ", cur_dimension
         call velocity_density(cur_dimension, 0, g0, N_closest_nu)
-#ifdef write_vel
+#ifdef write_vel_groups
         call writevelocityfield(0, g0)
 #endif
         call darkmatter(0)
         call swap_slab12(0)
         call velocity_density(cur_dimension, 0, g1, N_closest_nu)
-#ifdef write_vel
+#ifdef write_vel_groups
         call writevelocityfield(0, g1)
 #endif
         call darkmatter(0)
@@ -334,13 +377,13 @@ program cic_crossvel
 
         if (rank == 0) write(*,*) "Computing dark matter total velocity for dim = ", cur_dimension
         call velocity_density(cur_dimension, 1, g0, N_closest_dm)
-#ifdef write_vel
+#ifdef write_vel_groups
         call writevelocityfield(1, g0)
 #endif
         call darkmatter(0)
         call swap_slab12(0)
         call velocity_density(cur_dimension, 1, g1, N_closest_dm)
-#ifdef write_vel
+#ifdef write_vel_groups
         call writevelocityfield(1, g1)
 #endif
         call darkmatter(0)
@@ -354,13 +397,13 @@ program cic_crossvel
         if (.not. turn_off_halos) then
             if (rank == 0) write(*,*) "Computing halo total velocity for dim = ", cur_dimension
             call velocity_density(cur_dimension, 2, g0, N_closest_h)
-#ifdef write_vel
+#ifdef write_vel_groups
             call writevelocityfield(2, g0)
 #endif
             call darkmatter(0)
             call swap_slab12(0)
             call velocity_density(cur_dimension, 2, g1, N_closest_h)
-#ifdef write_vel
+#ifdef write_vel_groups
             call writevelocityfield(2, g1)
 #endif
             call darkmatter(0)
@@ -377,7 +420,7 @@ program cic_crossvel
         call swap_velden12(0)
         call velocity_density(cur_dimension, 1, g0, N_closest_dm)
         call relative_velocity
-#ifdef write_vel
+#ifdef write_vel_groups
         call writevelocityfield(3, g0)
 #endif
         call darkmatter(0)
@@ -386,7 +429,7 @@ program cic_crossvel
         call swap_velden12(0)
         call velocity_density(cur_dimension, 1, g1, N_closest_dm)
         call relative_velocity
-#ifdef write_vel
+#ifdef write_vel_groups
         call writevelocityfield(3, g1)
 #endif
         call darkmatter(0)
@@ -403,7 +446,7 @@ program cic_crossvel
             call swap_velden12(0)
             call velocity_density(cur_dimension, 2, g0, N_closest_h)
             call relative_velocity
-#ifdef write_vel
+#ifdef write_vel_groups
             call writevelocityfield(4, g0)
 #endif
             call darkmatter(0)
@@ -412,7 +455,7 @@ program cic_crossvel
             call swap_velden12(0)
             call velocity_density(cur_dimension, 2, g1, N_closest_h)
             call relative_velocity
-#ifdef write_vel
+#ifdef write_vel_groups
             call writevelocityfield(4, g1)
 #endif
             call darkmatter(0)
@@ -428,7 +471,7 @@ program cic_crossvel
             call swap_velden12(0)
             call velocity_density(cur_dimension, 2, g0, N_closest_h)
             call relative_velocity
-#ifdef write_vel
+#ifdef write_vel_groups
             call writevelocityfield(5, g0)
 #endif
             call darkmatter(0)
@@ -437,7 +480,7 @@ program cic_crossvel
             call swap_velden12(0)
             call velocity_density(cur_dimension, 2, g1, N_closest_h)
             call relative_velocity
-#ifdef write_vel
+#ifdef write_vel_groups
             call writevelocityfield(5, g1)
 #endif
             call darkmatter(0)
@@ -825,7 +868,7 @@ program cic_crossvel
     enddo
 
     ! --------------------------------------------------------------------------------
-    ! Write the total velocity power spectra for each field
+    ! Write the curl velocity power spectra for each field
     ! --------------------------------------------------------------------------------
 
     if (rank == 0) then 
@@ -841,7 +884,264 @@ program cic_crossvel
     endif
 #endif
 
+    ! --------------------------------------------------------------------------------
+    ! Reconstruct various velocity fields (dark matter and neutrino as well as their 
+    ! relative velocities) from the halo and dark matter density fields. 
+    ! --------------------------------------------------------------------------------
+
+    !! kt == 1 is a consistency check that does not apply any transfer functions.
+    !! That is, it computes halo and dark matter density power spectra that can be compared to cic_power_dmnu.f90. 
+    !! kt = 2, 3, and 4 reconstruct the dm, nu, and nu-dm velocity fields respectively.
+
+    do kt = 1, 4 
+
+        ! --------------------------------------------------------------------------------
+        ! HALO RECONSTRUCTION
+        ! --------------------------------------------------------------------------------
+
+        call matter_density(2, g0) 
+        call darkmatter(-1)
+        call veltransfer(recom(kt,1))
+        call swap_slab12(0)
+        call matter_density(2, g1)
+        call darkmatter(-1)
+        call veltransfer(recom(kt,1))
+        call powerspectrum(slab, slab2, pkrec(kt,:,:,1), 0)
+        if (rank == 0) call writepowerspectra(3, recom(kt,2)) 
+
+        ! --------------------------------------------------------------------------------
+        ! DARK MATTER RECONSTRUCTION
+        ! --------------------------------------------------------------------------------
+
+        call matter_density(1, g0)
+        call darkmatter(-1)
+        call veltransfer(recom(kt,1))
+        call swap_slab12(0)
+        call matter_density(1, g1)
+        call darkmatter(-1)
+        call veltransfer(recom(kt,1))
+        call powerspectrum(slab, slab2, pkrec(kt,:,:,2), 0)
+        if (rank == 0) call writepowerspectra(4, recom(kt,2)) 
+
+    enddo
+
+    ! --------------------------------------------------------------------------------
+    ! Now need to clear groups and compute cross-correlations between the actual
+    ! and reconstructed velocity fields for dmdm, nunu, and nudm.
+    ! --------------------------------------------------------------------------------
+
+     call clear_groups
+     call order_xvp_ll(0, g0)
+     call order_xvp_ll(1, g0)
+     call order_xvp_ll(2, g0)
+
+    ! --------------------------------------------------------------------------------
+    ! DARK MATTER VELOCITY FIELD
+    ! --------------------------------------------------------------------------------
+
+    if (rank == 0) write(*,*) "Computing cross correlation between dm real and reconstructed fields..." 
+    do cur_dimension = 1, 3 !! Each x, y, z dimension
+
+        !! Actual first
+        call velocity_density(cur_dimension, 1, g0, N_closest_dm)
+#ifdef write_vel
+        call writevelocityfield_totpop(1, -1)
+#endif
+        call darkmatter(0)
+        call swap_slab12(0)
+
+        !! Reconstructed from halos
+        call matter_density(2, g0)
+        call darkmatter(-1)
+        call veltransfer(3)
+        call numerical_gradient(1, 2)
+        call powerspectrum(slab, slab2, pkrec2(cur_dimension,:,:,1,1), 0)
+
+        !! Reconstructed from dark matter
+        call matter_density(1, g0)
+        call darkmatter(-1)
+        call veltransfer(3)
+        call numerical_gradient(1, 1) 
+        call powerspectrum(slab, slab2, pkrec2(cur_dimension,:,:,1,2), 0)    
+
+    enddo
+    if (rank == 0) then
+        do kt = 5, 6
+            call writepowerspectra(kt, 2)
+        enddo
+        write(*,*)
+    endif
+
+    ! --------------------------------------------------------------------------------
+    ! NEUTRINO VELOCITY FIELD
+    ! --------------------------------------------------------------------------------
+
+    if (rank == 0) write(*,*) "Computing cross correlation between nu real and reconstructed fields..."
+    do cur_dimension = 1, 3 !! Each x, y, z dimension
+
+        !! Actual first
+        call velocity_density(cur_dimension, 0, g0, N_closest_nu)
+#ifdef write_vel
+        call writevelocityfield_totpop(0, -1)
+#endif
+        call darkmatter(0)
+        call swap_slab12(0)
+
+        !! Reconstructed from halos
+        call matter_density(2, g0)
+        call darkmatter(-1)
+        call veltransfer(4)
+        call numerical_gradient(0, 2)
+        call powerspectrum(slab, slab2, pkrec2(cur_dimension,:,:,2,1), 0)
+
+        !! Reconstructed from dark matter
+        call matter_density(1, g0)
+        call darkmatter(-1)
+        call veltransfer(4)
+        call numerical_gradient(0, 1)
+        call powerspectrum(slab, slab2, pkrec2(cur_dimension,:,:,2,2), 0)
+
+    enddo
+    if (rank == 0) then
+        do kt = 5, 6
+            call writepowerspectra(kt, 1)
+        enddo
+        write(*,*)
+    endif
+
+    ! --------------------------------------------------------------------------------
+    ! NEUTRINO-DARK MATTER RELATIVE VELOCITY FIELD
+    ! --------------------------------------------------------------------------------
+
+    if (rank == 0) write(*,*) "Computing cross correlation between nu-dm real and reconstructed fields..."
+    do cur_dimension = 1, 3 !! Each x, y, z dimension
+
+        !! Actual first
+        call velocity_density(cur_dimension, 0, g0, N_closest_nu)
+        call swap_velden12(0)
+        call velocity_density(cur_dimension, 1, g0, N_closest_dm)
+        call relative_velocity
+#ifdef write_vel
+        call writevelocityfield_totpop(3, -1)
+#endif
+        call darkmatter(0)
+        call swap_slab12(0)
+
+        !! Reconstructed from halos
+        call matter_density(2, g0)
+        call darkmatter(-1)
+        call veltransfer(5)
+        call numerical_gradient(3, 2)
+        call powerspectrum(slab, slab2, pkrec2(cur_dimension,:,:,3,1), 0)
+
+        !! Reconstructed from dark matter
+        call matter_density(1, g0)
+        call darkmatter(-1)
+        call veltransfer(5)
+        call numerical_gradient(3, 1)
+        call powerspectrum(slab, slab2, pkrec2(cur_dimension,:,:,3,2), 0)
+
+    enddo
+    if (rank == 0) then
+        do kt = 5, 6
+            call writepowerspectra(kt, 4)
+        enddo
+        write(*,*)
+    endif
+
+#ifdef RECONSTRUCT_DIVG 
+
+    ! --------------------------------------------------------------------------------
+    ! DARK MATTER DIVERGENCE 
+    ! --------------------------------------------------------------------------------
+
+    !! Actual first
+    do cur_dimension = 1, 3
+        call velocity_density(cur_dimension, 1, g0, N_closest_dm)
+        call pass_veldensity
+        call velocity_divergence
+    enddo
+    call darkmatter(1)
+    call swap_slab12(0)
+
+    !! Reconstructed from halos
+    call matter_density(2, g0)
+    call darkmatter(-1)
+    call veltransfer(0)
+    call powerspectrum(slab, slab2, pkrec3(1,:,:,1), 2)
+    if (rank == 0) call writepowerspectra(7, 2)
+
+    !! Reconstructed from halos
+    call matter_density(1, g0)
+    call darkmatter(-1)
+    call veltransfer(0)
+    call powerspectrum(slab, slab2, pkrec3(1,:,:,2), 2)
+    if (rank == 0) call writepowerspectra(8, 2) 
+
+    ! --------------------------------------------------------------------------------
+    ! NEUTRINO DIVERGENCE
+    ! --------------------------------------------------------------------------------
+
+    !! Actual first
+    do cur_dimension = 1, 3
+        call velocity_density(cur_dimension, 0, g0, N_closest_nu)
+        call pass_veldensity
+        call velocity_divergence
+    enddo
+    call darkmatter(1)
+    call swap_slab12(0)
+
+    !! Reconstructed from halos
+    call matter_density(2, g0)
+    call darkmatter(-1)
+    call veltransfer(1)
+    call powerspectrum(slab, slab2, pkrec3(2,:,:,1), 2)
+    if (rank == 0) call writepowerspectra(7, 1)
+
+    !! Reconstructed from halos
+    call matter_density(1, g0)
+    call darkmatter(-1)
+    call veltransfer(1)
+    call powerspectrum(slab, slab2, pkrec3(2,:,:,1), 2)
+    if (rank == 0) call writepowerspectra(8, 1)
+
+    ! --------------------------------------------------------------------------------
+    ! RELATIVE DIVERGENCE
+    ! --------------------------------------------------------------------------------
+
+    !! Actual first
+    do cur_dimension = 1, 3
+        call velocity_density(cur_dimension, 0, g0, N_closest_nu)
+        call swap_velden12(0)
+        call velocity_density(cur_dimension, 1, g0, N_closest_dm)
+        call relative_velocity
+        call pass_veldensity
+        call velocity_divergence
+    enddo
+    call darkmatter(1)
+    call swap_slab12(0)
+
+    !! Reconstructed from halos
+    call matter_density(2, g0)
+    call darkmatter(-1)
+    call veltransfer(2)
+    call powerspectrum(slab, slab2, pkrec3(3,:,:,1), 2)
+    if (rank == 0) call writepowerspectra(7, 4)
+
+    !! Reconstructed from halos
+    call matter_density(1, g0)
+    call darkmatter(-1)
+    call veltransfer(2)
+    call powerspectrum(slab, slab2, pkrec3(3,:,:,2), 2)
+    if (rank == 0) call writepowerspectra(8, 4)
+
+#endif
+
   enddo
+
+  !! Output timing stats
+  globaltime2 = mpi_wtime(ierr)
+  if (rank == 0) write(*,*) "ELAPSED PROGRAM TIME: ", globaltime2-globaltime1
 
   call cp_fftw(0)
   call mpi_finalize(ierr)
@@ -1017,6 +1317,9 @@ subroutine initvar
 #ifdef CURL
         velden3(:, :, k) = 0.
 #endif
+#ifdef MOMENTUM
+        velden4(:, :, k) = 0.
+#endif
         velden_send_buff(:, k) = 0.
         velden_recv_buff(:, k) = 0.
     enddo
@@ -1060,9 +1363,12 @@ subroutine initvar
 
     !! Power spectrum arrays
     do k = 1, nc
-        pkvel(:, :, :, k) = 0.
-        pkdivg(:, :, k) = 0.
-        pkcurl(:, :, :, k) = 0.
+        pkvel(:, :, k, :) = 0.
+        pkdivg(:, k, :) = 0.
+        pkrec(:, :, k, :) = 0.
+        pkrec2(:, :, k, :, :) = 0.
+        pkrec3(:, :, k, :) = 0.
+        pkcurl(:, :, k, :) = 0.
         pkdm(:, k) = 0.
     enddo
 
@@ -1074,6 +1380,15 @@ subroutine initvar
     curlcom(3,1) = 2
     curlcom(3,2) = 1
 #endif
+
+    recom(1,1) = -1
+    recom(1,2) = -1 
+    recom(2,1) = 0
+    recom(2,2) = 2
+    recom(3,1) = 1
+    recom(3,2) = 1
+    recom(4,1) = 2
+    recom(4,2) = 4
 
     return
 
@@ -1201,8 +1516,19 @@ subroutine read_particles(command)
     integer j, fstat
     character(len=7) :: z_string
     character(len=4) :: rank_string
-    character(len=100) :: check_name
+    character(len=200) :: check_name
     integer(4) :: command
+
+#ifdef ZIP
+    character(len=200) :: f_zip1, f_zip2, f_zip3
+    integer :: fstat1, fstat2, fstat3
+    real(4) :: v_r2i,shake_offset(3)
+    integer(1) :: xi1(4,3), rhoc_i1(4), test_i1
+    integer(4) :: xi4(3), rhoc_i4, np_uzip, np_dm, ii, jj, kk, l
+    integer(2) :: vi2(3)
+    equivalence(xi1, xi4)
+    equivalence(rhoc_i4, rhoc_i1)
+#endif
 
     !! These are unnecessary headers from the checkpoint
     real(4) :: a, t, tau, dt_f_acc, dt_c_acc, dt_pp_acc, mass_p
@@ -1233,6 +1559,17 @@ subroutine read_particles(command)
     rank_string=adjustl(rank_string)
 
     if (command == 0) then
+#ifdef ZIP
+        if(z_write .eq. z_i) then
+            f_zip1=ic_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'zip1_'//rank_string(1:len_trim(rank_string))//'_nu.dat'
+            f_zip2=ic_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'zip2_'//rank_string(1:len_trim(rank_string))//'_nu.dat'
+            f_zip3=ic_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'zip3_'//rank_string(1:len_trim(rank_string))//'_nu.dat'
+        else
+            f_zip1=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'zip1_'//rank_string(1:len_trim(rank_string))//'_nu.dat'
+            f_zip2=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'zip2_'//rank_string(1:len_trim(rank_string))//'_nu.dat'
+            f_zip3=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'zip3_'//rank_string(1:len_trim(rank_string))//'_nu.dat'
+        endif
+#else
         if(z_write .eq. z_i) then
            check_name=ic_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'xv'// &
                    rank_string(1:len_trim(rank_string))//'_nu.dat'
@@ -1240,7 +1577,19 @@ subroutine read_particles(command)
            check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'xv'// &
                    rank_string(1:len_trim(rank_string))//'_nu.dat'
         endif
+#endif
     else if (command == 1) then
+#ifdef ZIP
+        if(z_write .eq. z_i) then
+            f_zip1=ic_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'zip1_'//rank_string(1:len_trim(rank_string))//'.dat'
+            f_zip2=ic_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'zip2_'//rank_string(1:len_trim(rank_string))//'.dat'
+            f_zip3=ic_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'zip3_'//rank_string(1:len_trim(rank_string))//'.dat'
+        else
+            f_zip1=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'zip1_'//rank_string(1:len_trim(rank_string))//'.dat'
+            f_zip2=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'zip2_'//rank_string(1:len_trim(rank_string))//'.dat'
+            f_zip3=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'zip3_'//rank_string(1:len_trim(rank_string))//'.dat'
+        endif
+#else
         if(z_write .eq. z_i) then
            check_name=ic_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'xv'// &
                    rank_string(1:len_trim(rank_string))//'.dat'
@@ -1248,29 +1597,53 @@ subroutine read_particles(command)
            check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'xv'// &
                    rank_string(1:len_trim(rank_string))//'.dat'
         endif
+#endif
     else if (command == 2) then
         check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'halo'//&
                    rank_string(1:len_trim(rank_string))//'.dat'
     endif
 
-    !! Open the file    
-
-    open(unit=21,file=check_name,status="old",iostat=fstat,access="stream")
-
-    !! Check for opening error
-    if (fstat /= 0) then
-      write(*,*) 'ERROR: Cannot open checkpoint position file'
-      write(*,*) 'rank', rank, ' file: ',check_name
-      call mpi_abort(mpi_comm_world, ierr, ierr)
+    !! open checkpoint    
+#ifdef ZIP
+    if (command == 0 .or. command == 1) then
+        open(11, file=f_zip1, status="old", iostat=fstat1, access="stream", buffered='yes')
+        open(12, file=f_zip2, status="old", iostat=fstat2, access="stream", buffered='yes')
+        open(13, file=f_zip3, status="old", iostat=fstat3, access="stream", buffered='yes')
+        if (fstat1 /= 0 .or. fstat2 /= 0 .or. fstat3 /= 0) then
+          write(*,*) 'error opening zip checkpoint'
+          write(*,*) 'rank',rank,'files:',f_zip1,f_zip2,f_zip3
+          call mpi_abort(mpi_comm_world,ierr,ierr)
+        endif
+    else
+        open(unit=21,file=check_name,status="old",iostat=fstat,access="stream")
+        if (fstat /= 0) then
+          write(*,*) 'error opening checkpoint'
+          write(*,*) 'rank',rank,'file:',check_name
+          call mpi_abort(mpi_comm_world,ierr,ierr)
+        endif
     endif
+#else
+    open(unit=21,file=check_name,status="old",iostat=fstat,access="stream")
+    if (fstat /= 0) then
+      write(*,*) 'error opening checkpoint'
+      write(*,*) 'rank',rank,'file:',check_name
+      call mpi_abort(mpi_comm_world,ierr,ierr)
+    endif
+#endif
 
     !! Read in checkpoint header data
     if (command == 0) then
-        read(21) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint, &
-                   sim_projection,sim_halofind,mass_p
+#ifdef ZIP
+        read(11) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint,sim_projection,sim_halofind,mass_p,v_r2i,shake_offset
+#else
+        read(21) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint,sim_projection,sim_halofind,mass_p
+#endif
     else if (command == 1) then
-        read(21) np_local_dm,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint, &
-                   sim_projection,sim_halofind,mass_p
+#ifdef ZIP
+        read(11) np_local_dm,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint,sim_projection,sim_halofind,mass_p,v_r2i,shake_offset
+#else
+        read(21) np_local_dm,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint,sim_projection,sim_halofind,mass_p
+#endif
     else
         read(21) np_local_h,t, tau
     endif
@@ -1298,29 +1671,78 @@ subroutine read_particles(command)
 
     !! Tally up total number of particles
     if (command == 0) then
-        call mpi_reduce(int(np_local, kind=8), np_total, 1, mpi_integer8, &
-                         mpi_sum, 0, mpi_comm_world, ierr)
+        call mpi_reduce(int(np_local, kind=8), np_total, 1, mpi_integer8, mpi_sum, 0, mpi_comm_world, ierr)
     else if (command == 1) then
-        call mpi_reduce(int(np_local_dm, kind=8), np_total, 1, mpi_integer8, &
-                         mpi_sum, 0, mpi_comm_world, ierr)
+        call mpi_reduce(int(np_local_dm, kind=8), np_total, 1, mpi_integer8, mpi_sum, 0, mpi_comm_world, ierr)
     else
-        call mpi_reduce(int(np_local_h, kind=8), np_total, 1, mpi_integer8, &
-                        mpi_sum, 0, mpi_comm_world, ierr)
-        call mpi_allreduce(int(np_local_h,kind=8), np_h, 1, mpi_integer8, mpi_sum, &
-                           mpi_comm_world, ierr)
+        call mpi_reduce(int(np_local_h, kind=8), np_total, 1, mpi_integer8, mpi_sum, 0, mpi_comm_world, ierr)
+        call mpi_allreduce(int(np_local_h,kind=8), np_h, 1, mpi_integer8, mpi_sum, mpi_comm_world, ierr)
     endif
 
     if (rank == 0) write(*,*) 'Total number of particles = ', np_total
 
-    if (command == 0) then
+    if (command == 0) then !! Neutrinos
+
+#ifdef ZIP
+        np_uzip = 0
+        do kk = 1, ncoarse_node_dim
+            do jj = 1, ncoarse_node_dim
+                do ii = 1, ncoarse_node_dim
+                    rhoc_i4 = 0 ; xi4 = 0
+                    read(12) rhoc_i1(1)
+                    if (rhoc_i4==255) read(13) rhoc_i4
+                    do l = 1, rhoc_i4
+                        np_uzip = np_uzip + 1
+                        read(11) xi1(1,:), vi2
+                        xvp(1:3, np_uzip) = mesh_scale_sim * ( xi4/256. + (/ii,jj,kk/) - 1 )
+                        xvp(4:6, np_uzip) = vi2 / v_r2i
+                    enddo
+                enddo
+            enddo
+        enddo
+        close(11) ; close(12) ; close(13)
+        if (np_uzip /= np_local) then
+            write(*,*) "ERROR: Inconsistency in neutrino zip checkpoint ", np_local, np_uzip
+            call mpi_abort(mpi_comm_world, ierr, ierr)
+        endif
+#else
         do j=1, np_local
             read(21) xvp(:,j)
         enddo
-    else if (command == 1) then
+#endif
+
+    else if (command == 1) then !! Dark matter
+
+#ifdef ZIP
+        np_uzip = 0
+        do kk = 1, ncoarse_node_dim
+            do jj = 1, ncoarse_node_dim
+                do ii = 1, ncoarse_node_dim
+                    rhoc_i4 = 0 ; xi4 = 0
+                    read(12) rhoc_i1(1)
+                    if (rhoc_i4==255) read(13) rhoc_i4
+                    do l = 1, rhoc_i4
+                        np_uzip = np_uzip + 1
+                        read(11) xi1(1,:), vi2
+                        xvp_dm(1:3, np_uzip) = mesh_scale_sim * ( xi4/256. + (/ii,jj,kk/) - 1 )
+                        xvp_dm(4:6, np_uzip) = vi2 / v_r2i
+                    enddo
+                enddo
+            enddo
+        enddo
+        close(11) ; close(12) ; close(13)
+        if (np_uzip /= np_local_dm) then
+            write(*,*) "ERROR: Inconsistency in dm zip checkpoint ", np_local_dm, np_uzip
+            call mpi_abort(mpi_comm_world, ierr, ierr)
+        endif
+#else
         do j=1, np_local_dm
             read(21) xvp_dm(:,j)
         enddo
-    else
+#endif
+
+    else !! Halos
+
         !! Read halo global coordinates and velocities
         do j=1, np_local_h
             read(21) xvmp_h(1:3, j)
@@ -1338,7 +1760,11 @@ subroutine read_particles(command)
         enddo
         !! Convert global halo coordinates to local node coordinates
         do j=1 , np_local_h
+#ifdef COARSE_HACK
+            xvmp_h(1:3, j) = xvmp_h(1:3, j) - slab_coord(:)*nc_node_dim*coarsen_factor
+#else
             xvmp_h(1:3, j) = xvmp_h(1:3, j) - slab_coord(:)*nc_node_dim
+#endif
         enddo
     endif
 
@@ -1772,7 +2198,7 @@ subroutine writepowerspectra(command, index)
 
     implicit none
     
-    integer      :: i, j, k
+    integer      :: i, j, k, ii
     character*180 :: fn
     character*3  :: prefix
     character*7  :: z_write
@@ -1815,10 +2241,20 @@ subroutine writepowerspectra(command, index)
         fn = '_totvel'//fn
     else if (command == 1) then 
         fn = '_divvel'//fn
-#ifdef CURL
     else if (command == 2) then
         fn = '_crlvel'//fn
-#endif
+    else if (command == 3) then
+        fn = '_recha'//fn
+    else if (command == 4) then
+        fn = '_recdm'//fn
+    else if (command == 5) then
+        fn = '_recha_crs'//fn
+    else if (command == 6) then
+        fn = '_recdm_crs'//fn
+    else if (command == 7) then
+        fn = '_recha_div'//fn
+    else if (command == 8) then
+        fn = '_recdm_div'//fn
     endif
 
     write(z_write,'(f7.3)') z_checkpoint(cur_checkpoint)
@@ -1859,7 +2295,6 @@ subroutine writepowerspectra(command, index)
             pkdm(3, i) = pkdivg(3, i, index)
         enddo
 
-#ifdef CURL
     else if (command == 2) then
 
         !! Sum over all three dimensions 
@@ -1870,7 +2305,47 @@ subroutine writepowerspectra(command, index)
             enddo
             pkdm(3, i) = pkcurl(1, 3, i, index)
         enddo
-#endif
+
+    else if (command == 3 .or. command == 4) then
+
+        if (index == -1) then
+            pkdm(:,:) = pkrec(1,:,:,command-2)
+        else if (index == 1) then
+            pkdm(:,:) = pkrec(3,:,:,command-2)
+        else if (index == 2) then
+            pkdm(:,:) = pkrec(2,:,:,command-2)
+        else if (index == 4) then
+            pkdm(:,:) = pkrec(4,:,:,command-2)
+        endif
+
+    else if (command == 5 .or. command == 6) then
+
+        if (index == 2) then
+            ii = 1
+        else if (index == 1) then
+            ii = 2
+        else if (index == 4) then
+            ii = 3
+        endif
+
+        !! Sum over all three dimensions
+         do i = 1, nc
+            do j = 1, 3
+                pkdm(1, i) = pkdm(1, i) + pkrec2(j, 1, i, ii, command-4)
+                pkdm(2, i) = pkdm(2, i) + pkrec2(j, 2, i, ii, command-4)
+            enddo
+            pkdm(3, i) = pkrec2(1, 3, i, ii, command-4)
+        enddo
+
+    else if (command == 7 .or. command == 8) then
+
+        if (index == 2) then
+            pkdm(:,:) = pkrec3(1,:,:,command-6)
+        else if (index == 1) then
+            pkdm(:,:) = pkrec3(2,:,:,command-6)
+        else if (index == 4) then
+            pkdm(:,:) = pkrec3(3,:,:,command-6)
+        endif
 
     endif
 
@@ -1880,8 +2355,12 @@ subroutine writepowerspectra(command, index)
 
     do i = 1, nc
 
-        pkdm(1, i) = vsim2phys**2 * pkdm(1, i)
-        pkdm(2, i) = vsim2phys**2 * pkdm(2, i) 
+        if (index > 0) then  !! Index == -1 denotes density power
+
+            pkdm(1, i) = vsim2phys**2 * pkdm(1, i)
+            pkdm(2, i) = vsim2phys**2 * pkdm(2, i)
+
+        endif
 
     enddo
 
@@ -1938,7 +2417,7 @@ subroutine darkmatter(command)
     ! Assign data to density grid
     !
 
-    if (command == 0) then !! Take velocity field
+    if (command <= 0) then !! Take velocity field
         cube(:, :, :) = velden(1:nc_node_dim, 1:nc_node_dim, 1:nc_node_dim)
     else !! Take divergence field
         cube(:, :, :) = veldivg(1:nc_node_dim, 1:nc_node_dim, 1:nc_node_dim)
@@ -1960,6 +2439,7 @@ subroutine darkmatter(command)
     do k = 1, nc_node_dim
        do j = 1, nc_node_dim
           do i = 1, nc_node_dim
+             if (command < 0) cube(i, j, k) = cube(i, j, k) - 1. !! Used if cube is storing density field (in reconstruction)
              d = cube(i, j, k)
              dsum = dsum + d
              dvar = dvar + d*d
@@ -3569,6 +4049,21 @@ subroutine velocity_density(cdim, command, glook, nfind)
 
   if (rank == 0) write(*,*) "Starting velocity_density c, g, n = ", command, glook, nfind
 
+#ifdef MOMENTUM
+    if (command == 0) then !! NEUTRINOS 
+
+        call matter_density(command, glook)
+        call momentum_density(command, cdim, glook)
+        call momentum2velocity
+
+        time2 = mpi_wtime(ierr)
+        if (rank == 0) write(*,*) "Finished velocity_density ... elapsed time = ", time2-time1
+
+        return 
+
+    endif
+#endif
+
   ! --------------------------------------------------------------------------------------
   ! Initialize to zeros + make hoc
   ! --------------------------------------------------------------------------------------
@@ -4041,7 +4536,6 @@ subroutine pass_veldensity
 
     implicit none
 
-    integer :: i
     integer, dimension(mpi_status_size) :: status, sstatus, rstatus
     integer :: tag, srequest, rrequest, sierr, rierr, ierr
     integer, parameter :: num2send = (nc_node_dim + 2)**2
@@ -4049,111 +4543,107 @@ subroutine pass_veldensity
     real(8) time1, time2
     time1 = mpi_wtime(ierr)
 
-    do i = 1, 3
+    !
+    ! Pass +x
+    ! 
 
-        !
-        ! Pass +x
-        ! 
+    tag = 111
 
-        tag = 111
+    velden_send_buff(:, :) = velden(nc_node_dim, :, :)
 
-        velden_send_buff(:, :) = velden(nc_node_dim, :, :)
+    call mpi_isend(velden_send_buff, num2send, mpi_real, cart_neighbor(6), &
+               tag, mpi_comm_world, srequest, sierr)
+    call mpi_irecv(velden_recv_buff, num2send, mpi_real, cart_neighbor(5), &
+               tag, mpi_comm_world, rrequest, rierr)
+    call mpi_wait(srequest, sstatus, sierr)
+    call mpi_wait(rrequest, rstatus, rierr)
 
-        call mpi_isend(velden_send_buff, num2send, mpi_real, cart_neighbor(6), &
-                   tag, mpi_comm_world, srequest, sierr)
-        call mpi_irecv(velden_recv_buff, num2send, mpi_real, cart_neighbor(5), &
-                   tag, mpi_comm_world, rrequest, rierr)
-        call mpi_wait(srequest, sstatus, sierr)
-        call mpi_wait(rrequest, rstatus, rierr)
+    velden(0, :, :) = velden_recv_buff(:, :)
 
-        velden(0, :, :) = velden_recv_buff(:, :)
+    !
+    ! Pass -x
+    ! 
 
-        !
-        ! Pass -x
-        ! 
+    tag = 112
 
-        tag = 112
+    velden_send_buff(:, :) = velden(1, :, :)
 
-        velden_send_buff(:, :) = velden(1, :, :)
+    call mpi_isend(velden_send_buff, num2send, mpi_real, cart_neighbor(5), &
+               tag, mpi_comm_world, srequest, sierr)
+    call mpi_irecv(velden_recv_buff, num2send, mpi_real, cart_neighbor(6), &
+               tag, mpi_comm_world, rrequest, rierr)
+    call mpi_wait(srequest, sstatus, sierr)
+    call mpi_wait(rrequest, rstatus, rierr)
 
-        call mpi_isend(velden_send_buff, num2send, mpi_real, cart_neighbor(5), &
-                   tag, mpi_comm_world, srequest, sierr)
-        call mpi_irecv(velden_recv_buff, num2send, mpi_real, cart_neighbor(6), &
-                   tag, mpi_comm_world, rrequest, rierr)
-        call mpi_wait(srequest, sstatus, sierr)
-        call mpi_wait(rrequest, rstatus, rierr)
+    velden(nc_node_dim+1, :, :) = velden_recv_buff(:, :)
 
-        velden(nc_node_dim+1, :, :) = velden_recv_buff(:, :)
+    !
+    ! Pass +y
+    ! 
 
-        !
-        ! Pass +y
-        ! 
+    tag = 113
 
-        tag = 113
+    velden_send_buff(:, :) = velden(:, nc_node_dim, :)
 
-        velden_send_buff(:, :) = velden(:, nc_node_dim, :)
+    call mpi_isend(velden_send_buff, num2send, mpi_real, cart_neighbor(4), &
+               tag, mpi_comm_world, srequest, sierr)
+    call mpi_irecv(velden_recv_buff, num2send, mpi_real, cart_neighbor(3), &
+               tag, mpi_comm_world, rrequest, rierr)
+    call mpi_wait(srequest, sstatus, sierr)
+    call mpi_wait(rrequest, rstatus, rierr)
 
-        call mpi_isend(velden_send_buff, num2send, mpi_real, cart_neighbor(4), &
-                   tag, mpi_comm_world, srequest, sierr)
-        call mpi_irecv(velden_recv_buff, num2send, mpi_real, cart_neighbor(3), &
-                   tag, mpi_comm_world, rrequest, rierr)
-        call mpi_wait(srequest, sstatus, sierr)
-        call mpi_wait(rrequest, rstatus, rierr)
+    velden(:, 0, :) = velden_recv_buff(:, :)
 
-        velden(:, 0, :) = velden_recv_buff(:, :)
+    !
+    ! Pass -y
+    ! 
 
-        !
-        ! Pass -y
-        ! 
+    tag = 114
 
-        tag = 114
+    velden_send_buff(:, :) = velden(:, 1, :)
 
-        velden_send_buff(:, :) = velden(:, 1, :)
+    call mpi_isend(velden_send_buff, num2send, mpi_real, cart_neighbor(3), &
+               tag, mpi_comm_world, srequest, sierr)
+    call mpi_irecv(velden_recv_buff, num2send, mpi_real, cart_neighbor(4), &
+               tag, mpi_comm_world, rrequest, rierr)
+    call mpi_wait(srequest, sstatus, sierr)
+    call mpi_wait(rrequest, rstatus, rierr)
 
-        call mpi_isend(velden_send_buff, num2send, mpi_real, cart_neighbor(3), &
-                   tag, mpi_comm_world, srequest, sierr)
-        call mpi_irecv(velden_recv_buff, num2send, mpi_real, cart_neighbor(4), &
-                   tag, mpi_comm_world, rrequest, rierr)
-        call mpi_wait(srequest, sstatus, sierr)
-        call mpi_wait(rrequest, rstatus, rierr)
+    velden(:, nc_node_dim+1, :) = velden_recv_buff(:, :)
 
-        velden(:, nc_node_dim+1, :) = velden_recv_buff(:, :)
+    !
+    ! Pass +z
+    ! 
 
-        !
-        ! Pass +z
-        ! 
+    tag = 115
 
-        tag = 115
+    velden_send_buff(:, :) = velden(:, :, nc_node_dim)
 
-        velden_send_buff(:, :) = velden(:, :, nc_node_dim)
+    call mpi_isend(velden_send_buff, num2send, mpi_real, cart_neighbor(2), &
+               tag, mpi_comm_world, srequest, sierr)
+    call mpi_irecv(velden_recv_buff, num2send, mpi_real, cart_neighbor(1), &
+               tag, mpi_comm_world, rrequest, rierr)
+    call mpi_wait(srequest, sstatus, sierr)
+    call mpi_wait(rrequest, rstatus, rierr)
 
-        call mpi_isend(velden_send_buff, num2send, mpi_real, cart_neighbor(2), &
-                   tag, mpi_comm_world, srequest, sierr)
-        call mpi_irecv(velden_recv_buff, num2send, mpi_real, cart_neighbor(1), &
-                   tag, mpi_comm_world, rrequest, rierr)
-        call mpi_wait(srequest, sstatus, sierr)
-        call mpi_wait(rrequest, rstatus, rierr)
+    velden(:, :, 0) = velden_recv_buff(:, :)
 
-        velden(:, :, 0) = velden_recv_buff(:, :)
+    !
+    ! Pass -z
+    ! 
 
-        !
-        ! Pass -z
-        ! 
+    tag = 116
 
-        tag = 116
+    velden_send_buff(:, :) = velden(:, :, 1)
 
-        velden_send_buff(:, :) = velden(:, :, 1)
+    call mpi_isend(velden_send_buff, num2send, mpi_real, cart_neighbor(1), &
+               tag, mpi_comm_world, srequest, sierr)
+    call mpi_irecv(velden_recv_buff, num2send, mpi_real, cart_neighbor(2), &
+               tag, mpi_comm_world, rrequest, rierr)
+    call mpi_wait(srequest, sstatus, sierr)
+    call mpi_wait(rrequest, rstatus, rierr)
 
-        call mpi_isend(velden_send_buff, num2send, mpi_real, cart_neighbor(1), &
-                   tag, mpi_comm_world, srequest, sierr)
-        call mpi_irecv(velden_recv_buff, num2send, mpi_real, cart_neighbor(2), &
-                   tag, mpi_comm_world, rrequest, rierr)
-        call mpi_wait(srequest, sstatus, sierr)
-        call mpi_wait(rrequest, rstatus, rierr)
-
-        velden(:, :, nc_node_dim+1) = velden_recv_buff(:, :)
-
-    enddo
+    velden(:, :, nc_node_dim+1) = velden_recv_buff(:, :)
 
     time2 = mpi_wtime(ierr)
     if (rank == 0) write(*, *) "Finished pass_veldensity ... elapsed time = ", time2-time1
@@ -4511,7 +5001,7 @@ end subroutine velocity_curl
 #endif
 
                 !! Divide by k^2 for divergence 
-                if (command == 1) then
+                if (command /= 0) then
 
 #ifdef LOGBIN
                     kavg = real(10**(kcensum2(k) / kcountsum(k)), kind=4)
@@ -4519,7 +5009,11 @@ end subroutine velocity_curl
                     kavg = real(kcensum2(k) / kcountsum(k), kind=4)
 #endif
                     kavg = kavg / box * ncr
-                    pk(1:2, k) = pk(1:2, k) / kavg**2 
+                    if (command == 1) then
+                        pk(1:2, k) = pk(1:2, k) / kavg**2 
+                    else if (command == 2) then
+                        pk(1:2, k) = pk(1:2, k) / kavg
+                    endif
 
                 endif
 
@@ -4538,7 +5032,7 @@ end subroutine velocity_curl
 
 ! -------------------------------------------------------------------------------------------------------
 
-#ifdef write_vel
+#ifdef write_vel_groups
 subroutine writevelocityfield(command, glook)
 
     implicit none
@@ -4622,6 +5116,95 @@ subroutine writevelocityfield(command, glook)
 end subroutine writevelocityfield
 #endif
 
+! -------------------------------------------------------------------------------------------------------
+
+#ifdef write_vel
+subroutine writevelocityfield_totpop(command, command2)
+
+    implicit none
+
+    integer :: m, i, j, k, fstat
+    character(len=180) :: fn
+    character(len=7)   :: z_write
+    character(len=4)   :: rank_string
+    character(len=1)   :: dim_string
+    character(len=3)   :: g_string
+    real :: vsim2phys, zcur
+
+    integer :: command, command2
+
+    !
+    ! Determine conversion to proper velocity [km/s]
+    !
+
+    if (rank == 0)  zcur = z_checkpoint(cur_checkpoint)
+    call mpi_bcast(zcur, 1, mpi_real, 0, mpi_comm_world, ierr)
+
+    vsim2phys = 300. * sqrt(omega_m) * box * (1. + zcur) / 2. / nc
+
+    !
+    ! Checkpoint and rank strings
+    !
+
+    write(z_write, '(f7.3)') zcur
+    z_write = adjustl(z_write)
+
+    write(rank_string, '(i4)') rank
+    rank_string = adjustl(rank_string)
+
+    !
+    ! Write out velocity field for given dimension
+    !
+
+    m = cur_dimension
+
+    if (m == 1) dim_string = "x"
+    if (m == 2) dim_string = "y"
+    if (m == 3) dim_string = "z"
+    if (command2 == -1) g_string = "sim"
+    if (command2 ==  1) g_string = "rdm"
+    if (command2 ==  2) g_string = "rha"
+
+    if (command == 0) then
+        fn = output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_write(1:len_trim(z_write))//&
+             "vel"//dim_string//rank_string(1:len_trim(rank_string))//"_nu"//g_string//".bin"
+    else if (command == 1) then
+        fn = output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_write(1:len_trim(z_write))//&
+             "vel"//dim_string//rank_string(1:len_trim(rank_string))//g_string//".bin"
+    else if (command == 2) then
+        fn = output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_write(1:len_trim(z_write))//&
+             "vel"//dim_string//rank_string(1:len_trim(rank_string))//"_halo"//g_string//".bin"
+    else if (command == 3) then
+        fn = output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_write(1:len_trim(z_write))//&
+             "vel"//dim_string//rank_string(1:len_trim(rank_string))//"_nu-dm"//g_string//".bin"
+    else if (command == 4) then
+        fn = output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_write(1:len_trim(z_write))//&
+             "vel"//dim_string//rank_string(1:len_trim(rank_string))//"_nu-ha"//g_string//".bin"
+    else if (command == 5) then
+        fn = output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_write(1:len_trim(z_write))//&
+             "vel"//dim_string//rank_string(1:len_trim(rank_string))//"_dm-ha"//g_string//".bin"
+    endif
+
+    open(unit=11, file=fn, status="replace", iostat=fstat, access="stream")
+
+    do k = 1, nc_node_dim
+        do j = 1, nc_node_dim
+
+            if (command2 == -1) then
+                write(11) velden(1:nc_node_dim, j, k) * vsim2phys
+            else
+                write(11) cube(1:nc_node_dim, j, k) * vsim2phys
+            endif
+
+        enddo
+    enddo
+
+    close(11)
+
+    return
+
+end subroutine writevelocityfield_totpop
+#endif
 ! -------------------------------------------------------------------------------------------------------
 
 subroutine order_xvp_groups(command)
@@ -4740,6 +5323,99 @@ subroutine order_xvp_groups(command)
   endif
 
 end subroutine order_xvp_groups
+
+! -------------------------------------------------------------------------------------------------------
+
+subroutine clear_groups
+  !
+  ! Assign all particles to group 0
+  ! 
+
+  implicit none
+  integer :: pp_start, pp_up, pp_down, pp, command
+
+  real(8) :: time1, time2
+  time1 = mpi_wtime(ierr)
+
+  !--------------------------------------------------------    
+  ! Reput all particles at the beginnig of the xvp array
+  !--------------------------------------------------------    
+
+  do command = 0, 2
+
+     if (command == 0) then
+        pp_start = np_groups(g0) + np_buf_groups(g0) + 1
+        pp_up = max_np
+        pp_down = max_np + 1 - np_groups(g1) - np_buf_groups(g1)
+     else if (command == 1) then
+        pp_start = np_groups_dm(g0) + np_buf_groups_dm(g0) + 1
+        pp_up = max_np_dm
+        pp_down = max_np_dm + 1 - np_groups_dm(g1) - np_buf_groups_dm(g1)
+     else if (command == 2) then
+        pp_start = np_groups_h(g0) + np_buf_groups_h(g0) + 1
+        pp_up = max_np_h
+        pp_down = max_np_h + 1 - np_groups_h(g1) - np_buf_groups_h(g1)
+     endif
+
+     if (command == 0) then
+        do pp = 0, (pp_up-pp_down)
+           xvp(:,pp_start+pp) = xvp(:,pp_down+pp)
+        enddo
+     else if (command == 1) then
+        do pp = 0, (pp_up-pp_down)
+           xvp_dm(:,pp_start+pp) = xvp_dm(:,pp_down+pp)
+        enddo
+     else if (command == 2) then
+        do pp = 0, (pp_up-pp_down)
+           xvmp_h(:,pp_start+pp) = xvmp_h(:,pp_down+pp)
+        enddo
+     endif
+
+  enddo
+
+  !--------------------------------------------------------    
+  ! Update np_groups ...
+  !-------------------------------------------------------- 
+
+  np_groups(g0) = np_groups(g0) + np_groups(g1)
+  np_groups(g1) = 0
+
+  np_groups_dm(g0) = np_groups_dm(g0) + np_groups_dm(g1)
+  np_groups_dm(g1) = 0
+
+  np_groups_h(g0) = np_groups_h(g0) + np_groups_h(g1)
+  np_groups_h(g1) = 0
+
+  np_groups_tot(g0) = np_groups_tot(g0) + np_groups_tot(g1)
+  np_groups_tot(g1) = 0
+
+  np_groups_tot_dm(g0) = np_groups_tot_dm(g0) + np_groups_tot_dm(g1)
+  np_groups_tot_dm(g1) = 0
+
+  np_groups_tot_h(0) = np_groups_tot_h(g0) + np_groups_tot_h(g1)
+  np_groups_tot_h(g1) = 0
+
+  np_buf_groups(g0) = np_buf_groups(g0) + np_buf_groups(g1)
+  np_buf_groups(g1) = 0
+
+  np_buf_groups_dm(g0) = np_buf_groups_dm(g0) + np_buf_groups_dm(g1)
+  np_buf_groups_dm(g1) = 0
+
+  np_buf_groups_h(g0) = np_buf_groups_h(g0) + np_buf_groups_h(g1)
+  np_buf_groups_h(g1) = 0
+
+  time2 = mpi_wtime(ierr)
+
+  if (rank == 0) then
+     write(*,*) 'Total neutrinos    : ', np_groups_tot(0)
+     write(*,*) 'Total dm particles : ', np_groups_tot_dm(0)
+     write(*,*) 'Total halos        : ', np_groups_tot_h(0)
+     write(*,*) "Finished clear_groups ... time elapsed = ", time2-time1
+  endif
+
+  return
+
+end subroutine clear_groups
 
 ! -------------------------------------------------------------------------------------------------------
 
@@ -5203,6 +5879,930 @@ subroutine relative_velocity
     !$omp end parallel do
 
 end subroutine relative_velocity
+
+! -------------------------------------------------------------------------------------------------------
+
+#ifdef MOMENTUM
+subroutine momentum_density(command, cdim, glook)
+    !
+    ! Compute the momentum density field for the given species and given group
+    ! in the given velocity direction.
+    !
+
+    implicit none
+
+    real       :: mp,xvtemp(3),vtemp,dx1(3),dx2(3)
+    integer    :: command,cdim
+    integer    :: ic,jc,kc,pp,pp_up,pp_down,pp_down0,index1(3),index2(3),thread
+    integer(1) :: glook
+    real(8) time1, time2    
+
+    time1 = mpi_wtime(ierr)
+
+    if (rank == 0) write(*,*) "Starting momentum_density c, d, g = ", command, cdim, glook
+
+    if (command == 0) then
+        mp = ncr**3 / real(np_groups_tot(glook))
+    else if (command == 1) then
+        mp = ncr**3 / real(np_groups_tot_dm(glook))
+    else if (command == 2) then
+        mp = ncr**3 / real(np_groups_tot_h(glook))
+    endif
+
+    ! --------------------------------------------------------------------------------------
+    ! Initialize to zeros + make hoc
+    ! --------------------------------------------------------------------------------------
+
+    call make_hoc(command, glook)
+
+    do ic = 0, nc_node_dim + 1
+        velden4(:, :, ic) = 0.
+    enddo
+
+    if (glook == g0) then
+        pp_down0 = 1
+    else if (glook == g1) then
+        if (command == 0) then
+            pp_down0 = max_np + 1 - np_groups(g1) - np_buf_groups(g1)
+        else if (command == 1) then
+            pp_down0 = max_np_dm + 1 - np_groups_dm(g1) - np_buf_groups_dm(g1)
+        else if (command == 2) then
+            pp_down0 = max_np_h + 1 - np_groups_h(g1) - np_buf_groups_h(g1)
+        endif
+    endif
+
+    ! --------------------------------------------------------------------------------------
+    ! Assign momentum to grid cell.
+    ! Note that in what follows we assume that nfine_buf > 0 so that buffer particles are 
+    ! stored and we do not need to buffer velden4 at the end of this routine.
+    ! --------------------------------------------------------------------------------------
+
+    !! In principle these loops could be threaded since fine mesh cells are included in coarse cells.
+    thread = 1
+
+    if (command == 0) then !! NEUTRINOS
+
+        do kc = 0, nm_node_dim+1
+            do jc = 0, nm_node_dim+1
+                do ic = 0, nm_node_dim+1
+
+                    if (ic == hoc_nc_l .and. jc == hoc_nc_l .and. kc == hoc_nc_l) then
+                        pp_down = pp_down0
+                        pp_up = hoc(ic,jc,kc)
+                    else if (ic == hoc_nc_l .and. jc == hoc_nc_l) then
+                        pp_down = hoc(hoc_nc_h, hoc_nc_h, kc-1) + 1
+                        pp_up = hoc(hoc_nc_l, hoc_nc_l, kc)
+                    else if (ic == hoc_nc_l) then
+                        pp_down = hoc(hoc_nc_h, jc-1, kc) + 1
+                        pp_up = hoc(hoc_nc_l, jc, kc)
+                    else
+                        pp_down = hoc(ic-1, jc, kc) + 1
+                        pp_up = hoc(ic, jc, kc)
+                    endif
+
+                    do pp = pp_down, pp_up
+                        vtemp = xvp(3+cdim,pp)
+                        xvtemp(1:3) = xvp(1:3,pp) - 0.5
+                        index1(1:3) = 1 + floor(xvtemp(1:3))
+                        index2(1:3) = 1 + index1(1:3)
+                        dx1(1:3) = real(index1(1:3)) - xvtemp(1:3)
+                        dx2(1:3) = 1.0 - dx1(1:3)
+
+                        if (index1(1) >= 0 .and. index2(1) <= nc_node_dim + 1 .and. &
+                            index1(2) >= 0 .and. index2(2) <= nc_node_dim + 1 .and. &
+                            index1(3) >= 0 .and. index2(3) <= nc_node_dim + 1) then
+
+                            velden4(index1(1), index1(2), index1(3)) = velden4(index1(1), index1(2), index1(3)) + mp*dx1(1)*dx1(2)*dx1(3)*vtemp
+                            velden4(index1(1), index1(2), index2(3)) = velden4(index1(1), index1(2), index2(3)) + mp*dx1(1)*dx1(2)*dx2(3)*vtemp
+                            velden4(index1(1), index2(2), index1(3)) = velden4(index1(1), index2(2), index1(3)) + mp*dx1(1)*dx2(2)*dx1(3)*vtemp
+                            velden4(index1(1), index2(2), index2(3)) = velden4(index1(1), index2(2), index2(3)) + mp*dx1(1)*dx2(2)*dx2(3)*vtemp
+
+                            velden4(index2(1), index1(2), index1(3)) = velden4(index2(1), index1(2), index1(3)) + mp*dx2(1)*dx1(2)*dx1(3)*vtemp
+                            velden4(index2(1), index1(2), index2(3)) = velden4(index2(1), index1(2), index2(3)) + mp*dx2(1)*dx1(2)*dx2(3)*vtemp
+                            velden4(index2(1), index2(2), index1(3)) = velden4(index2(1), index2(2), index1(3)) + mp*dx2(1)*dx2(2)*dx1(3)*vtemp
+                            velden4(index2(1), index2(2), index2(3)) = velden4(index2(1), index2(2), index2(3)) + mp*dx2(1)*dx2(2)*dx2(3)*vtemp
+
+                        endif
+                    enddo !!pp
+                enddo !! ic
+            enddo !! jc
+        enddo !! kc
+
+    else if (command == 1) then !! DARK MATTER
+
+        do kc = 0, nm_node_dim+1
+            do jc = 0, nm_node_dim+1
+                do ic = 0, nm_node_dim+1
+
+                    if (ic == hoc_nc_l .and. jc == hoc_nc_l .and. kc == hoc_nc_l) then
+                        pp_down = pp_down0
+                        pp_up = hoc_dm(ic,jc,kc)
+                    else if (ic == hoc_nc_l .and. jc == hoc_nc_l) then
+                        pp_down = hoc_dm(hoc_nc_h, hoc_nc_h, kc-1) + 1
+                        pp_up = hoc_dm(hoc_nc_l, hoc_nc_l, kc)
+                    else if (ic == hoc_nc_l) then
+                        pp_down = hoc_dm(hoc_nc_h, jc-1, kc) + 1
+                        pp_up = hoc_dm(hoc_nc_l, jc, kc)
+                    else
+                        pp_down = hoc_dm(ic-1, jc, kc) + 1
+                        pp_up = hoc_dm(ic, jc, kc)
+                    endif
+
+                    do pp = pp_down, pp_up
+                        vtemp = xvp_dm(3+cdim,pp)
+                        xvtemp(1:3) = xvp_dm(1:3,pp) - 0.5
+                        index1(1:3) = 1 + floor(xvtemp(1:3))
+                        index2(1:3) = 1 + index1(1:3)
+                        dx1(1:3) = real(index1(1:3)) - xvtemp(1:3)
+                        dx2(1:3) = 1.0 - dx1(1:3)
+
+                        if (index1(1) >= 0 .and. index2(1) <= nc_node_dim + 1 .and. &
+                            index1(2) >= 0 .and. index2(2) <= nc_node_dim + 1 .and. &
+                            index1(3) >= 0 .and. index2(3) <= nc_node_dim + 1) then
+
+                            velden4(index1(1), index1(2), index1(3)) = velden4(index1(1), index1(2), index1(3)) + mp*dx1(1)*dx1(2)*dx1(3)*vtemp
+                            velden4(index1(1), index1(2), index2(3)) = velden4(index1(1), index1(2), index2(3)) + mp*dx1(1)*dx1(2)*dx2(3)*vtemp
+                            velden4(index1(1), index2(2), index1(3)) = velden4(index1(1), index2(2), index1(3)) + mp*dx1(1)*dx2(2)*dx1(3)*vtemp
+                            velden4(index1(1), index2(2), index2(3)) = velden4(index1(1), index2(2), index2(3)) + mp*dx1(1)*dx2(2)*dx2(3)*vtemp
+
+                            velden4(index2(1), index1(2), index1(3)) = velden4(index2(1), index1(2), index1(3)) + mp*dx2(1)*dx1(2)*dx1(3)*vtemp
+                            velden4(index2(1), index1(2), index2(3)) = velden4(index2(1), index1(2), index2(3)) + mp*dx2(1)*dx1(2)*dx2(3)*vtemp
+                            velden4(index2(1), index2(2), index1(3)) = velden4(index2(1), index2(2), index1(3)) + mp*dx2(1)*dx2(2)*dx1(3)*vtemp
+                            velden4(index2(1), index2(2), index2(3)) = velden4(index2(1), index2(2), index2(3)) + mp*dx2(1)*dx2(2)*dx2(3)*vtemp
+
+                        endif
+                    enddo !!pp
+                enddo !! ic
+            enddo !! jc
+        enddo !! kc
+
+    else if (command == 2) then !! HALOS
+
+        do kc = 0, nm_node_dim_h+1
+            do jc = 0, nm_node_dim_h+1
+                do ic = 0, nm_node_dim_h+1
+
+                    if (ic == hoc_nc_l_h .and. jc == hoc_nc_l_h .and. kc == hoc_nc_l_h) then
+                        pp_down = pp_down0
+                        pp_up = hoc_h(ic,jc,kc)
+                    else if (ic == hoc_nc_l_h .and. jc == hoc_nc_l_h) then
+                        pp_down = hoc_h(hoc_nc_h_h, hoc_nc_h_h, kc-1) + 1
+                        pp_up = hoc_h(hoc_nc_l_h, hoc_nc_l_h, kc)
+                    else if (ic == hoc_nc_l_h) then
+                        pp_down = hoc_h(hoc_nc_h_h, jc-1, kc) + 1
+                        pp_up = hoc_h(hoc_nc_l_h, jc, kc)
+                    else
+                        pp_down = hoc_h(ic-1, jc, kc) + 1
+                        pp_up = hoc_h(ic, jc, kc)
+                    endif
+
+                    do pp = pp_down, pp_up
+                        vtemp = xvmp_h(3+cdim,pp)
+                        xvtemp(1:3) = xvmp_h(1:3,pp) - 0.5
+                        index1(1:3) = 1 + floor(xvtemp(1:3))
+                        index2(1:3) = 1 + index1(1:3)
+                        dx1(1:3) = real(index1(1:3)) - xvtemp(1:3)
+                        dx2(1:3) = 1.0 - dx1(1:3)
+
+                    if (index1(1) >= 0 .and. index2(1) <= nc_node_dim + 1 .and. &
+                        index1(2) >= 0 .and. index2(2) <= nc_node_dim + 1 .and. &
+                        index1(3) >= 0 .and. index2(3) <= nc_node_dim + 1) then
+
+                            velden4(index1(1), index1(2), index1(3)) = velden4(index1(1), index1(2), index1(3)) + mp*dx1(1)*dx1(2)*dx1(3)*vtemp
+                            velden4(index1(1), index1(2), index2(3)) = velden4(index1(1), index1(2), index2(3)) + mp*dx1(1)*dx1(2)*dx2(3)*vtemp
+                            velden4(index1(1), index2(2), index1(3)) = velden4(index1(1), index2(2), index1(3)) + mp*dx1(1)*dx2(2)*dx1(3)*vtemp
+                            velden4(index1(1), index2(2), index2(3)) = velden4(index1(1), index2(2), index2(3)) + mp*dx1(1)*dx2(2)*dx2(3)*vtemp
+
+                            velden4(index2(1), index1(2), index1(3)) = velden4(index2(1), index1(2), index1(3)) + mp*dx2(1)*dx1(2)*dx1(3)*vtemp
+                            velden4(index2(1), index1(2), index2(3)) = velden4(index2(1), index1(2), index2(3)) + mp*dx2(1)*dx1(2)*dx2(3)*vtemp
+                            velden4(index2(1), index2(2), index1(3)) = velden4(index2(1), index2(2), index1(3)) + mp*dx2(1)*dx2(2)*dx1(3)*vtemp
+                            velden4(index2(1), index2(2), index2(3)) = velden4(index2(1), index2(2), index2(3)) + mp*dx2(1)*dx2(2)*dx2(3)*vtemp
+
+                        endif
+                    enddo !!pp
+                enddo !! ic
+            enddo !! jc
+        enddo !! kc
+
+    endif
+
+    time2 = mpi_wtime(ierr)
+    if (rank == 0) write(*,*) "Finished momentum_density ... elapsed time = ", time2-time1
+
+    return
+
+end subroutine momentum_density
+
+! -------------------------------------------------------------------------------------------------------
+
+subroutine momentum2velocity
+    !
+    ! Converts momentum density field v*(1+delta) to velocity field by dividing by density field (1+delta)
+    !
+
+    implicit none
+
+    integer :: m, i, j, k
+    integer(8) :: ecount_local, ecount
+
+    real(8) time1, time2
+    time1 = mpi_wtime(ierr)
+
+    ecount_local = 0
+
+    do i = 1, nc_node_dim
+        do j = 1, nc_node_dim
+            do k = 1, nc_node_dim
+                if (velden(i, j, k) .ne. 0.) then
+                    velden(i, j, k) = velden4(i, j, k) / velden(i, j, k)
+                else
+                    ecount_local = ecount_local + 1
+                endif
+            enddo
+        enddo
+    enddo
+
+    call mpi_reduce(ecount_local, ecount, 1, mpi_integer8, mpi_sum, 0, mpi_comm_world, ierr)
+
+    time2 = mpi_wtime(ierr)
+    if (rank == 0 .and. ecount > 0) write(*, *) "WARNING: Empty cells in the density field = ", ecount
+    if (rank == 0) write(*, *) "Finished momentum2velocity ... elapsed time = ", time2-time1
+
+    return
+
+end subroutine momentum2velocity
+#endif
+
+! -------------------------------------------------------------------------------------------------------
+
+subroutine matter_density(command, glook)
+    !
+    ! Compute the density field for the given species and given group and store this in velden
+    !
+
+    implicit none
+    real       :: mp,xvtemp(3),dx1(3),dx2(3)
+    integer    :: ic,jc,kc,pp,pp_up,pp_down,pp_down0,index1(3),index2(3),command,thread
+    integer(1) :: glook
+    real(8) time1, time2
+
+    time1 = mpi_wtime(ierr)
+
+    if (rank == 0) write(*,*) "Starting matter_density c, g = ", command, glook
+
+    if (command == 0) then
+        mp = ncr**3 / real(np_groups_tot(glook))
+    else if (command == 1) then
+        mp = ncr**3 / real(np_groups_tot_dm(glook))
+    else if (command == 2) then
+        mp = ncr**3 / real(np_groups_tot_h(glook))
+    endif
+
+    ! --------------------------------------------------------------------------------------
+    ! Initialize to zeros + make hoc
+    ! --------------------------------------------------------------------------------------
+
+    call make_hoc(command, glook)
+
+    do ic = 0, nc_node_dim + 1
+        velden(:, :, ic) = 0.
+    enddo
+
+    if (glook == g0) then
+        pp_down0 = 1
+    else if (glook == g1) then
+        if (command == 0) then
+            pp_down0 = max_np + 1 - np_groups(g1) - np_buf_groups(g1)
+        else if (command == 1) then
+            pp_down0 = max_np_dm + 1 - np_groups_dm(g1) - np_buf_groups_dm(g1)
+        else if (command == 2) then
+            pp_down0 = max_np_h + 1 - np_groups_h(g1) - np_buf_groups_h(g1)
+        endif
+    endif
+
+    ! --------------------------------------------------------------------------------------
+    ! Assign mass to grid cell.
+    ! Note that in what follows we assume that nfine_buf > 0 so that buffer particles are 
+    ! stored and we do not need to buffer velden at the end of this routine.
+    ! --------------------------------------------------------------------------------------
+
+    !! In principle these loops could be threaded since fine mesh cells are included in coarse cells.
+    thread = 1
+
+    if (command == 0) then !! NEUTRINOS
+
+        do kc = 0, nm_node_dim+1
+            do jc = 0, nm_node_dim+1
+                do ic = 0, nm_node_dim+1
+
+                    if (ic == hoc_nc_l .and. jc == hoc_nc_l .and. kc == hoc_nc_l) then
+                        pp_down = pp_down0
+                        pp_up = hoc(ic,jc,kc)
+                    else if (ic == hoc_nc_l .and. jc == hoc_nc_l) then
+                        pp_down = hoc(hoc_nc_h, hoc_nc_h, kc-1) + 1
+                        pp_up = hoc(hoc_nc_l, hoc_nc_l, kc)
+                    else if (ic == hoc_nc_l) then
+                        pp_down = hoc(hoc_nc_h, jc-1, kc) + 1
+                        pp_up = hoc(hoc_nc_l, jc, kc)
+                    else
+                        pp_down = hoc(ic-1, jc, kc) + 1
+                        pp_up = hoc(ic, jc, kc)
+                    endif
+
+                    do pp = pp_down, pp_up
+                        xvtemp(1:3) = xvp(1:3,pp) - 0.5
+                        index1(1:3) = 1 + floor(xvtemp(1:3))
+                        index2(1:3) = 1 + index1(1:3)
+                        dx1(1:3) = real(index1(1:3)) - xvtemp(1:3)
+                        dx2(1:3) = 1.0 - dx1(1:3)
+
+                        if (index1(1) >= 0 .and. index2(1) <= nc_node_dim + 1 .and. &
+                            index1(2) >= 0 .and. index2(2) <= nc_node_dim + 1 .and. &
+                            index1(3) >= 0 .and. index2(3) <= nc_node_dim + 1) then
+
+                            velden(index1(1), index1(2), index1(3)) = velden(index1(1), index1(2), index1(3)) + mp*dx1(1)*dx1(2)*dx1(3)
+                            velden(index1(1), index1(2), index2(3)) = velden(index1(1), index1(2), index2(3)) + mp*dx1(1)*dx1(2)*dx2(3)
+                            velden(index1(1), index2(2), index1(3)) = velden(index1(1), index2(2), index1(3)) + mp*dx1(1)*dx2(2)*dx1(3)
+                            velden(index1(1), index2(2), index2(3)) = velden(index1(1), index2(2), index2(3)) + mp*dx1(1)*dx2(2)*dx2(3)
+
+                            velden(index2(1), index1(2), index1(3)) = velden(index2(1), index1(2), index1(3)) + mp*dx2(1)*dx1(2)*dx1(3)
+                            velden(index2(1), index1(2), index2(3)) = velden(index2(1), index1(2), index2(3)) + mp*dx2(1)*dx1(2)*dx2(3)
+                            velden(index2(1), index2(2), index1(3)) = velden(index2(1), index2(2), index1(3)) + mp*dx2(1)*dx2(2)*dx1(3)
+                            velden(index2(1), index2(2), index2(3)) = velden(index2(1), index2(2), index2(3)) + mp*dx2(1)*dx2(2)*dx2(3)
+
+                        endif
+                    enddo !!pp
+                enddo !! ic
+            enddo !! jc
+        enddo !! kc
+
+    else if (command == 1) then !! DARK MATTER
+
+        do kc = 0, nm_node_dim+1
+            do jc = 0, nm_node_dim+1
+                do ic = 0, nm_node_dim+1
+
+                    if (ic == hoc_nc_l .and. jc == hoc_nc_l .and. kc == hoc_nc_l) then
+                        pp_down = pp_down0
+                        pp_up = hoc_dm(ic,jc,kc)
+                    else if (ic == hoc_nc_l .and. jc == hoc_nc_l) then
+                        pp_down = hoc_dm(hoc_nc_h, hoc_nc_h, kc-1) + 1
+                        pp_up = hoc_dm(hoc_nc_l, hoc_nc_l, kc)
+                    else if (ic == hoc_nc_l) then
+                        pp_down = hoc_dm(hoc_nc_h, jc-1, kc) + 1
+                        pp_up = hoc_dm(hoc_nc_l, jc, kc)
+                    else
+                        pp_down = hoc_dm(ic-1, jc, kc) + 1
+                        pp_up = hoc_dm(ic, jc, kc)
+                    endif
+
+                    do pp = pp_down, pp_up
+                        xvtemp(1:3) = xvp_dm(1:3,pp) - 0.5
+                        index1(1:3) = 1 + floor(xvtemp(1:3))
+                        index2(1:3) = 1 + index1(1:3)
+                        dx1(1:3) = real(index1(1:3)) - xvtemp(1:3)
+                        dx2(1:3) = 1.0 - dx1(1:3)
+
+                        if (index1(1) >= 0 .and. index2(1) <= nc_node_dim + 1 .and. &
+                            index1(2) >= 0 .and. index2(2) <= nc_node_dim + 1 .and. &
+                            index1(3) >= 0 .and. index2(3) <= nc_node_dim + 1) then
+
+                            velden(index1(1), index1(2), index1(3)) = velden(index1(1), index1(2), index1(3)) + mp*dx1(1)*dx1(2)*dx1(3)
+                            velden(index1(1), index1(2), index2(3)) = velden(index1(1), index1(2), index2(3)) + mp*dx1(1)*dx1(2)*dx2(3)
+                            velden(index1(1), index2(2), index1(3)) = velden(index1(1), index2(2), index1(3)) + mp*dx1(1)*dx2(2)*dx1(3)
+                            velden(index1(1), index2(2), index2(3)) = velden(index1(1), index2(2), index2(3)) + mp*dx1(1)*dx2(2)*dx2(3)
+
+                            velden(index2(1), index1(2), index1(3)) = velden(index2(1), index1(2), index1(3)) + mp*dx2(1)*dx1(2)*dx1(3)
+                            velden(index2(1), index1(2), index2(3)) = velden(index2(1), index1(2), index2(3)) + mp*dx2(1)*dx1(2)*dx2(3)
+                            velden(index2(1), index2(2), index1(3)) = velden(index2(1), index2(2), index1(3)) + mp*dx2(1)*dx2(2)*dx1(3)
+                            velden(index2(1), index2(2), index2(3)) = velden(index2(1), index2(2), index2(3)) + mp*dx2(1)*dx2(2)*dx2(3)
+
+                        endif
+                    enddo !!pp
+                enddo !! ic
+            enddo !! jc
+        enddo !! kc
+
+    else if (command == 2) then !! HALOS
+
+        do kc = 0, nm_node_dim_h+1
+            do jc = 0, nm_node_dim_h+1
+                do ic = 0, nm_node_dim_h+1
+
+                    if (ic == hoc_nc_l_h .and. jc == hoc_nc_l_h .and. kc == hoc_nc_l_h) then
+                        pp_down = pp_down0
+                        pp_up = hoc_h(ic,jc,kc)
+                    else if (ic == hoc_nc_l_h .and. jc == hoc_nc_l_h) then
+                        pp_down = hoc_h(hoc_nc_h_h, hoc_nc_h_h, kc-1) + 1
+                        pp_up = hoc_h(hoc_nc_l_h, hoc_nc_l_h, kc)
+                    else if (ic == hoc_nc_l_h) then
+                        pp_down = hoc_h(hoc_nc_h_h, jc-1, kc) + 1
+                        pp_up = hoc_h(hoc_nc_l_h, jc, kc)
+                    else
+                        pp_down = hoc_h(ic-1, jc, kc) + 1
+                        pp_up = hoc_h(ic, jc, kc)
+                    endif
+
+                    do pp = pp_down, pp_up
+                        xvtemp(1:3) = xvmp_h(1:3,pp) - 0.5
+                        index1(1:3) = 1 + floor(xvtemp(1:3))
+                        index2(1:3) = 1 + index1(1:3)
+                        dx1(1:3) = real(index1(1:3)) - xvtemp(1:3)
+                        dx2(1:3) = 1.0 - dx1(1:3)
+
+                    if (index1(1) >= 0 .and. index2(1) <= nc_node_dim + 1 .and. &
+                        index1(2) >= 0 .and. index2(2) <= nc_node_dim + 1 .and. &
+                        index1(3) >= 0 .and. index2(3) <= nc_node_dim + 1) then
+
+                            velden(index1(1), index1(2), index1(3)) = velden(index1(1), index1(2), index1(3)) + mp*dx1(1)*dx1(2)*dx1(3)
+                            velden(index1(1), index1(2), index2(3)) = velden(index1(1), index1(2), index2(3)) + mp*dx1(1)*dx1(2)*dx2(3)
+                            velden(index1(1), index2(2), index1(3)) = velden(index1(1), index2(2), index1(3)) + mp*dx1(1)*dx2(2)*dx1(3)
+                            velden(index1(1), index2(2), index2(3)) = velden(index1(1), index2(2), index2(3)) + mp*dx1(1)*dx2(2)*dx2(3)
+
+                            velden(index2(1), index1(2), index1(3)) = velden(index2(1), index1(2), index1(3)) + mp*dx2(1)*dx1(2)*dx1(3)
+                            velden(index2(1), index1(2), index2(3)) = velden(index2(1), index1(2), index2(3)) + mp*dx2(1)*dx1(2)*dx2(3)
+                            velden(index2(1), index2(2), index1(3)) = velden(index2(1), index2(2), index1(3)) + mp*dx2(1)*dx2(2)*dx1(3)
+                            velden(index2(1), index2(2), index2(3)) = velden(index2(1), index2(2), index2(3)) + mp*dx2(1)*dx2(2)*dx2(3)
+
+                        endif
+                    enddo !!pp
+                enddo !! ic
+            enddo !! jc
+        enddo !! kc
+   
+    endif
+
+    time2 = mpi_wtime(ierr)
+    if (rank == 0) write(*,*) "Finished matter_density ... elapsed time = ", time2-time1
+
+    return
+
+end subroutine matter_density
+
+! -------------------------------------------------------------------------------------------------------
+
+subroutine veltransfer(command)
+    !
+    ! Apply a transfer function in Fourier space with command specifying the transfer function.
+    !
+
+    implicit none
+
+    integer :: command
+    character(len=200) :: fntf, vfntf, fn
+    real, dimension(7, nk) :: tf, vtf
+    integer :: k, j, i, l, kg, jg, ig, mg, ioerr, ii, thread
+    real(4) :: kz, ky, kx, kr, interpHTF_nu, interpMTF, kphys, interpVTF, interpVTF_nu
+    integer :: dx, dxy, ind
+    character(len=6) :: rank_s
+    real  :: z_current, w1, w2, vsim2phys
+    real(8) time1, time2
+
+    !! Return if don't want to do anything
+    if (command < 0) return
+
+    time1 = mpi_wtime(ierr)
+    if (rank == 0) write(*,*) 'Starting veltransfer ...'
+
+    ! --------------------------------------------------------------------------------------
+    ! Assign file names and get velocity conversion factor
+    ! --------------------------------------------------------------------------------------
+
+    z_current = z_checkpoint(cur_checkpoint)
+    vsim2phys = 300. * sqrt(omega_m) * box * (1. + z_current) / 2. / nc
+
+    if (z_current == 10.0) then
+        fntf = fntf10
+        vfntf = vfntf10
+    else if (z_current == 1.0) then
+        fntf = fntf1
+        vfntf = vfntf1
+    else
+        fntf = fntf0
+        vfntf = vfntf0
+    endif
+
+    ! --------------------------------------------------------------------------------------
+    ! Read density transfer function         
+    ! --------------------------------------------------------------------------------------
+
+    if (rank ==0) then
+        write(*,*) 'Reading ', fntf
+        open(11, file = fntf)
+        do k = 1,nk
+            read(11,*) tf(1,k), tf(2,k), tf(3,k), tf(4,k), tf(5,k), tf(6,k), tf(7,k)
+        end do
+        close(11)
+    endif
+
+    call mpi_bcast(tf, 7*nk, mpi_real, 0, mpi_comm_world, ierr)
+
+    ! --------------------------------------------------------------------------------------
+    ! Read velocity transfer function and put in simulation units
+    ! --------------------------------------------------------------------------------------
+
+    if (rank == 0) then
+        write(*,*) 'Reading ',vfntf
+        open(11, file=vfntf)
+        do k=1,nk
+            read(11,*) vtf(1,k), vtf(2,k), vtf(3,k), vtf(4,k), vtf(5,k), vtf(6,k), vtf(7,k)
+        enddo
+        close(11)
+        do k=1,nk
+            do j = 2,7
+                vtf(j,k) = vtf(j,k) / vsim2phys
+            enddo
+        enddo
+    endif
+
+    call mpi_bcast(vtf, 7*nk, mpi_real, 0, mpi_comm_world, ierr)
+
+    ! --------------------------------------------------------------------------------------
+    ! Multiply slab by the appropriate transfer function                                                                                              
+    ! --------------------------------------------------------------------------------------
+
+#ifndef SLAB
+    dx  = fsize(1)
+    dxy = dx * fsize(2)
+    ind = 0
+#endif
+
+#ifdef SLAB
+    !$omp parallel default(shared) private(k, j, i, kz, ky, kx, kphys, kr, interpMTF, interpHTF_nu, interpVTF, interpVTF_nu, w1, w2, ii) 
+    !$omp do schedule(dynamic) 
+    do k = 1, nc_slab
+        kg=k+nc_slab*rank
+        if (kg .lt. hc+2) then
+            kz=kg-1
+        else
+            kz=kg-1-nc
+        endif
+        do j = 1, nc
+            if (j .lt. hc+2) then
+                ky=j-1
+            else
+                ky=j-1-nc
+            endif
+            do i = 1, nc+2, 2
+                kx=(i-1)/2
+
+                kphys = 2*pi*sqrt(kx**2+ky**2+kz**2)/box
+                kx = 2*sin(pi*kx/ncr)
+                ky = 2*sin(pi*ky/ncr)
+                kz = 2*sin(pi*kz/ncr)
+#else
+    !$omp parallel default(shared) private(k, j, i, kg, mg, jg, ig, ind, kz, ky, kx, kphys, kr, interpMTF, interpHTF_nu, interpVTF, interpVTF_nu, w1, w2, ii) 
+    !$omp do schedule(dynamic) 
+    do k = 1, nc_pen+mypadd
+        ind = (k-1)*nc_node_dim*nc/2
+        do j = 1, nc_node_dim
+            do i = 1, nc, 2
+                kg = ind / dxy
+                mg = ind - kg * dxy
+                jg = mg / dx
+                ig = mg - jg * dx
+                kg = fstart(3) + kg
+                jg = fstart(2) + jg
+                ig = 2 * (fstart(1) + ig) - 1
+                ind = ind + 1
+                if (kg < hc+2) then
+                    kz=kg-1
+                else
+                    kz=kg-1-nc
+                endif
+                if (jg < hc+2) then
+                    ky=jg-1
+                else
+                    ky=jg-1-nc
+                endif
+                kx = (ig-1)/2
+
+                kphys = 2*pi*sqrt(kx**2+ky**2+kz**2)/box
+                kx = 2*sin(pi*kx/ncr)
+                ky = 2*sin(pi*ky/ncr)
+                kz = 2*sin(pi*kz/ncr)
+#endif
+                kr = sqrt(kx**2+ky**2+kz**2)
+
+                ! --------------------------------------------------------------------------------------
+                ! Find appropriate velocity transfer function
+                ! --------------------------------------------------------------------------------------
+
+                if (kphys <= vtf(1,1)) then
+                    interpVTF = vtf(dmcol, 1)
+                    interpVTF_nu = vtf(nucol, 1)
+                else if (kphys >= vtf(1, nk)) then
+                    interpVTF = vtf(dmcol, nk)
+                    interpVTF_nu = vtf(nucol, nk)
+                else
+                    do ii = 1, nk-1
+                        if (kphys <= vtf(1,ii+1)) then
+                            w1 = vtf(1,ii+1) - kphys
+                            w2 = kphys - vtf(1,ii)
+                            interpVTF = (w1*vtf(dmcol,ii)+w2*vtf(dmcol,ii+1))/(vtf(1,ii+1)-vtf(1,ii))
+                            interpVTF_nu = (w1*vtf(nucol,ii)+w2*vtf(nucol,ii+1))/(vtf(1,ii+1)-vtf(1,ii))
+                            exit
+                        endif
+                    enddo
+                endif
+
+                ! --------------------------------------------------------------------------------------
+                ! Find appropriate density transfer function
+                ! --------------------------------------------------------------------------------------
+
+                if (kphys <= tf(1,1)) then
+                    interpMTF = tf(dmcol, 1)
+                    interpHTF_nu = tf(nucol, 1)
+                else if (kphys >= tf(1, nk)) then
+                    interpMTF = tf(dmcol, nk)
+                    interpHTF_nu = tf(nucol, nk)
+                else
+                    do ii = 1, nk-1
+                        if (kphys <= tf(1,ii+1)) then
+                            w1 = tf(1,ii+1) - kphys
+                            w2 = kphys - tf(1,ii)
+                            interpMTF = (w1*tf(dmcol,ii)+w2*tf(dmcol,ii+1))/(tf(1,ii+1)-tf(1,ii))
+                            interpHTF_nu = (w1*tf(nucol,ii)+w2*tf(nucol,ii+1))/(tf(1,ii+1)-tf(1,ii))
+                            exit
+                        endif
+                    enddo
+                endif
+
+                !! Prevent division by zero issues (though only needed with gradient method)
+                if (kr == 0) then
+                    kr = 0.000001
+                endif
+
+                ! --------------------------------------------------------------------------------------
+                ! Apply the desired transfer function
+                ! --------------------------------------------------------------------------------------
+
+                if (command == 0) then !! dm density => dm velocity
+                    slab(i:i+1, j, k) = -1 * slab(i:i+1, j, k) * interpVTF/interpMTF
+                else if (command == 1) then !! dm density => nu velocity
+                    slab(i:i+1, j, k) = -1 * slab(i:i+1, j, k) * interpVTF_nu/interpMTF
+                else if (command == 2) then !! dm density => (nu-dm) velocity
+                    slab(i:i+1, j, k) = -1 * slab(i:i+1, j, k) * (interpVTF_nu-interpVTF)/interpMTF
+                else if (command == 3) then !! dm density => dm velocity potential
+                    slab(i:i+1, j, k) = -1 * slab(i:i+1, j, k) * interpVTF/interpMTF/kr
+                else if (command == 4) then !! dm density => nu velocity potential
+                    slab(i:i+1, j, k) = -1 * slab(i:i+1, j, k) * interpVTF_nu/interpMTF/kr
+                else if (command == 5) then !! dm density => (nu-dm) velocity potential (actually dm-nu for consistency with manual calculation)
+                    slab(i:i+1, j, k) = -1 * slab(i:i+1, j, k) * (interpVTF-interpVTF_nu)/interpMTF/kr
+                endif
+
+            enddo !! i
+        enddo !! j
+    enddo !! k
+    !$omp end do                                                                                                                                          
+    !$omp end parallel
+
+    time2 = mpi_wtime(ierr)
+    if (rank == 0) write(*,*) "Finished veltransfer ... elapsed time = ", time2-time1 
+
+    return 
+
+end subroutine veltransfer
+
+! -------------------------------------------------------------------------------------------------------
+
+subroutine numerical_gradient(command1, command2)
+  !
+  ! Computes numerical gradient in direction cur_dimension.
+  ! It is assumed that this is being called after veltransfer so that slab contains a dark matter velocity potential.
+  !
+
+  implicit none
+  integer ::  command1, command2
+  integer :: kt, k, j, i
+
+  real(8) :: time1, time2
+  time1 = mpi_wtime(ierr)
+
+  !------------------------------------------------------------
+  ! Fourier transform backward slab to cube
+  !------------------------------------------------------------                                                        
+
+  call cp_fftw(-1)
+
+  !------------------------------------------------------------
+  ! Stores cube in velden to compute gradient                                                      
+  !------------------------------------------------------------
+
+  !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                      
+  do kt = 0, nc_node_dim+1
+     velden(:,:,kt) = 0.0
+  enddo
+  !$omp end parallel do
+
+  !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                      
+  do kt = 1, nc_node_dim
+     velden(1:nc_node_dim,1:nc_node_dim,kt) = cube(:,:,kt)
+  enddo
+  !$omp end parallel do
+
+  call writebuffer_velden
+
+  !------------------------------------------------------------
+  ! Numerical gradient
+  !------------------------------------------------------------
+
+  if (cur_dimension == 1) then
+     !------------------------------------------------------------
+     ! Along X
+     !------------------------------------------------------------
+     !$omp parallel do num_threads(nt) default(shared) private(k,j,i)                                                                                
+     do k = 1,nc_node_dim
+        do j = 1,nc_node_dim
+           do i = 1,nc_node_dim
+              cube(i,j,k) = (velden(i+1,j,k)-velden(i-1,j,k))/2.
+           enddo
+        enddo
+     enddo
+     !$omp end parallel do                                                                                                                          
+  else if (cur_dimension == 2) then
+     !------------------------------------------------------------
+     ! Along Y
+     !------------------------------------------------------------
+     !$omp parallel do num_threads(nt) default(shared) private(k,j,i)                                                                               
+     do k = 1,nc_node_dim
+        do j = 1,nc_node_dim
+           do i = 1,nc_node_dim
+              cube(i,j,k) = (velden(i,j+1,k)-velden(i,j-1,k))/2.
+           enddo
+        enddo
+     enddo
+     !$omp end parallel do                                                                                                                          
+  else if (cur_dimension == 3) then
+     !------------------------------------------------------------
+     ! Along Z, in 2 steps for threading
+     !------------------------------------------------------------
+     !$omp parallel do num_threads(nt) default(shared) private(k,j,i)                                                                                 
+     do k = 1,nc_node_dim
+        do j = 1,nc_node_dim
+           do i = 1,nc_node_dim
+              cube(i,j,k) = velden(i,j,k+1)/2.
+           enddo
+        enddo
+     enddo
+     !$omp end parallel do                                                                                                                           
+     !$omp parallel do num_threads(nt) default(shared) private(k,j,i)                                                                                   
+     do k = 1,nc_node_dim
+        do j = 1,nc_node_dim
+           do i = 1,nc_node_dim
+              cube(i,j,k) = cube(i,j,k) - velden(i,j,k-1)/2.
+           enddo
+        enddo
+     enddo
+     !$omp end parallel do                                                                                                                           
+  endif
+
+  !------------------------------------------------------------
+  ! Writes velocity field to file if desired
+  !------------------------------------------------------------
+
+#ifdef write_vel
+    call writevelocityfield_totpop(command1, command2)
+#endif
+
+  !------------------------------------------------------------
+  ! Fourier transform cube to slab
+  !------------------------------------------------------------
+
+  call cp_fftw(1)
+
+  time2 = mpi_wtime(ierr)
+  if (rank == 0) write(*,*) "Finished Numerical_gradient ...  elapsed time = ", time2-time1
+
+  return
+
+end subroutine numerical_gradient
+
+! -------------------------------------------------------------------------------------------------------
+
+subroutine writebuffer_velden
+  !
+  ! Accumulate buffer from physical volume to adjacent nodes.
+  !
+
+  implicit none
+
+  integer :: i
+  integer, dimension(mpi_status_size) :: status, sstatus, rstatus
+  integer :: tag, srequest, rrequest, sierr, rierr, ierr
+  integer, parameter :: num2send = (nc_node_dim + 2)**2
+    
+  real(8) :: time1, time2
+  time1 = mpi_wtime(ierr)
+
+  !------------------------------------------------------------
+  ! Pass +x
+  !------------------------------------------------------------
+
+  tag = 111
+
+  velden_send_buff(:, :) = velden(nc_node_dim, :, :)
+
+  call mpi_isend(velden_send_buff, num2send, mpi_real, cart_neighbor(6), &
+       tag, mpi_comm_world, srequest, sierr)
+  call mpi_irecv(velden_recv_buff, num2send, mpi_real, cart_neighbor(5), &
+       tag, mpi_comm_world, rrequest, rierr)
+  call mpi_wait(srequest, sstatus, sierr)
+  call mpi_wait(rrequest, rstatus, rierr)
+
+  velden(0, :, :) = velden_recv_buff(:, :)
+
+  !------------------------------------------------------------
+  ! Pass -x
+  !------------------------------------------------------------
+
+  tag = 112
+
+  velden_send_buff(:, :) = velden(1, :, :)
+
+  call mpi_isend(velden_send_buff, num2send, mpi_real, cart_neighbor(5), &
+       tag, mpi_comm_world, srequest, sierr)
+  call mpi_irecv(velden_recv_buff, num2send, mpi_real, cart_neighbor(6), &
+       tag, mpi_comm_world, rrequest, rierr)
+  call mpi_wait(srequest, sstatus, sierr)
+  call mpi_wait(rrequest, rstatus, rierr)
+
+  velden(nc_node_dim+1, :, :) = velden_recv_buff(:, :)
+
+  !------------------------------------------------------------
+  ! Pass +y
+  !------------------------------------------------------------
+
+  tag = 113
+
+  velden_send_buff(:, :) = velden(:, nc_node_dim, :)
+
+  call mpi_isend(velden_send_buff, num2send, mpi_real, cart_neighbor(4), &
+       tag, mpi_comm_world, srequest, sierr)
+  call mpi_irecv(velden_recv_buff, num2send, mpi_real, cart_neighbor(3), &
+       tag, mpi_comm_world, rrequest, rierr)
+  call mpi_wait(srequest, sstatus, sierr)
+  call mpi_wait(rrequest, rstatus, rierr)
+
+  velden(:, 0, :) = velden_recv_buff(:, :)
+
+  !------------------------------------------------------------
+  ! Pass -y
+  !------------------------------------------------------------
+
+  tag = 114
+
+  velden_send_buff(:, :) = velden(:, 1, :)
+
+  call mpi_isend(velden_send_buff, num2send, mpi_real, cart_neighbor(3), &
+       tag, mpi_comm_world, srequest, sierr)
+  call mpi_irecv(velden_recv_buff, num2send, mpi_real, cart_neighbor(4), &
+       tag, mpi_comm_world, rrequest, rierr)
+  call mpi_wait(srequest, sstatus, sierr)
+  call mpi_wait(rrequest, rstatus, rierr)
+
+  velden(:, nc_node_dim+1, :) = velden_recv_buff(:, :)
+
+  !------------------------------------------------------------
+  ! Pass +z
+  !------------------------------------------------------------
+
+  tag = 115
+
+  velden_send_buff(:, :) = velden(:, :, nc_node_dim)
+
+  call mpi_isend(velden_send_buff, num2send, mpi_real, cart_neighbor(2), &
+       tag, mpi_comm_world, srequest, sierr)
+  call mpi_irecv(velden_recv_buff, num2send, mpi_real, cart_neighbor(1), &
+       tag, mpi_comm_world, rrequest, rierr)
+  call mpi_wait(srequest, sstatus, sierr)
+  call mpi_wait(rrequest, rstatus, rierr)
+
+  velden(:, :, 0) = velden_recv_buff(:, :)
+
+  !------------------------------------------------------------
+  ! Pass -z
+  !------------------------------------------------------------
+
+  tag = 116
+
+  velden_send_buff(:, :) = velden(:, :, 1)
+
+  call mpi_isend(velden_send_buff, num2send, mpi_real, cart_neighbor(1), &
+       tag, mpi_comm_world, srequest, sierr)
+  call mpi_irecv(velden_recv_buff, num2send, mpi_real, cart_neighbor(2), &
+       tag, mpi_comm_world, rrequest, rierr)
+  call mpi_wait(srequest, sstatus, sierr)
+  call mpi_wait(rrequest, rstatus, rierr)
+
+  velden(:, :, nc_node_dim+1) = velden_recv_buff(:, :)
+
+  time2 = mpi_wtime(ierr)
+  if (rank == 0) write(*,*) "Finished writebuffer_velden ... elapsed time = ", time2-time1
+
+  return
+
+end subroutine writebuffer_velden
 
 ! -------------------------------------------------------------------------------------------------------
 

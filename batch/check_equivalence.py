@@ -8,9 +8,9 @@ import numpy
 # These ones are usually changed
 #
 
-nodes_dim      = 1
+nodes_dim      = 2
 tiles_node_dim = 6
-nf_tile        = 176
+nf_tile        = 240
 density_buffer = 1.5
 
 # Factor to reduce max_buf by in cubepm.par 
@@ -19,6 +19,10 @@ srfac = 1
 # Set this true if using P3DFFT for pencil decomposition
 pencil = True
 pencil_ICs = True
+slab_fftw3_ICs = False 
+
+# Set this true if using ZIP checkpointing method
+zip = True
 
 # Set this true if using neutrinos
 neutrinos = True
@@ -48,13 +52,16 @@ mesh_scale  = 4
 part_ratio  = 2
 nc_halo_max = 128
 max_llf     = 100000
-ngrid_max   = 240
+ngrid_max   = 650 
 nf_cutoff   = 16
 nf_buf      = nf_cutoff + 8
 pp_range    = 2
 nlist       = 5 * (nc_halo_max + 1)**3
 max_maxima  = 5 * nc_halo_max**3
 max_halo_np = 5 * (nc_halo_max + 1)**3
+
+dbuf_ICs       = 1.4
+mesh_scale_ICs = 4
 
 # ---------------------------------------------------------------------
 # MAIN CUBEP3M CODE
@@ -372,7 +379,7 @@ slab        = 4 * (nc + 2) * nc * nc_slab
 slab_work   = 4 * (nc + 2) * nc * nc_slab
 phi         = 4 * (nc_node_dim + 2)**3
 phi_buf     = 4 * (nc_node_dim + 2)**2
-xvp         = 4 * 6 * np_node_dim**2 * num_threads_ic 
+slab_cmplx  = 0
 
 # Changes if P3DFFT is used instead of slab decomposition on the fine mesh.
 if pencil_ICs:
@@ -380,57 +387,213 @@ if pencil_ICs:
     slab        = 4 * nc * nc_node_dim * (nc_pen+2)
     slab_work   = 4 * nc * nc_node_dim * (nc_pen+2)
 
-#
-# Determine memory usage of equivalenced and other arrays
-#
+# Consistency check
+if pencil_ICs and slab_fftw3_ICs:
+    print "You can only pick one of pencil_ICs/slab_fftw3_ICs !!"
+    exit()
 
-bytes_eq1 = max(phi, slab_work, recv_cube)
-bytes_eq2 = max(slab, cube)
-bytes_oth = phi_buf + xvp
+if slab_fftw3_ICs: 
+    slab_cmplx = 2 * slab
 
-#
-# Determine memory usage of large P3DFFT arrays if applicable
-#
+if neutrinos and zip:
 
-bytes_p3dfft = 0
+    #
+    # Sizes of some arrays are different depending on ratio_nudm_dim 
+    #
+    
+    np_node_dim_dm = np_node_dim / ratio_nudm_dim
+    nm_node_dim = nc_node_dim / mesh_scale_ICs
+    max_np    = int(dbuf_ICs*np_node_dim)*np_node_dim**2
+    max_np_dm = int(dbuf_ICs*np_node_dim_dm)*np_node_dim_dm**2    
+    np_buffer    = max_np - np_node_dim**3
+    np_buffer_dm = max_np_dm - np_node_dim_dm**3
 
-if pencil_ICs:
+    xvp    = 4*6*max_np
+    xvp_dm = 4*6*max_np_dm
+    xp_buf    = 4*6*np_buffer
+    xp_buf_dm = 4*6*np_buffer_dm
+    send_buf = xp_buf ; recv_buf = xp_buf
+    send_buf_dm = xp_buf_dm ; recv_buf_dm = xp_buf_dm
+    hoc = 4 * nm_node_dim * nm_node_dim * nm_node_dim
+    ll  = 4 * max_np
+    ll_dm = 4 * max_np_dm
 
-    if nodes_dim == 1:
-        nm = int(nc_node_dim * nc_node_dim * (nc_node_dim+2) / 2)
+    slab_cache = slab
+
+    #
+    # Determine memory usage of equivalenced and other arrays
+    #
+
+    bytes_eq1    = max(phi, slab_work, recv_cube, send_buf)
+    bytes_eq1_dm = max(phi, slab_work, recv_cube, send_buf_dm)
+    if not slab_fftw3_ICs:
+        bytes_eq2    = max(slab, cube, xp_buf, hoc)
+        bytes_eq2_dm = max(slab, cube, xp_buf_dm, hoc)
     else:
-        nm = int(nc_node_dim * (nc_node_dim + nodes_dim) * (nc_node_dim + 2./nodes_dim) / 2.)
+        bytes_eq2    = max(cube, xp_buf, hoc)
+        bytes_eq2_dm = max(cube, xp_buf_dm, hoc)
+    bytes_eq3    = max(slab_cache, ll, recv_buf)
+    bytes_eq3_dm = max(slab_cache, ll_dm, recv_buf_dm)
+    bytes_eq4    = xvp
+    bytes_eq4_dm = xvp_dm
+    bytes_oth    = phi_buf
+    if slab_fftw3_ICs:
+        bytes_oth += slab_cmplx
+        
+    #
+    # Determine memory usage of large P3DFFT arrays if applicable
+    #
 
-    buf1 = 4 * 2 * nm
-    buf2 = 4 * 2 * nm
-    R    = 4 * 2 * nm
-    bytes_p3dfft = buf1 + buf2 + R
+    bytes_p3dfft = 0
 
-#
-# Print memory usage
-#
+    if pencil_ICs:
 
-totalbytes = bytes_eq1 + bytes_eq2 + bytes_oth + bytes_p3dfft
+        if nodes_dim == 1:
+            nm = int(nc_node_dim * nc_node_dim * (nc_node_dim+2) / 2)
+        else:
+            nm = int(nc_node_dim * (nc_node_dim + nodes_dim) * (nc_node_dim + 2./nodes_dim) / 2.)
 
-print "TOTAL MEMORY USAGE:  " + str(totalbytes/1024.**3) + " GB"
-if pencil:
-    print "P3DFFT MEMORY USAGE: " + str(bytes_p3dfft/1024.**3) + " GB"
-print
+        buf1 = 4 * 2 * nm
+        buf2 = 4 * 2 * nm
+        R    = 4 * 2 * nm
+        bytes_p3dfft = buf1 + buf2 + R
 
-#
-# Print notes to screen
-#
+    #
+    # Print memory usage
+    #
 
-if bytes_eq1 != phi:
-    print " *** Adjust common block for phi, slab_work, and recv_cube *** " 
-    print "     phi       = ", phi
-    print "     slab_work = ", slab_work
-    print "     recv_cube = ", recv_cube
+    totalbytes = bytes_eq1 + bytes_eq2 + bytes_eq3 + bytes_eq4 + bytes_oth + bytes_p3dfft
+    totalbytes_dm = bytes_eq1_dm + bytes_eq2_dm + bytes_eq3_dm + bytes_eq4_dm + bytes_oth + bytes_p3dfft
+
+    print "TOTAL NU MEMORY USAGE:  " + str(totalbytes/1024.**3) + " GB"
+    print "TOTAL DM MEMORY USAGE:  " + str(totalbytes_dm/1024.**3) + " GB"
+    if pencil:
+        print "P3DFFT MEMORY USAGE: " + str(bytes_p3dfft/1024.**3) + " GB"
     print
 
-if bytes_eq2 != slab:
-    print " *** Adjust common block for slab and cube *** "
-    print "     slab = ", slab
-    print "     cube = ", cube
+    #
+    # Print notes to screen
+    #
+
+    for i in xrange(2):
+
+        if i == 0:
+            bb = "NEUTRINO EXECUTABLE"
+            b1 = bytes_eq1
+            b2 = bytes_eq2
+            b3 = bytes_eq3
+
+        if i == 1:
+            bb = "DARK MATTER EXECUTABLE"
+            b1 = bytes_eq1_dm
+            b2 = bytes_eq2_dm
+            b3 = bytes_eq3_dm
+
+        if b1 != phi:
+            print " *** Adjust common block for phi, slab_work, recv_cube, and send_buf in " + bb + " *** "
+            print "     phi       = ", phi
+            print "     slab_work = ", slab_work
+            print "     recv_cube = ", recv_cube
+            if i == 0:
+                print "   send_buf_nu = ", send_buf
+            else:
+                print "   send_buf_dm = ", send_buf_dm
+            print
+
+        if not slab_fftw3_ICs :
+            if b2 != slab:
+                print " *** Adjust common block for slab, cube, hoc, and xp_buf in " + bb + " *** "
+                print "     slab = ", slab
+                print "     cube = ", cube
+                if i == 0:
+                    print "xp_buf_nu = ", xp_buf
+                else:
+                    print "xp_buf_dm = ", xp_buf_dm
+                print "      hoc = ", hoc
+                print
+        else:
+            if b2 != cube:
+                print " *** Adjust common block for cube, hoc, and xp_buf in " + bb + " *** "
+                print "     cube = ", cube
+                if i == 0:
+                    print "xp_buf_nu = ", xp_buf
+                else:
+                    print "xp_buf_dm = ", xp_buf_dm
+                print "      hoc = ", hoc
+                print
+
+        if b3 != slab_cache:
+            print " *** Adjust common block for slab_cache, ll, and recv_buf in " + bb + " *** " 
+            print "     slab_cache = ", slab_cache
+            if i == 0:
+                print "          ll_nu = ", ll
+                print "    recv_buf_nu = ", recv_buf 
+            else:
+                print "          ll_dm = ", ll_dm
+                print "    recv_buf_dm = ", recv_buf_dm
+
+
+else:
+
+    xvp     = 4 * 6 * np_node_dim**2 * num_threads_ic    
+
+    #
+    # Determine memory usage of equivalenced and other arrays
+    #
+
+    bytes_eq1 = max(phi, slab_work, recv_cube)
+    if not slab_fftw3_ICs:
+        bytes_eq2 = max(slab, cube)
+    else:
+        bytes_eq2 = max(slab_cmplx, slab)
+    bytes_oth = phi_buf + xvp
+    if slab_fftw3_ICs:
+        bytes_oth += cube
+
+    #
+    # Determine memory usage of large P3DFFT arrays if applicable
+    #
+
+    bytes_p3dfft = 0
+
+    if pencil_ICs:
+
+        if nodes_dim == 1:
+            nm = int(nc_node_dim * nc_node_dim * (nc_node_dim+2) / 2)
+        else:
+            nm = int(nc_node_dim * (nc_node_dim + nodes_dim) * (nc_node_dim + 2./nodes_dim) / 2.)
+
+        buf1 = 4 * 2 * nm
+        buf2 = 4 * 2 * nm
+        R    = 4 * 2 * nm
+        bytes_p3dfft = buf1 + buf2 + R
+
+    #
+    # Print memory usage
+    #
+
+    totalbytes = bytes_eq1 + bytes_eq2 + bytes_oth + bytes_p3dfft
+
+    print "TOTAL MEMORY USAGE:  " + str(totalbytes/1024.**3) + " GB"
+    if pencil:
+        print "P3DFFT MEMORY USAGE: " + str(bytes_p3dfft/1024.**3) + " GB"
     print
+
+    #
+    # Print notes to screen
+    #
+
+    if bytes_eq1 != phi:
+        print " *** Adjust common block for phi, slab_work, and recv_cube *** " 
+        print "     phi       = ", phi
+        print "     slab_work = ", slab_work
+        print "     recv_cube = ", recv_cube
+        print
+
+    if not slab_fftw3_ICs:
+        if bytes_eq2 != slab:
+            print " *** Adjust common block for slab and cube *** "
+            print "     slab = ", slab
+            print "     cube = ", cube
+            print
 

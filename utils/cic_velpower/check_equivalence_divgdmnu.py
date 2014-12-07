@@ -6,24 +6,27 @@ import numpy
 nodes_dim      = 2
 tiles_node_dim = 6
 nf_tile        = 240 
-density_buffer = 1.6
+density_buffer = 1.8
 ratio_nudm_dim = 2
-nfine_buf      = 16 
-nfine_buf_h    = 128
-mesh_scale     = 4
+nfine_buf      = 8 
+nfine_buf_h    = 64
+mesh_scale     = 1
 mesh_scale_h   = 8
-nt             = 8
+nt             = 16
 max_np_h       = 1000000
 
 # Set this true if using P3DFFT for pencil decomposition
 pencil = True
 
 # Set this true if you are using curl
-curl = True
+curl = False 
+
+# Set this true if you are using momentum density field method for neutrinos
+momentum = True
 
 # Set this true if using -DCOARSE_HACK and choose appropriate value of coarsen_factor
-coarse_hack = False
-coarsen_factor = 2
+coarse_hack = True 
+coarsen_factor = 4
 
 # Usually won't need to change these
 nf_cutoff   = 16
@@ -174,6 +177,9 @@ if maxeq5 != eqtest:
 slab_work = slab
 if pencil: slab_work = 0
 slab2 = slab
+velden4 = 0
+if momentum:
+    velden4 = velden
 
 #
 # Determine memory usage of large P3DFFT arrays if applicable
@@ -201,7 +207,7 @@ velden_send_buff = 4 * (nc_node_dim+2)**2
 velden_recv_buff = velden_send_buff
 
 t1 = maxeq1 + maxeq2 + maxeq3 + maxeq4 + maxeq5
-t2 = slab_work + slab2 + xvp + xvp_dm + xvp_h + veldivg + velden_send_buff + velden_recv_buff
+t2 = slab_work + slab2 + xvp + xvp_dm + xvp_h + veldivg + velden_send_buff + velden_recv_buff + velden4
 print "Total memory used by large arrays [GB]: ", (t1 + t2 + bytes_p3dfft) / 1024.**3
 if pencil: print "Total memory of large P3DFFT arrays [GB]: ", bytes_p3dfft / 1024.**3
 print
