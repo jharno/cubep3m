@@ -27,15 +27,15 @@
 #endif
 #endif
 #ifdef ZIP
-    character(len=max_path) :: f_zip1,f_zip2,f_zip3
-    integer :: fstat1, fstat2, fstat3, l
+    character(len=max_path) :: f_zip0,f_zip1,f_zip2,f_zip3
+    integer :: fstat0, fstat1, fstat2, fstat3, l
     real(4) :: v_r2i
     integer(4) :: np_uzip
     integer(1) :: xi1(4,3), rhoc_i1(4), test_i1
-    integer(4) :: xi4(3), rhoc_i4
+    integer(4) :: xi4(3), rr_i4
     integer(2) :: vi2(3)
     equivalence(xi1,xi4)
-    equivalence(rhoc_i4,rhoc_i1)
+    equivalence(rr_i4,rhoc_i1)
 #endif
 
     fstat=0
@@ -166,23 +166,26 @@
 
 #else
 
+    f_zip0 = output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip0_'//rank_s(1:len_trim(rank_s))//'.dat'
     f_zip1 = output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip1_'//rank_s(1:len_trim(rank_s))//'.dat'
     f_zip2 = output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip2_'//rank_s(1:len_trim(rank_s))//'.dat'
     f_zip3 = output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip3_'//rank_s(1:len_trim(rank_s))//'.dat'
 
+    open(10, file=f_zip0, status="old", iostat=fstat0, access="stream", buffered='yes')
     open(11, file=f_zip1, status="old", iostat=fstat1, access="stream", buffered='yes')
     open(12, file=f_zip2, status="old", iostat=fstat2, access="stream", buffered='yes')
     open(13, file=f_zip3, status="old", iostat=fstat3, access="stream", buffered='yes')
 
-    if (fstat1 /= 0 .or. fstat2 /= 0 .or. fstat3 /= 0) then
+    if (fstat0 /= 0 .or. fstat1 /= 0 .or. fstat2 /= 0 .or. fstat3 /= 0) then
         write(*,*) 'error opening dm zip checkpoint'
-        write(*,*) 'rank',rank,'files:',f_zip1,f_zip2,f_zip3
+        write(*,*) 'rank',rank,'files:',f_zip0,f_zip1,f_zip2,f_zip3
         call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
 
     !! Read header (which incluedes velocity conversion factor and shake_offset)
 
-    read(11) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_projection,cur_halofind,mass_p,v_r2i,shake_offset
+    read(10) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_projection,cur_halofind,mass_p,v_r2i,shake_offset
+    read(11) dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy
 
     if (rank == 0) print *,'restarting simulation from z=',z_checkpoint(cur_checkpoint-1)
 
@@ -199,12 +202,13 @@
     do k = 1, nc_node_dim
         do j = 1, nc_node_dim
             do i = 1, nc_node_dim
-                rhoc_i4=0 ; xi4=0 !! Clean up, very imortant.
+                rr_i4=0 ; xi4=0 !! Clean up, very imortant.
                 read(12) rhoc_i1(1) !! Get number of particles in the coarse grid
-                if (rhoc_i4==255) read(13) rhoc_i4
-                do l = 1, rhoc_i4
+                if (rr_i4==255) read(13) rr_i4
+                do l = 1, rr_i4
                     np_uzip = np_uzip + 1
-                    read(11) xi1(1,:), vi2
+                    read(10) xi1(1,:)
+                    read(11) vi2
                     xv(1:3, np_uzip) = mesh_scale * ( xi4/256. + (/i,j,k/) - 1 )
                     xv(4:6, np_uzip) = vi2 / v_r2i
                 enddo
@@ -213,11 +217,14 @@
     enddo
 
     !! Consistency checks
-
-    read(11, end=701) test_i1
+    read(10, end=701) test_i1
+    print*, 'ERROR: rank', rank, ': file not ending:', f_zip0
+    call mpi_abort(mpi_comm_world, ierr, ierr)
+701 close(10)
+    read(11, end=801) test_i1
     print*, 'ERROR: rank', rank, ': file not ending:', f_zip1
     call mpi_abort(mpi_comm_world, ierr, ierr)
-701 close(11) ; close(12) ; close(13)
+801 close(11) ; close(12) ; close(13)
 
     if (np_uzip /= np_local) then
         write(*,*) "Something wrong with reading dark matter zipped files: ", rank, np_local, np_uzip
@@ -273,24 +280,27 @@
 
     !! Open neutrino files for reading
 
+    f_zip0 = output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip0_'//rank_s(1:len_trim(rank_s))//'_nu.dat' 
     f_zip1 = output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip1_'//rank_s(1:len_trim(rank_s))//'_nu.dat'
     f_zip2 = output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip2_'//rank_s(1:len_trim(rank_s))//'_nu.dat'
     f_zip3 = output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip3_'//rank_s(1:len_trim(rank_s))//'_nu.dat'
 
+    open(20, file=f_zip0, status="old", iostat=fstat0, access="stream", buffered='yes')
     open(21, file=f_zip1, status="old", iostat=fstat1, access="stream", buffered='yes')
     open(22, file=f_zip2, status="old", iostat=fstat2, access="stream", buffered='yes')
     open(23, file=f_zip3, status="old", iostat=fstat3, access="stream", buffered='yes')
 
-    if (fstat1 /= 0 .or. fstat2 /= 0 .or. fstat3 /= 0) then
+    if (fstat0 /= 0 .or. fstat1 /= 0 .or. fstat2 /= 0 .or. fstat3 /= 0) then
         write(*,*) 'error opening dm zip checkpoint'
-        write(*,*) 'rank',rank,'files:',f_zip1,f_zip2,f_zip3
+        write(*,*) 'rank',rank,'files:',f_zip0,f_zip1,f_zip2,f_zip3
         call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
 
     !! Read header (which incluedes velocity conversion factor and shake_offset). Only store the local number
     !! of particles and velocity conversion factor. All other info already read from dark matter checkpoint file.
 
-    read(21) np_nu,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,v_r2i,dummy,dummy,dummy
+    read(20) np_nu,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,v_r2i,dummy,dummy,dummy
+    read(21) dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy
 
     if (rank == 0) print *,'neutrinos restarting simulation from z=',z_checkpoint(cur_checkpoint-1)
 
@@ -305,12 +315,13 @@
     do k = 1, nc_node_dim
         do j = 1, nc_node_dim
             do i = 1, nc_node_dim
-                rhoc_i4=0 ; xi4=0 !! Clean up, very imortant.
+                rr_i4=0 ; xi4=0 !! Clean up, very imortant.
                 read(22) rhoc_i1(1) !! Get number of particles in the coarse grid
-                if (rhoc_i4==255) read(23) rhoc_i4
-                do l = 1, rhoc_i4
+                if (rr_i4==255) read(23) rr_i4
+                do l = 1, rr_i4
                     np_uzip = np_uzip + 1
-                    read(21) xi1(1,:), vi2
+                    read(20) xi1(1,:)
+                    read(21) vi2
                     xv(1:3, np_uzip) = mesh_scale * ( xi4/256. + (/i,j,k/) - 1 )
                     xv(4:6, np_uzip) = vi2 / v_r2i
                 enddo
@@ -320,10 +331,14 @@
 
     !! Consistency checks
 
-    read(21, end=702) test_i1
+    read(20, end=702) test_i1
+    print*, 'ERROR: rank', rank, ': file not ending:', f_zip0
+    call mpi_abort(mpi_comm_world, ierr, ierr)
+702 close(20) 
+    read(21, end=802) test_i1
     print*, 'ERROR: rank', rank, ': file not ending:', f_zip1
     call mpi_abort(mpi_comm_world, ierr, ierr)
-702 close(21) ; close(22) ; close(23)
+802 close(21) ; close(22) ; close(23)
 
     if (np_uzip /= np_local+np_nu) then
         write(*,*) "Something wrong with reading neutrino zipped files: ", rank, np_local, np_nu, np_uzip
@@ -478,23 +493,26 @@
 #ifdef ZIP
     else
 
+        f_zip0 = output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//reskill_prefix//'zipres0_'//rank_s(1:len_trim(rank_s))//'.dat'
         f_zip1 = output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//reskill_prefix//'zipres1_'//rank_s(1:len_trim(rank_s))//'.dat'
         f_zip2 = output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//reskill_prefix//'zipres2_'//rank_s(1:len_trim(rank_s))//'.dat'
         f_zip3 = output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//reskill_prefix//'zipres3_'//rank_s(1:len_trim(rank_s))//'.dat'
 
+        open(10, file=f_zip0, status="old", iostat=fstat0, access="stream", buffered='yes')
         open(11, file=f_zip1, status="old", iostat=fstat1, access="stream", buffered='yes')
         open(12, file=f_zip2, status="old", iostat=fstat2, access="stream", buffered='yes')
         open(13, file=f_zip3, status="old", iostat=fstat3, access="stream", buffered='yes')
 
-        if (fstat1 /= 0 .or. fstat2 /= 0 .or. fstat3 /= 0) then
+        if (fstat0 /= 0 .or. fstat1 /= 0 .or. fstat2 /= 0 .or. fstat3 /= 0) then
             write(*,*) 'error opening dm zip checkpoint'
-            write(*,*) 'rank',rank,'files:',f_zip1,f_zip2,f_zip3
+            write(*,*) 'rank',rank,'files:',f_zip0,f_zip1,f_zip2,f_zip3
             call mpi_abort(mpi_comm_world,ierr,ierr)
         endif
 
         !! Read header (which incluedes velocity conversion factor and shake_offset)
 
-        read(11) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_projection,cur_halofind,mass_p,v_r2i,shake_offset
+        read(10) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_projection,cur_halofind,mass_p,v_r2i,shake_offset
+        read(11) dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy
 
         if (rank == 0) print *,'restarting simulation from z=',reskill_prefix
         if (rank == 0) print *,'current checkpoint, proj and halo entries are:', cur_checkpoint, cur_projection,cur_halofind
@@ -512,12 +530,13 @@
         do k = 1, nc_node_dim
             do j = 1, nc_node_dim
                 do i = 1, nc_node_dim
-                    rhoc_i4=0 ; xi4=0 !! Clean up, very imortant.
+                    rr_i4=0 ; xi4=0 !! Clean up, very imortant.
                     read(12) rhoc_i1(1) !! Get number of particles in the coarse grid
-                    if (rhoc_i4==255) read(13) rhoc_i4
-                    do l = 1, rhoc_i4
+                    if (rr_i4==255) read(13) rr_i4
+                    do l = 1, rr_i4
                         np_uzip = np_uzip + 1
-                        read(11) xi1(1,:), vi2
+                        read(10) xi1(1,:)
+                        read(11) vi2
                         xv(1:3, np_uzip) = mesh_scale * ( xi4/256. + (/i,j,k/) - 1 )
                         xv(4:6, np_uzip) = vi2 / v_r2i
                     enddo
@@ -526,11 +545,14 @@
         enddo
 
         !! Consistency checks
-
-        read(11, end=703) test_i1
+        read(10, end=703) test_i1
+        print*, 'ERROR: rank', rank, ': file not ending:', f_zip0
+        call mpi_abort(mpi_comm_world, ierr, ierr)
+703     close(10)
+        read(11, end=803) test_i1
         print*, 'ERROR: rank', rank, ': file not ending:', f_zip1
         call mpi_abort(mpi_comm_world, ierr, ierr)
-703     close(11) ; close(12) ; close(13)
+803     close(11) ; close(12) ; close(13)
 
         if (np_uzip /= np_local) then
             write(*,*) "Something wrong with reading dark matter zipped files: ", rank, np_local, np_uzip
@@ -590,24 +612,27 @@
 
         !! Open neutrino files for reading
 
+        f_zip0 = output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//reskill_prefix//'zipres0_'//rank_s(1:len_trim(rank_s))//'_nu.dat'
         f_zip1 = output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//reskill_prefix//'zipres1_'//rank_s(1:len_trim(rank_s))//'_nu.dat'
         f_zip2 = output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//reskill_prefix//'zipres2_'//rank_s(1:len_trim(rank_s))//'_nu.dat'
         f_zip3 = output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//reskill_prefix//'zipres3_'//rank_s(1:len_trim(rank_s))//'_nu.dat'
 
+        open(20, file=f_zip0, status="old", iostat=fstat0, access="stream", buffered='yes')
         open(21, file=f_zip1, status="old", iostat=fstat1, access="stream", buffered='yes')
         open(22, file=f_zip2, status="old", iostat=fstat2, access="stream", buffered='yes')
         open(23, file=f_zip3, status="old", iostat=fstat3, access="stream", buffered='yes')
 
-        if (fstat1 /= 0 .or. fstat2 /= 0 .or. fstat3 /= 0) then
+        if (fstat0 /= 0 .or. fstat1 /= 0 .or. fstat2 /= 0 .or. fstat3 /= 0) then
             write(*,*) 'error opening dm zip checkpoint'
-            write(*,*) 'rank',rank,'files:',f_zip1,f_zip2,f_zip3
+            write(*,*) 'rank',rank,'files:',f_zip0,f_zip1,f_zip2,f_zip3
             call mpi_abort(mpi_comm_world,ierr,ierr)
         endif
 
         !! Read header (which incluedes velocity conversion factor and shake_offset). Only store the local number
         !! of particles and velocity conversion factor. All other info already read from dark matter checkpoint file.
 
-        read(21) np_nu,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,v_r2i,dummy,dummy,dummy
+        read(20) np_nu,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,v_r2i,dummy,dummy,dummy
+        read(21) dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy
 
         if (rank == 0) print *,'neutrinos restarting simulation from z=',reskill_prefix
 
@@ -622,12 +647,13 @@
         do k = 1, nc_node_dim
             do j = 1, nc_node_dim
                 do i = 1, nc_node_dim
-                    rhoc_i4=0 ; xi4=0 !! Clean up, very imortant.
+                    rr_i4=0 ; xi4=0 !! Clean up, very imortant.
                     read(22) rhoc_i1(1) !! Get number of particles in the coarse grid
-                    if (rhoc_i4==255) read(23) rhoc_i4
-                    do l = 1, rhoc_i4
+                    if (rr_i4==255) read(23) rr_i4
+                    do l = 1, rr_i4
                         np_uzip = np_uzip + 1
-                        read(21) xi1(1,:), vi2
+                        read(20) xi1(1,:)
+                        read(21) vi2
                         xv(1:3, np_uzip) = mesh_scale * ( xi4/256. + (/i,j,k/) - 1 )
                         xv(4:6, np_uzip) = vi2 / v_r2i
                     enddo
@@ -636,11 +662,14 @@
         enddo
 
         !! Consistency checks
-
-        read(21, end=704) test_i1
+        read(20, end=704) test_i1
+        print*, 'ERROR: rank', rank, ': file not ending:', f_zip0
+        call mpi_abort(mpi_comm_world, ierr, ierr)
+704     close(20); 
+        read(21, end=804) test_i1
         print*, 'ERROR: rank', rank, ': file not ending:', f_zip1
         call mpi_abort(mpi_comm_world, ierr, ierr)
-704     close(21) ; close(22) ; close(23)
+804     close(21) ; close(22) ; close(23)
 
         if (np_uzip /= np_local+np_nu) then
             write(*,*) "Something wrong with reading neutrino zipped files: ", rank, np_local, np_nu, np_uzip
@@ -783,23 +812,26 @@
 
 #else
 
+    f_zip0 = ic_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip0_'//rank_s(1:len_trim(rank_s))//'.dat' 
     f_zip1 = ic_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip1_'//rank_s(1:len_trim(rank_s))//'.dat'
     f_zip2 = ic_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip2_'//rank_s(1:len_trim(rank_s))//'.dat'
     f_zip3 = ic_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip3_'//rank_s(1:len_trim(rank_s))//'.dat'
 
+    open(10, file=f_zip0, status="old", iostat=fstat0, access="stream", buffered='yes')
     open(11, file=f_zip1, status="old", iostat=fstat1, access="stream", buffered='yes')
     open(12, file=f_zip2, status="old", iostat=fstat2, access="stream", buffered='yes')
     open(13, file=f_zip3, status="old", iostat=fstat3, access="stream", buffered='yes')
 
-    if (fstat1 /= 0 .or. fstat2 /= 0 .or. fstat3 /= 0) then
+    if (fstat0 /= 0 .or. fstat1 /= 0 .or. fstat2 /= 0 .or. fstat3 /= 0) then
         write(*,*) 'error opening dm zip checkpoint'
-        write(*,*) 'rank',rank,'files:',f_zip1,f_zip2,f_zip3
+        write(*,*) 'rank',rank,'files:',f_zip0,f_zip1,f_zip2,f_zip3
         call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
 
     !! Read header (which incluedes velocity conversion factor and shake_offset)
 
-    read(11) np_local,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,v_r2i,dummy,dummy,dummy
+    read(10) np_local,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,v_r2i,dummy,dummy,dummy
+    read(11) dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy
 
     if (np_local > max_np) then
         write(*,*) 'too many particles to store'
@@ -814,12 +846,13 @@
     do k = 1, nc_node_dim
         do j = 1, nc_node_dim
             do i = 1, nc_node_dim
-                rhoc_i4=0 ; xi4=0 !! Clean up, very imortant.
+                rr_i4=0 ; xi4=0 !! Clean up, very imortant.
                 read(12) rhoc_i1(1) !! Get number of particles in the coarse grid
-                if (rhoc_i4==255) read(13) rhoc_i4
-                do l = 1, rhoc_i4
+                if (rr_i4==255) read(13) rr_i4
+                do l = 1, rr_i4
                     np_uzip = np_uzip + 1
-                    read(11) xi1(1,:), vi2
+                    read(10) xi1(1,:)
+                    read(11) vi2
                     xv(1:3, np_uzip) = mesh_scale * ( xi4/256. + (/i,j,k/) - 1 )
                     xv(4:6, np_uzip) = vi2 / v_r2i
                 enddo
@@ -829,10 +862,14 @@
 
     !! Consistency checks
 
-    read(11, end=705) test_i1
+    read(10, end=705) test_i1
+    print*, 'ERROR: rank', rank, ': file not ending:', f_zip0
+    call mpi_abort(mpi_comm_world, ierr, ierr)
+705 close(10)
+    read(11, end=805) test_i1
     print*, 'ERROR: rank', rank, ': file not ending:', f_zip1
     call mpi_abort(mpi_comm_world, ierr, ierr)
-705 close(11) ; close(12) ; close(13)
+805 close(11) ; close(12) ; close(13)
 
     if (np_uzip /= np_local) then
         write(*,*) "Something wrong with reading dark matter zipped files: ", rank, np_local, np_uzip

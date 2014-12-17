@@ -164,17 +164,18 @@ program dist_init
   integer, parameter :: nm_node_dim = nc_node_dim / mesh_scale
   integer(4), dimension(nm_node_dim, nm_node_dim, nm_node_dim) :: hoc
   integer(4) :: ll(max_np)
+  real(4), parameter :: dbuf_cell = 100
+  integer(4), parameter :: max_cell_np = int(dbuf_cell*(hcr/ncr*mesh_scale)**3) + 1
+  integer(4), dimension(nm_node_dim) :: rhoc_i4
+  integer(1), dimension(3, max_cell_np, nm_node_dim) :: pos_i1
+  integer(2), dimension(3, max_cell_np, nm_node_dim) :: vel_i2
 #ifdef SLAB
   real, dimension(nc+2,nc,nc_slab) :: slab_cache
 #else
   real, dimension(nc, nc_node_dim, nc_pen+2) :: slab_cache
 #endif
 #else
-#ifdef openmp
   real, dimension(6,np_node_dim,np_node_dim,num_threads) :: xvp
-#else
-  real, dimension(6,np_node_dim,np_node_dim,1) :: xvp
-#endif
 #endif
 
   !! Timing variables
@@ -182,39 +183,31 @@ program dist_init
 
   !! Equivalence arrays to save memory
 #ifdef ZIP
-
   equivalence (phi,slab_work,recv_cube,send_buf)
-#ifdef SFFTW3
-  equivalence (cube,xp_buf,hoc)
-  equivalence (slab_cmplx,slab)
-#else
   equivalence (slab,cube,xp_buf,hoc)
-#endif
-  equivalence (slab_cache,ll,recv_buf)
+  equivalence (slab_cache, ll, recv_buf)
   equivalence (xvp, xvp_grid)
-
 #else
-
   equivalence (phi,slab_work,recv_cube)
 #ifdef SFFTW3
   equivalence (slab_cmplx,slab)
 #else
   equivalence (slab,cube)
 #endif
-
 #endif
 
   !! Common block
   common /rvar/ tf, pkm, pkn, phi_buf
   common / equiv1 / phi
-#ifdef ZIP
-  common / equiv2 / slab_cache
-#endif
 #ifdef SFFTW3
-  common / equiv3 / cube
-  common / equiv4 / slab_cmplx
+  common / equiv2 / slab_cmplx
+  common / cvar / cube
 #else
-  common / equiv3 / slab
+  common / equiv2 / slab
+#endif
+#ifdef ZIP
+  common / equiv3 / slab_cache
+  common / zvar / rhoc_i4, pos_i1, vel_i2
 #endif
   common / xvar / xvp
 
@@ -223,15 +216,8 @@ program dist_init
   sec1 = mpi_wtime(ierr)
   if (rank == 0) write(*,*) "STARTING INITIAL CONDITIONS: ", sec1
 
-#ifdef openmp
   call omp_set_num_threads(num_threads)
-  sec2 = mpi_wtime(ierr)
   if (rank == 0) print*, 'Note: compile with openmp: num_threads=', num_threads
-#else
-  call omp_set_num_threads(1)
-  sec2 = mpi_wtime(ierr)
-  if (rank == 0) print*, 'Note: compile without openmp: num_threads=', num_threads
-#endif
 
   if (rank == 0) call writeparams
 
@@ -2786,12 +2772,12 @@ subroutine zip_checkpoint
     
     implicit none
 
-    character (len=200) :: fdm_zip1,fdm_zip2,fdm_zip3
+    character (len=200) :: fdm_zip0,fdm_zip1,fdm_zip2,fdm_zip3
     character (len=6) :: rank_s
     character (len=7) :: z_s
     integer(4), dimension(11) :: header_garbage
     integer(4), parameter :: v_resolution = 16384
-    integer(4) :: rhoc_i4
+    integer(4) :: thread, ind
     real(4) :: vmax, vmax_local, v_r2i
     real(4) :: shake_offset(3)
     integer :: k, j, i, pp
@@ -2811,43 +2797,58 @@ subroutine zip_checkpoint
     rank_s=adjustl(rank_s)
 
 #ifdef NEUTRINOS
+    fdm_zip0=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip0_'//rank_s(1:len_trim(rank_s))//'_nu.dat'
     fdm_zip1=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip1_'//rank_s(1:len_trim(rank_s))//'_nu.dat'
     fdm_zip2=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip2_'//rank_s(1:len_trim(rank_s))//'_nu.dat'
     fdm_zip3=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip3_'//rank_s(1:len_trim(rank_s))//'_nu.dat'
 #else
+    fdm_zip0=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip0_'//rank_s(1:len_trim(rank_s))//'.dat'
     fdm_zip1=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip1_'//rank_s(1:len_trim(rank_s))//'.dat'
     fdm_zip2=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip2_'//rank_s(1:len_trim(rank_s))//'.dat'
     fdm_zip3=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip3_'//rank_s(1:len_trim(rank_s))//'.dat'
 #endif
+    open(unit=10, file=fdm_zip0, status="replace", iostat=fstat, access="stream", buffered='yes')
     open(unit=11, file=fdm_zip1, status="replace", iostat=fstat, access="stream", buffered='yes')
     open(unit=12, file=fdm_zip2, status="replace", iostat=fstat, access="stream", buffered='yes')
     open(unit=13, file=fdm_zip3, status="replace", iostat=fstat, access="stream", buffered='yes')
 
     header_garbage(:) = 0
     shake_offset(:) = 0
+    write(10) np_local, header_garbage, v_r2i, shake_offset
     write(11) np_local, header_garbage, v_r2i, shake_offset
 
     do k = 1, nm_node_dim
         do j = 1, nm_node_dim
-            do i = 1, nm_node_dim 
-                rhoc_i4 = 0
-                pp = hoc(i,j,k)
+            !$omp parallel default(shared) private(i, ind, pp) 
+            !$omp do schedule(static)
+            do i = 1, nm_node_dim
+                ind = 1
+                rhoc_i4(i) = 0
+                pp = hoc(i, j, k)
                 do while (pp > 0)
-                    rhoc_i4 = rhoc_i4 + 1
-                    write(11) int(mod(xvp(1:3,pp)/mesh_scale,1.)*256,kind=1)
-                    write(11) int(xvp(4:6,pp)*v_r2i,kind=2)
+                    rhoc_i4(i) = rhoc_i4(i) + 1
+                    pos_i1(:, ind, i) = int(mod(xvp(1:3,pp)/mesh_scale,1.)*256,kind=1)
+                    vel_i2(:, ind, i) = int(xvp(4:6,pp)*v_r2i,kind=2)
+                    ind = ind + 1
                     pp = ll(pp)
                 enddo
-                if (rhoc_i4 < 255) then
-                    write(12) int(rhoc_i4,kind=1) ! write density in int1
-                else
-                    write(12) int(255,kind=1)
-                    write(13) rhoc_i4
+                if (ind > max_cell_np+1) then
+                    write(*,*) "ERROR: max_cell_np too small !!", rank, ind, max_cell_np
+                    call mpi_abort(mpi_comm_world, ierr, ierr)
                 endif
+            enddo
+            !$omp end do
+            !$omp end parallel
+            write(12) int(min(rhoc_i4, 255), kind=1)
+            write(13) pack(rhoc_i4, rhoc_i4>254)
+            do i = 1, nm_node_dim
+                write(10) pos_i1(:, 1:rhoc_i4(i), i)
+                write(11) vel_i2(:, 1:rhoc_i4(i), i)
             enddo
         enddo
     enddo
 
+    close(10)
     close(11)
     close(12)
     close(13)

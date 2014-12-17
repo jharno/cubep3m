@@ -111,6 +111,12 @@ real, parameter :: writeBoxBelowZ = 2.0
 real, parameter :: writeBoxAboveA = 1./(1.+writeBoxBelowZ) 
 #endif
 
+#ifdef ZIP
+!! Maximum number of particles that may exist in one coarse cell
+real(4), parameter :: dbuf_cell = 10000.
+integer(4), parameter :: max_cell_np = int(8*dbuf_cell) + 1
+#endif
+
 ! testing flags
 
 logical, parameter :: ngp_fmesh_force = .true. 

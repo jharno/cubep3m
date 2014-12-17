@@ -35,9 +35,10 @@
 #endif
 #ifdef ZIP
     integer :: l, k
-    integer :: fstat1, fstat2, fstat3
-    character (len=max_path) :: fdm_zip1,fdm_zip2,fdm_zip3
-    character (len=max_path) :: fnu_zip1,fnu_zip2,fnu_zip3
+    integer :: ind, ind_nu
+    integer :: fstat0, fstat1, fstat2, fstat3
+    character (len=max_path) :: fdm_zip0,fdm_zip1,fdm_zip2,fdm_zip3
+    character (len=max_path) :: fnu_zip0,fnu_zip1,fnu_zip2,fnu_zip3
     integer(4) :: v_resolution = 16384
     real(4) :: vmax, vmax_local, v_r2i
     integer(4) :: rhoc_dm_i4, rhoc_nu_i4
@@ -67,6 +68,7 @@
     !! Dark matter file
 #ifdef ZIP
     if (dozip) then
+        fdm_zip0=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip0res_'//rank_s(1:len_trim(rank_s))//'.dat'
         fdm_zip1=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip1res_'//rank_s(1:len_trim(rank_s))//'.dat'
         fdm_zip2=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip2res_'//rank_s(1:len_trim(rank_s))//'.dat'
         fdm_zip3=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip3res_'//rank_s(1:len_trim(rank_s))//'.dat'
@@ -81,6 +83,7 @@
     !! Neutrino file
 #ifdef ZIP
     if (dozip) then
+        fnu_zip0=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip0res_'//rank_s(1:len_trim(rank_s))//'_nu.dat'
         fnu_zip1=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip1res_'//rank_s(1:len_trim(rank_s))//'_nu.dat'
         fnu_zip2=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip2res_'//rank_s(1:len_trim(rank_s))//'_nu.dat'
         fnu_zip3=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip3res_'//rank_s(1:len_trim(rank_s))//'_nu.dat'
@@ -120,12 +123,13 @@
     !! Dark matter 
 #ifdef ZIP
     if (dozip) then
+        open(unit=10, file=fdm_zip0, status="replace", iostat=fstat0, access="stream", buffered='yes')
         open(unit=11, file=fdm_zip1, status="replace", iostat=fstat1, access="stream", buffered='yes')
         open(unit=12, file=fdm_zip2, status="replace", iostat=fstat2, access="stream", buffered='yes')
         open(unit=13, file=fdm_zip3, status="replace", iostat=fstat3, access="stream", buffered='yes')
-        if (fstat1 /= 0 .or. fstat2 /= 0 .or. fstat3 /= 0) then
+        if (fstat0 /= 0 .or. fstat1 /= 0 .or. fstat2 /= 0 .or. fstat3 /= 0) then
           write(*,*) 'error opening zipped checkpoint file for write'
-          write(*,*) 'rank',rank,'file:',fdm_zip1,fdm_zip2,fdm_zip3
+          write(*,*) 'rank',rank,'file:',fdm_zip0,fdm_zip1,fdm_zip2,fdm_zip3
           call mpi_abort(mpi_comm_world,ierr,ierr)
         endif
     else
@@ -145,10 +149,11 @@
     !! Neutrinos 
 #ifdef ZIP
     if (dozip) then
+        open(unit=20, file=fnu_zip0, status="replace", iostat=fstat0, access="stream", buffered='yes')
         open(unit=21, file=fnu_zip1, status="replace", iostat=fstat1, access="stream", buffered='yes')
         open(unit=22, file=fnu_zip2, status="replace", iostat=fstat2, access="stream", buffered='yes')
         open(unit=23, file=fnu_zip3, status="replace", iostat=fstat3, access="stream", buffered='yes')
-        if (fstat1 /= 0 .or. fstat2 /= 0 .or. fstat3 /= 0) then
+        if (fstat0 /= 0 .or. fstat1 /= 0 .or. fstat2 /= 0 .or. fstat3 /= 0) then
           write(*,*) 'error opening zipped checkpoint file for write'
           write(*,*) 'rank',rank,'file:',fnu_zip1,fnu_zip2,fnu_zip3
           call mpi_abort(mpi_comm_world,ierr,ierr)
@@ -186,6 +191,8 @@
 
 #ifdef ZIP
     if (dozip) then
+        write(10) np_dm,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_projection,cur_halofind,mass_p,v_r2i,shake_offset
+        write(20) np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_projection,cur_halofind,mass_p,v_r2i,shake_offset
         write(11) np_dm,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_projection,cur_halofind,mass_p,v_r2i,shake_offset
         write(21) np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_projection,cur_halofind,mass_p,v_r2i,shake_offset
     else
@@ -204,6 +211,7 @@
 
 #ifdef ZIP
     if (dozip) then
+        write(10) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_projection,cur_halofind,mass_p,v_r2i,shake_offset
         write(11) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_projection,cur_halofind,mass_p,v_r2i,shake_offset
     else
 #endif
@@ -229,48 +237,56 @@
 
         do k = 1, nc_node_dim
             do j = 1, nc_node_dim
+                !$omp parallel default(shared) private(i,l,ind,ind_nu)
+                !$omp do schedule(static)
                 do i = 1, nc_node_dim
-
-                    rhoc_dm_i4 = 0 ; rhoc_nu_i4 = 0
-
+                    ind = 1 ; ind_nu = 1
+                    rhoc_i4(i) = 0 ; rhoc_i4_nu(i) = 0
                     l = hoc(i,j,k)
                     do while (l > 0)
                         if (PID(l) == pdm) then
-                            rhoc_dm_i4 = rhoc_dm_i4 + 1
-                            write(11) int(mod(xv(1:3,l)/mesh_scale,1.)*256, kind=1)
-                            write(11) int(xv(4:6,l)*v_r2i, kind=2)
-                            ind_check1 = ind_check1 + 1
+                            rhoc_i4(i) = rhoc_i4(i) + 1
+                            pos_i1(:, ind, i) = int(mod(xv(1:3,l)/mesh_scale,1.)*256, kind=1)
+                            vel_i2(:, ind, i) = int(xv(4:6,l)*v_r2i, kind=2)
+                            ind = ind + 1
                         else
-                            rhoc_nu_i4 = rhoc_nu_i4 + 1
-                            write(21) int(mod(xv(1:3,l)/mesh_scale,1.)*256, kind=1)
-                            write(21) int(xv(4:6,l)*v_r2i, kind=2)
+                            rhoc_i4_nu(i) = rhoc_i4_nu(i) + 1
+                            pos_i1_nu(:, ind_nu, i) = int(mod(xv(1:3,l)/mesh_scale,1.)*256, kind=1)
+                            vel_i2_nu(:, ind_nu, i) = int(xv(4:6,l)*v_r2i, kind=2)
 #ifdef NUPID
-                            write(25) PID(l)
+                            pid_i8_nu(ind_nu, i) = PID(l)
 #endif
-                            ind_check2 = ind_check2 + 1
+                            ind_nu = ind_nu + 1
                         endif
                         l = ll(l)
                     enddo !! l
-
-                    if (rhoc_dm_i4 < 255) then
-                        write(12) int(rhoc_dm_i4, kind=1) ! write density in int1
-                    else
-                        write(12) int(255, kind=1)
-                        write(13) rhoc_dm_i4
+                    if (ind > max_cell_np+1 .or. ind_nu > max_cell_np+1) then
+                        write(*,*) "ERROR: max_cell_np too small !!", rank, ind, ind_nu, max_cell_np
+                        call mpi_abort(mpi_comm_world, ierr, ierr)
                     endif
-                    if (rhoc_nu_i4 < 255) then
-                        write(22) int(rhoc_nu_i4, kind=1)
-                    else
-                        write(22) int(255, kind=1)
-                        write(23) rhoc_nu_i4
-                    endif
-
                 enddo !! i
+                !$omp end do
+                !$omp end parallel
+                ind_check1 = ind_check1 + sum(rhoc_i4)
+                ind_check2 = ind_check2 + sum(rhoc_i4_nu)
+                write(12) int(min(rhoc_i4, 255), kind=1)
+                write(13) pack(rhoc_i4, rhoc_i4>254)
+                write(22) int(min(rhoc_i4_nu, 255), kind=1)
+                write(23) pack(rhoc_i4_nu, rhoc_i4_nu>254)
+                do i = 1, nc_node_dim
+                    write(10) pos_i1(:, 1:rhoc_i4(i), i)
+                    write(11) vel_i2(:, 1:rhoc_i4(i), i)
+                    write(20) pos_i1_nu(:, 1:rhoc_i4_nu(i), i)
+                    write(21) vel_i2_nu(:, 1:rhoc_i4_nu(i), i)
+#ifdef NUPID
+                    write(25) pid_i8_nu(1:rhoc_i4_nu(i), i)
+#endif
+                enddo
             enddo !! j
         enddo !! k
 
-        close(11); close(12); close(13)
-        close(21); close(22); close(23)
+        close(10); close(11); close(12); close(13)
+        close(20); close(21); close(22); close(23)
 
     else
 #endif
@@ -339,30 +355,36 @@
 
         do k = 1, nc_node_dim
             do j = 1, nc_node_dim
+                !$omp parallel default(shared) private(i,l,ind)
+                !$omp do schedule(static)
                 do i = 1, nc_node_dim
-
-                    rhoc_dm_i4 = 0
-
+                    ind = 1
+                    rhoc_i4(i) = 0
                     l = hoc(i,j,k)
                     do while (l > 0)
-                        rhoc_dm_i4 = rhoc_dm_i4 + 1
-                        write(11) int(mod(xv(1:3,l)/mesh_scale,1.)*256, kind=1)
-                        write(11) int(xv(4:6,l)*v_r2i, kind=2)
+                        rhoc_i4(i) = rhoc_i4(i) + 1
+                        pos_i1(:, ind, i) = int(mod(xv(1:3,l)/mesh_scale,1.)*256, kind=1)
+                        vel_i2(:, ind, i) = int(xv(4:6,l)*v_r2i, kind=2)
+                        ind = ind + 1
                         l = ll(l)
                     enddo !! l
-
-                    if (rhoc_dm_i4 < 255) then
-                        write(12) int(rhoc_dm_i4, kind=1) ! write density in int1
-                    else
-                        write(12) int(255, kind=1)
-                        write(13) rhoc_dm_i4
+                    if (ind > max_cell_np+1) then
+                        write(*,*) "ERROR: max_cell_np too small !!", rank, ind, max_cell_np
+                        call mpi_abort(mpi_comm_world, ierr, ierr)
                     endif
-
                 enddo !! i
+                !$omp end do
+                !$omp end parallel
+                write(12) int(min(rhoc_i4, 255), kind=1)
+                write(13) pack(rhoc_i4, rhoc_i4>254)
+                do i = 1, nc_node_dim
+                    write(10) pos_i1(:, 1:rhoc_i4(i), i)
+                    write(11) vel_i2(:, 1:rhoc_i4(i), i)
+                enddo
             enddo !! j
         enddo !! k
 
-        close(11); close(12); close(13)
+        close(10); close(11); close(12); close(13)
 
     else
 #endif
