@@ -116,14 +116,26 @@ real(4), dimension(nf_physical_dim,nf_physical_dim)        :: rp_buf,rho_pxy,rho
 ! arrays storing modification to mass_p for -DNEUTRINOS simulation
 real(4), dimension(2) :: mass_p_nudm_fac
 
-#ifdef ZIP
+#if defined(ZIP) || defined(ZIPDM)
+#ifdef ZIPDM
 integer(4), dimension(nc_node_dim) :: rhoc_i4
 integer(1), dimension(3, max_cell_np, nc_node_dim) :: pos_i1
 integer(2), dimension(3, max_cell_np, nc_node_dim) :: vel_i2
+#else
+integer(4), dimension(nc_node_dim) :: rhoc_i4
+real(4), dimension(6, max_cell_np, nc_node_dim) :: pos_i1
+integer(2) :: vel_i2
+#endif
 #ifdef NEUTRINOS
+#ifdef ZIP
 integer(4), dimension(nc_node_dim) :: rhoc_i4_nu
 integer(1), dimension(3, max_cell_np, nc_node_dim) :: pos_i1_nu
 integer(2), dimension(3, max_cell_np, nc_node_dim) :: vel_i2_nu
+#else
+integer(4), dimension(nc_node_dim) :: rhoc_i4_nu
+real(4), dimension(6, max_cell_np, nc_node_dim) :: pos_i1_nu
+integer(2) :: vel_i2_nu
+#endif
 #ifdef NUPID
 integer(8), dimesnion(max_cell_np, nc_node_dim) :: pid_i8_nu
 #endif
@@ -185,7 +197,7 @@ common / drvar / rho_pxy, rho_pxz, rho_pyz, rp_buf, f_mesh_mass
 common / bdvar / nsubcuberanks
 #endif
 
-#ifdef ZIP
+#if defined(ZIP) || defined(ZIPDM)
 common / zipvar / rhoc_i4, pos_i1, vel_i2
 #ifdef NEUTRINOS
 common / zipvarnu / rhoc_i4_nu, pos_i1_nu, vel_i2_nu

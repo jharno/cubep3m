@@ -242,7 +242,7 @@ call mpi_barrier(mpi_comm_world,ierr)
 !#ifdef MOVE_GRID_BACK
 !      call move_grid_back
 !#endif
-#ifdef ZIP
+#if defined(ZIP) || defined(ZIPDM)
     call move_grid_back
     call link_list
     call particle_pass
@@ -255,10 +255,10 @@ call mpi_barrier(mpi_comm_world,ierr)
       if (kill_step .eqv. .true. .and. kill_step_done .eqv. .false.) then
         sec1a = mpi_wtime(ierr)
         if (rank == 0) write(*,*) "STARTING CHECKPOINT_KILL: ", sec1a
-#ifndef ZIP
-        call checkpoint_kill
-#else
+#if defined(ZIP) || defined(ZIPDM)
         call checkpoint_kill(.true.)
+#else
+        call checkpoint_kill
 #endif
         sec2a = mpi_wtime(ierr)
         if (rank == 0) write(*,*) "STOPPING CHECKPOINT_KILL: ", sec2a

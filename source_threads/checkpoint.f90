@@ -26,7 +26,7 @@
     integer, parameter :: pdm = 1
 #endif
 #endif
-#ifdef ZIP
+#if defined(ZIP) || defined(ZIPDM)
     integer :: l, k
     integer :: ind, ind_nu
     integer :: fstat0, fstat1, fstat2, fstat3
@@ -58,7 +58,7 @@
     z_s=adjustl(z_s)
 
     !! Dark matter file
-#ifndef ZIP
+#ifndef ZIPDM
     ofile=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'xv'// &
          rank_s(1:len_trim(rank_s))//'.dat'
 #else
@@ -92,7 +92,7 @@
 #endif
 #endif
 
-#ifdef ZIP
+#if defined(ZIP) || defined(ZIPDM)
     !
     ! Determine velocity conversion factor
     !
@@ -117,7 +117,7 @@
     !
 
     !! Dark matter 
-#ifndef ZIP
+#ifndef ZIPDM
     open(unit=12, file=ofile, status="replace", iostat=fstat, access="stream")
     if (fstat /= 0) then
       write(*,*) 'error opening checkpoint file for write'
@@ -177,13 +177,17 @@
     np_nu = np_local - np_dm 
     if (rank == 0) write(*,*) "checkpoint np_dm, np_nu = ", np_dm, np_nu
 
-#ifndef ZIP
+#ifndef ZIPDM
     write(12) np_dm,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_proj,cur_halo,mass_p
-    write(22) np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_proj,cur_halo,mass_p
 #else
     write(10) np_dm,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_proj,cur_halo,mass_p,v_r2i,shake_offset
-    write(20) np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_proj,cur_halo,mass_p,v_r2i,shake_offset
     write(11) np_dm,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_proj,cur_halo,mass_p,v_r2i,shake_offset
+#endif
+
+#ifndef ZIP
+    write(22) np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_proj,cur_halo,mass_p
+#else
+    write(20) np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_proj,cur_halo,mass_p,v_r2i,shake_offset
     write(21) np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_proj,cur_halo,mass_p,v_r2i,shake_offset
 #endif
 
@@ -192,7 +196,7 @@
 #endif
 
 #else
-#ifndef ZIP
+#ifndef ZIPDM
     write(12) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_proj,cur_halo,mass_p
 #else
     write(10) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_proj,cur_halo,mass_p,v_r2i,shake_offset
@@ -209,7 +213,7 @@
     ind_check1 = 0
     ind_check2 = 0
 
-#ifdef ZIP
+#if defined(ZIP) || defined(ZIPDM)
 
     !! Zipped format
 
@@ -224,13 +228,21 @@
                 do while (l > 0)
                     if (PID(l) == pdm) then
                         rhoc_i4(i) = rhoc_i4(i) + 1
+#ifdef ZIPDM
                         pos_i1(:, ind, i) = int(mod(xv(1:3,l)/mesh_scale,1.)*256, kind=1)
                         vel_i2(:, ind, i) = int(xv(4:6,l)*v_r2i, kind=2)
+#else
+                        pos_i1(:, ind, i) = xv(1:6,l)
+#endif
                         ind = ind + 1                        
                     else
                         rhoc_i4_nu(i) = rhoc_i4_nu(i) + 1
+#ifdef ZIP
                         pos_i1_nu(:, ind_nu, i) = int(mod(xv(1:3,l)/mesh_scale,1.)*256, kind=1)
                         vel_i2_nu(:, ind_nu, i) = int(xv(4:6,l)*v_r2i, kind=2)
+#else
+                        pos_i1_nu(:, ind_nu, i) = xv(1:6,l)
+#endif
 #ifdef NUPID
                         pid_i8_nu(ind_nu, i) = PID(l)
 #endif
@@ -247,15 +259,27 @@
             !$omp end parallel
             ind_check1 = ind_check1 + sum(rhoc_i4)
             ind_check2 = ind_check2 + sum(rhoc_i4_nu)
+#ifdef ZIPDM
             write(12) int(min(rhoc_i4, 255), kind=1)
             write(13) pack(rhoc_i4, rhoc_i4>254)
+#endif
+#ifdef ZIP
             write(22) int(min(rhoc_i4_nu, 255), kind=1)
             write(23) pack(rhoc_i4_nu, rhoc_i4_nu>254)
+#endif
             do i = 1, nc_node_dim
+#ifdef ZIPDM
                 write(10) pos_i1(:, 1:rhoc_i4(i), i)
                 write(11) vel_i2(:, 1:rhoc_i4(i), i)
+#else
+                write(12) pos_i1(:, 1:rhoc_i4(i), i)
+#endif
+#ifdef ZIP
                 write(20) pos_i1_nu(:, 1:rhoc_i4_nu(i), i)
                 write(21) vel_i2_nu(:, 1:rhoc_i4_nu(i), i)
+#else
+                write(22) pos_i1_nu(:, 1:rhoc_i4_nu(i), i)
+#endif
 #ifdef NUPID
                 write(25) pid_i8_nu(1:rhoc_i4_nu(i), i)
 #endif
@@ -263,8 +287,14 @@
         enddo !! j
     enddo !! k
 
-    close(10); close(11); close(12); close(13)
-    close(20); close(21); close(22); close(23)
+    close(12)
+#ifdef ZIPDM
+    close(10); close(11); close(13)
+#endif
+    close(22)
+#ifdef ZIP
+    close(20); close(21); close(23)
+#endif
 
 #else
 
@@ -323,7 +353,7 @@
     ! Write data for non-neutrino simulation
     !
 
-#ifdef ZIP
+#ifdef ZIPDM
 
     !! Zipped format
 

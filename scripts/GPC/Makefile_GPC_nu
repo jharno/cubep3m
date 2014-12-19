@@ -13,7 +13,7 @@ ifeq ($(NEUTRINOS), 0)
   NFLAGS=
   TARGET=cubep3m_dm
 else
-  NFLAGS=-DNEUTRINOS -DPID_FLAG
+  NFLAGS=-DNEUTRINOS -DPID_FLAG -DZIP
   TARGET=cubep3m_nu
 endif
 FFLAGS=-shared-intel -fpp -g  -O3 -fpic -xhost -i_dynamic -mcmodel=medium -mt_mpi -DDIAG -DNGP -DPPINT -DMPI_TIME -DLRCKCORR -DNGPH -DDISP_MESH -DNESTED_OMP -DCHECKPOINT_KILL $(NFLAGS) 

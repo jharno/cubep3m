@@ -26,7 +26,7 @@
     call mpi_abort(mpi_comm_world,ierr,ierr)
 #endif
 #endif
-#ifdef ZIP
+#if defined(ZIP) || defined(ZIPDM)
     character(len=max_path) :: f_zip0,f_zip1,f_zip2,f_zip3
     integer :: fstat0, fstat1, fstat2, fstat3, l
     real(4) :: v_r2i
@@ -125,7 +125,7 @@
       ! Read dark matter particles
       !
 
-#ifndef ZIP
+#ifndef ZIPDM
 
       ofile=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'xv'// &
             rank_s(1:len_trim(rank_s))//'.dat'
@@ -163,6 +163,10 @@
          enddo
       enddo
       close(21)
+
+#ifdef ZIP
+      np_uzip = np_local !! Need to do if ZIP is used for neutrinos 
+#endif
 
 #else
 
@@ -447,7 +451,7 @@
       ! Read dark matter particles
       !
 
-#ifdef ZIP
+#ifdef ZIPDM
      if (restart_kill_zip .eqv. .false.) then !! Happens if checkpoint_kill occured in particle_pass
 #endif
 
@@ -491,6 +495,10 @@
           close(21)
 
 #ifdef ZIP
+          np_uzip = np_local !! Need to do if ZIP is used for neutrinos 
+#endif
+
+#ifdef ZIPDM
     else
 
         f_zip0 = output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//reskill_prefix//'zipres0_'//rank_s(1:len_trim(rank_s))//'.dat'
@@ -790,7 +798,7 @@
       ! Read dark matter particles
       !
 
-#ifndef ZIP
+#ifndef ZIPDM
 
       ofile=ic_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'xv'//rank_s(1:len_trim(rank_s))//'.dat'
       if (rank==0) print *,'opening particle list:',ofile(1:len_trim(ofile))

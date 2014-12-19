@@ -63,7 +63,7 @@ integer(4), parameter   :: restart_checkpoint = 1 ! line number in input/checkpo
 
 logical, parameter :: restart_kill = .false. !! Only matters if CHECKPOINT_KILL flag used
 character(*), parameter :: reskill_prefix = '0.000'
-#ifdef ZIP
+#if defined(ZIP) || defined(ZIPDM)
 logical, parameter :: restart_kill_zip = .true. !! Set false if killed during particle_pass
 #endif
 
@@ -94,7 +94,7 @@ real, parameter         :: sep_inc=0.1
 #ifdef TH2
 real(4), parameter      :: rsoft = 0.3
 #else
-real(4), parameter      :: rsoft = 0.1
+real(4), parameter      :: rsoft = 0.3
 #endif
 ! arbitrary timescale limiting parameter :: dt_max_pp=sqrt(dt_pp_scale*rsoft/max_pp_acceleration)
 real(4), parameter      :: dt_pp_scale = 0.05
@@ -111,7 +111,7 @@ real, parameter :: writeBoxBelowZ = 2.0
 real, parameter :: writeBoxAboveA = 1./(1.+writeBoxBelowZ) 
 #endif
 
-#ifdef ZIP
+#if defined(ZIP) || defined(ZIPDM)
 !! Maximum number of particles that may exist in one coarse cell
 real(4), parameter :: dbuf_cell = 10000.
 integer(4), parameter :: max_cell_np = int(8*dbuf_cell) + 1
