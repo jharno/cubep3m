@@ -203,8 +203,8 @@ do i=1,nc_dim
   do l=1,rhoc_i4
     np_uzip=np_uzip+1
     read(11) xi1(1,:), vi2
-    xv(1:3,np_uzip) = mesh_scale * ( xi4/256. + (/i,j,k/) - 1 )
-    xv(4:6,np_uzip) = vi2 / v_r2i
+    xv(1:3,np_uzip) = mesh_scale * ( (xi4+0.5)/256. + (/i,j,k/) - 1 )
+    xv(4:6,np_uzip) = (vi2+0.5) / v_r2i
   enddo
 enddo
 enddo
@@ -234,8 +234,8 @@ call mpi_abort(mpi_comm_world,ierr,ierr)
     do l=1,rhoc_i4
       np_uzip=np_uzip+1
       read(21) xi1(1,:), vi2
-      xv(1:3,np_uzip) = mesh_scale * ( xi4/256. + (/i,j,k/) - 1 )
-      xv(4:6,np_uzip) = vi2 / v_r2i
+      xv(1:3,np_uzip) = mesh_scale * ( (xi4+0.5)/256. + (/i,j,k/) - 1 )
+      xv(4:6,np_uzip) = (vi2+0.5) / v_r2i
     enddo
   enddo
   enddo
