@@ -15,6 +15,9 @@ implicit none
     integer(4) :: seedsize
     integer(4), allocatable, dimension(:) :: iseed!,old
 #endif
+#ifdef READOFFSET
+  logical :: openoffset=.true.
+#endif
 !    integer k_seed, clock
 !    integer, dimension(8) :: values
 
@@ -22,10 +25,10 @@ implicit none
 #ifdef DISP_MESH 
     real(4), dimension(3) :: offset
 
-    if (rank==0) then
+if (rank==0) then
 
        
-#ifdef READ_SEED
+# ifdef READ_SEED
 
        !This will always use the same random number at each time step. 
        !It surely introduces a bias, but is good for testing code.        
@@ -45,30 +48,43 @@ implicit none
        close(11)
 
        call random_seed(put=iseed(1:seedsize))
-#else
+# else
 
        !call date_and_time(values=values)
        !if(rank==0) write(*,*) values(7:8), iseed      
        !call random_seed(put=values(7:8)) 
 
-#endif
+# endif
 
-       call random_number(offset)
-#ifdef NEUTRINOS
+
+# ifndef READOFFSET
+  call random_number(offset)
+# else
+  if (openoffset) then
+    open(91,file='offsets.dat',status='old',access='stream')
+    openoffset=.false.
+    print*,'opened offset file: offsets.dat'
+  endif
+  read(91,end=999) offset; goto 999
+  998 print*,'offsets.dat too short, need more random numbers.'; call mpi_abort(mpi_comm_world,ierr,ierr)
+  999 print*,'update_position: get offset(1:3) =',offset
+# endif
+
+# ifdef NEUTRINOS
      offset=(offset-0.5)*mesh_scale ! no shake offset
-#else
+# else
      offset=(offset-0.5)*mesh_scale*4.0  - shake_offset
      shake_offset=shake_offset+offset
      print*,'current shake offset:',shake_offset
-#endif
-  endif
+# endif
 
+endif ! rank==0
 
+if (pair_infall_no_shake.and.pair_infall .or. pp_test) offset=0.0
 
-    if (pair_infall_no_shake.and.pair_infall .or. pp_test) offset=0.0
+call mpi_bcast(offset,3,MPI_REAL,0,MPI_COMM_WORLD,ierr)
+call mpi_bcast(shake_offset,3,MPI_REAL,0,MPI_COMM_WORLD,ierr)
 
-    call mpi_bcast(offset,3,MPI_REAL,0,MPI_COMM_WORLD,ierr)
-    call mpi_bcast(shake_offset,3,MPI_REAL,0,MPI_COMM_WORLD,ierr)
 #endif
 
     call system_clock(count=count_i)
