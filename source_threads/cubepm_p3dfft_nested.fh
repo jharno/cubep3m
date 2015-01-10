@@ -207,6 +207,11 @@ common / izipvar / pid_i8_nu
 #endif
 #endif
 
+#ifdef PP_EXT
+common / eppvarr / pp_ext_force_accum
+common / eppvari / ll_fine, hoc_fine
+#endif
+
 common / lvar / min_den_buf
 
 common / ivar / slab_rank, num_projections, num_checkpoints, &

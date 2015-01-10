@@ -10,7 +10,7 @@
     integer(4) :: i,j,k,pp,fstat,blocksize,num_writes,nplow,nphigh
     integer*8 :: np_total,npl8
     character(len=max_path) :: ofile
-    character(len=4) :: rank_s
+    character(len=6) :: rank_s
     character(len=7) :: z_s, z_s2
     integer(4) :: np_nu
 #ifdef CHECK_IP
@@ -118,7 +118,7 @@
       write(z_s,'(f7.3)') z_write
       z_s=adjustl(z_s)
 
-      write(rank_s,'(i4)') rank
+      write(rank_s,'(i6)') rank
       rank_s=adjustl(rank_s)
 
       !
@@ -444,7 +444,7 @@
 
     elseif (restart_kill) then
 
-      write(rank_s,'(i4)') rank
+      write(rank_s,'(i6)') rank
       rank_s=adjustl(rank_s)
 
       !
@@ -791,7 +791,7 @@
       z_s2=adjustl(z_s2)
 #endif
 
-      write(rank_s,'(i4)') rank
+      write(rank_s,'(i6)') rank
       rank_s=adjustl(rank_s)
 
       !
@@ -904,7 +904,7 @@
 #endif
 
 #ifdef PID_FLAG
-        write(*,*) 'np_local before delete', np_local, 'rank =', rank
+        if (rank == 0) write(*,*) 'np_local before delete', np_local, 'rank =', rank
         !call delete_particles
         !write(*,*) 'np_local after delete', np_local, 'rank =', rank
 

@@ -10,7 +10,7 @@ subroutine boxcheckpoint
 
     character (len=max_path) :: ofile
     character (len=5) :: step_string 
-    character (len=4) :: rank_s
+    character (len=6) :: rank_s
 #ifdef NEUTRINOS
     character (len=max_path) :: ofile_nu
 #endif
@@ -24,7 +24,7 @@ subroutine boxcheckpoint
         if (rank == 0) write(*,*) "Writing boxcheckpoint for nts = ", nts
 
         !! Attach rank number to the output file(s) 
-        write(rank_s,'(i4)') rank
+        write(rank_s,'(i6)') rank
         rank_s=adjustl(rank_s)
 
         !! Attach sweep number to the output file(s)

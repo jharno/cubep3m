@@ -39,7 +39,7 @@
 #ifdef PP_EXT
 
     if (pp_ext_force_flag) then
-       write(*,*) 'Using fine mesh kernel modified for pp extended to', pp_range,'neighbours'
+       if (rank == 0) write(*,*) 'Using fine mesh kernel modified for pp extended to', pp_range,'neighbours'
        !! Set the kernel to 0 for immediate neighbors
        do k=1,pp_range+1
           do j=1,pp_range+1
