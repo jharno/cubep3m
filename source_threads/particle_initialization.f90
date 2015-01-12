@@ -37,7 +37,7 @@
     equivalence(xi1,xi4)
     equivalence(rr_i4,rhoc_i1)
 #endif
-
+print*,'particle_initialize'
     fstat=0
 
     np_local=(nf_physical_node_dim/2)**3
@@ -174,7 +174,6 @@
     f_zip1 = output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip1_'//rank_s(1:len_trim(rank_s))//'.dat'
     f_zip2 = output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip2_'//rank_s(1:len_trim(rank_s))//'.dat'
     f_zip3 = output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip3_'//rank_s(1:len_trim(rank_s))//'.dat'
-
     open(10, file=f_zip0, status="old", iostat=fstat0, access="stream", buffered='yes')
     open(11, file=f_zip1, status="old", iostat=fstat1, access="stream", buffered='yes')
     open(12, file=f_zip2, status="old", iostat=fstat2, access="stream", buffered='yes')
@@ -206,12 +205,21 @@
     do k = 1, nc_node_dim
         do j = 1, nc_node_dim
             do i = 1, nc_node_dim
-                rr_i4=0 ; xi4=0 !! Clean up, very imortant.
+                rhoc_i1=0; rr_i4=0 !! Clean up, very imortant.
+#ifndef BGQ
                 read(12) rhoc_i1(1) !! Get number of particles in the coarse grid
+#else
+                read(12) rhoc_i1(4)
+#endif
                 if (rr_i4==255) read(13) rr_i4
                 do l = 1, rr_i4
+                    xi1=0; xi4=0
                     np_uzip = np_uzip + 1
+#ifndef BGQ
                     read(10) xi1(1,:)
+#else
+                    read(10) xi1(4,:)
+#endif
                     read(11) vi2
                     xv(1:3, np_uzip) = mesh_scale * ( xi4/256. + (/i,j,k/) - 1 )
                     xv(4:6, np_uzip) = vi2 / v_r2i
@@ -293,7 +301,6 @@
     open(21, file=f_zip1, status="old", iostat=fstat1, access="stream", buffered='yes')
     open(22, file=f_zip2, status="old", iostat=fstat2, access="stream", buffered='yes')
     open(23, file=f_zip3, status="old", iostat=fstat3, access="stream", buffered='yes')
-
     if (fstat0 /= 0 .or. fstat1 /= 0 .or. fstat2 /= 0 .or. fstat3 /= 0) then
         write(*,*) 'error opening dm zip checkpoint'
         write(*,*) 'rank',rank,'files:',f_zip0,f_zip1,f_zip2,f_zip3
@@ -313,18 +320,25 @@
         write(*,*) 'rank',rank,'np_local',np_local,'np_nu',np_nu,'max_np',max_np
         call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
-
     !! Read zipped positions and velocities
-
     do k = 1, nc_node_dim
         do j = 1, nc_node_dim
             do i = 1, nc_node_dim
-                rr_i4=0 ; xi4=0 !! Clean up, very imortant.
+                rhoc_i1=0; rr_i4=0 !! Clean up, very imortant.
+#ifndef BGQ
                 read(22) rhoc_i1(1) !! Get number of particles in the coarse grid
+#else
+                read(22) rhoc_i1(4)
+#endif
                 if (rr_i4==255) read(23) rr_i4
                 do l = 1, rr_i4
+                    xi1=0; xi4=0
                     np_uzip = np_uzip + 1
+#ifndef BGQ
                     read(20) xi1(1,:)
+#else
+                    read(20) xi1(4,:)
+#endif
                     read(21) vi2
                     xv(1:3, np_uzip) = mesh_scale * ( xi4/256. + (/i,j,k/) - 1 )
                     xv(4:6, np_uzip) = vi2 / v_r2i
@@ -332,9 +346,7 @@
             enddo
         enddo
     enddo
-
     !! Consistency checks
-
     read(20, end=702) test_i1
     print*, 'ERROR: rank', rank, ': file not ending:', f_zip0
     call mpi_abort(mpi_comm_world, ierr, ierr)
@@ -510,7 +522,6 @@
         open(11, file=f_zip1, status="old", iostat=fstat1, access="stream", buffered='yes')
         open(12, file=f_zip2, status="old", iostat=fstat2, access="stream", buffered='yes')
         open(13, file=f_zip3, status="old", iostat=fstat3, access="stream", buffered='yes')
-
         if (fstat0 /= 0 .or. fstat1 /= 0 .or. fstat2 /= 0 .or. fstat3 /= 0) then
             write(*,*) 'error opening dm zip checkpoint'
             write(*,*) 'rank',rank,'files:',f_zip0,f_zip1,f_zip2,f_zip3
@@ -530,20 +541,26 @@
             write(*,*) 'rank',rank,'np_local',np_local,'max_np',max_np
             call mpi_abort(mpi_comm_world,ierr,ierr)
         endif
-
         !! Read zipped positions and velocities
-
         np_uzip = 0
-
         do k = 1, nc_node_dim
             do j = 1, nc_node_dim
                 do i = 1, nc_node_dim
-                    rr_i4=0 ; xi4=0 !! Clean up, very imortant.
+                    rhoc_i1=0; rr_i4=0 !! Clean up, very imortant.
+#ifndef BGQ
                     read(12) rhoc_i1(1) !! Get number of particles in the coarse grid
+#else
+                    read(12) rhoc_i1(4)
+#endif
                     if (rr_i4==255) read(13) rr_i4
                     do l = 1, rr_i4
+                        xi1=0; xi4=0
                         np_uzip = np_uzip + 1
+#ifndef BGQ
                         read(10) xi1(1,:)
+#else
+                        read(10) xi1(4,:)
+#endif
                         read(11) vi2
                         xv(1:3, np_uzip) = mesh_scale * ( xi4/256. + (/i,j,k/) - 1 )
                         xv(4:6, np_uzip) = vi2 / v_r2i
@@ -629,7 +646,6 @@
         open(21, file=f_zip1, status="old", iostat=fstat1, access="stream", buffered='yes')
         open(22, file=f_zip2, status="old", iostat=fstat2, access="stream", buffered='yes')
         open(23, file=f_zip3, status="old", iostat=fstat3, access="stream", buffered='yes')
-
         if (fstat0 /= 0 .or. fstat1 /= 0 .or. fstat2 /= 0 .or. fstat3 /= 0) then
             write(*,*) 'error opening dm zip checkpoint'
             write(*,*) 'rank',rank,'files:',f_zip0,f_zip1,f_zip2,f_zip3
@@ -655,12 +671,21 @@
         do k = 1, nc_node_dim
             do j = 1, nc_node_dim
                 do i = 1, nc_node_dim
-                    rr_i4=0 ; xi4=0 !! Clean up, very imortant.
+                    rhoc_i1=0; rr_i4=0 !! Clean up, very imortant.
+#ifndef BGQ
                     read(22) rhoc_i1(1) !! Get number of particles in the coarse grid
+#else
+                    read(22) rhoc_i1(4)
+#endif
                     if (rr_i4==255) read(23) rr_i4
                     do l = 1, rr_i4
+                        xi1=0; xi4=0
                         np_uzip = np_uzip + 1
+#ifndef BGQ
                         read(20) xi1(1,:)
+#else
+                        read(20) xi1(4,:)
+#endif
                         read(21) vi2
                         xv(1:3, np_uzip) = mesh_scale * ( xi4/256. + (/i,j,k/) - 1 )
                         xv(4:6, np_uzip) = vi2 / v_r2i
@@ -824,42 +849,46 @@
     f_zip1 = ic_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip1_'//rank_s(1:len_trim(rank_s))//'.dat'
     f_zip2 = ic_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip2_'//rank_s(1:len_trim(rank_s))//'.dat'
     f_zip3 = ic_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip3_'//rank_s(1:len_trim(rank_s))//'.dat'
-
     open(10, file=f_zip0, status="old", iostat=fstat0, access="stream", buffered='yes')
     open(11, file=f_zip1, status="old", iostat=fstat1, access="stream", buffered='yes')
     open(12, file=f_zip2, status="old", iostat=fstat2, access="stream", buffered='yes')
     open(13, file=f_zip3, status="old", iostat=fstat3, access="stream", buffered='yes')
-
     if (fstat0 /= 0 .or. fstat1 /= 0 .or. fstat2 /= 0 .or. fstat3 /= 0) then
         write(*,*) 'error opening dm zip checkpoint'
         write(*,*) 'rank',rank,'files:',f_zip0,f_zip1,f_zip2,f_zip3
         call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
-
     !! Read header (which incluedes velocity conversion factor and shake_offset)
-
     read(10) np_local,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,v_r2i,dummy,dummy,dummy
     read(11) dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy
-
     if (np_local > max_np) then
         write(*,*) 'too many particles to store'
         write(*,*) 'rank',rank,'np_local',np_local,'max_np',max_np
         call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
 
-    !! Read zipped positions and velocities
-
+    !! Read zipped positions and velocities !! fixed for big endian
     np_uzip = 0
-
     do k = 1, nc_node_dim
         do j = 1, nc_node_dim
             do i = 1, nc_node_dim
-                rr_i4=0 ; xi4=0 !! Clean up, very imortant.
+                rhoc_i1=0; rr_i4=0 !! Clean up, very imortant.
+#ifndef BGQ
                 read(12) rhoc_i1(1) !! Get number of particles in the coarse grid
+#else
+                read(12) rhoc_i1(4) !! big endian
+#endif
+!print*,'rhoc_i1, rr_i4 =',rhoc_i1,rr_i4
                 if (rr_i4==255) read(13) rr_i4
                 do l = 1, rr_i4
+                    xi1=0; xi4=0
                     np_uzip = np_uzip + 1
+#ifndef BGQ
                     read(10) xi1(1,:)
+#else
+                    read(10) xi1(4,:) !! big endian
+#endif
+!print*,'xi1, xi4 =',xi1,xi4
                     read(11) vi2
                     xv(1:3, np_uzip) = mesh_scale * ( xi4/256. + (/i,j,k/) - 1 )
                     xv(4:6, np_uzip) = vi2 / v_r2i
