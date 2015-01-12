@@ -10,7 +10,7 @@
     integer(4) :: i,j,k,pp,fstat,blocksize,num_writes,nplow,nphigh
     integer*8 :: np_total,npl8
     character(len=max_path) :: ofile
-    character(len=4) :: rank_s
+    character(len=6) :: rank_s
     character(len=7) :: z_s, z_s2
     integer(4) :: np_nu
 #ifdef CHECK_IP
@@ -118,7 +118,7 @@ print*,'particle_initialize'
       write(z_s,'(f7.3)') z_write
       z_s=adjustl(z_s)
 
-      write(rank_s,'(i4)') rank
+      write(rank_s,'(i6)') rank
       rank_s=adjustl(rank_s)
 
       !
@@ -221,8 +221,8 @@ print*,'particle_initialize'
                     read(10) xi1(4,:)
 #endif
                     read(11) vi2
-                    xv(1:3, np_uzip) = mesh_scale * ( xi4/256. + (/i,j,k/) - 1 )
-                    xv(4:6, np_uzip) = vi2 / v_r2i
+                    xv(1:3, np_uzip) = mesh_scale * ( (xi4+0.5)/256. + (/i,j,k/) - 1 )
+                    xv(4:6, np_uzip) = (vi2+0.5) / v_r2i
                 enddo
             enddo
         enddo
@@ -340,8 +340,8 @@ print*,'particle_initialize'
                     read(20) xi1(4,:)
 #endif
                     read(21) vi2
-                    xv(1:3, np_uzip) = mesh_scale * ( xi4/256. + (/i,j,k/) - 1 )
-                    xv(4:6, np_uzip) = vi2 / v_r2i
+                    xv(1:3, np_uzip) = mesh_scale * ( (xi4+0.5)/256. + (/i,j,k/) - 1 )
+                    xv(4:6, np_uzip) = (vi2+0.5) / v_r2i
                 enddo
             enddo
         enddo
@@ -456,7 +456,7 @@ print*,'particle_initialize'
 
     elseif (restart_kill) then
 
-      write(rank_s,'(i4)') rank
+      write(rank_s,'(i6)') rank
       rank_s=adjustl(rank_s)
 
       !
@@ -562,8 +562,8 @@ print*,'particle_initialize'
                         read(10) xi1(4,:)
 #endif
                         read(11) vi2
-                        xv(1:3, np_uzip) = mesh_scale * ( xi4/256. + (/i,j,k/) - 1 )
-                        xv(4:6, np_uzip) = vi2 / v_r2i
+                        xv(1:3, np_uzip) = mesh_scale * ( (xi4+0.5)/256. + (/i,j,k/) - 1 )
+                        xv(4:6, np_uzip) = (vi2+0.5) / v_r2i
                     enddo
                 enddo
             enddo
@@ -687,8 +687,8 @@ print*,'particle_initialize'
                         read(20) xi1(4,:)
 #endif
                         read(21) vi2
-                        xv(1:3, np_uzip) = mesh_scale * ( xi4/256. + (/i,j,k/) - 1 )
-                        xv(4:6, np_uzip) = vi2 / v_r2i
+                        xv(1:3, np_uzip) = mesh_scale * ( (xi4+0.5)/256. + (/i,j,k/) - 1 )
+                        xv(4:6, np_uzip) = (vi2+0.5) / v_r2i
                     enddo
                 enddo
             enddo
@@ -816,7 +816,7 @@ print*,'particle_initialize'
       z_s2=adjustl(z_s2)
 #endif
 
-      write(rank_s,'(i4)') rank
+      write(rank_s,'(i6)') rank
       rank_s=adjustl(rank_s)
 
       !
@@ -890,8 +890,8 @@ print*,'particle_initialize'
 #endif
 !print*,'xi1, xi4 =',xi1,xi4
                     read(11) vi2
-                    xv(1:3, np_uzip) = mesh_scale * ( xi4/256. + (/i,j,k/) - 1 )
-                    xv(4:6, np_uzip) = vi2 / v_r2i
+                    xv(1:3, np_uzip) = mesh_scale * ( (xi4+0.5)/256. + (/i,j,k/) - 1 )
+                    xv(4:6, np_uzip) = (vi2+0.5) / v_r2i
                 enddo
             enddo
         enddo
@@ -933,7 +933,7 @@ print*,'particle_initialize'
 #endif
 
 #ifdef PID_FLAG
-        write(*,*) 'np_local before delete', np_local, 'rank =', rank
+        if (rank == 0) write(*,*) 'np_local before delete', np_local, 'rank =', rank
         !call delete_particles
         !write(*,*) 'np_local after delete', np_local, 'rank =', rank
 

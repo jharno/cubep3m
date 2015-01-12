@@ -223,7 +223,7 @@ program cic_crossvel
 
   integer(4) :: np_groups(0:1), np_groups_dm(0:1), np_groups_h(0:1)
   integer(4) :: np_buf_groups(0:1), np_buf_groups_dm(0:1), np_buf_groups_h(0:1)
-  integer(4) :: np_groups_tot(0:1), np_groups_tot_dm(0:1), np_groups_tot_h(0:1)
+  integer(8) :: np_groups_tot(0:1), np_groups_tot_dm(0:1), np_groups_tot_h(0:1)
 
   integer(1), parameter :: g0 = 0
   integer(1), parameter :: g1 = 1
@@ -940,6 +940,7 @@ program cic_crossvel
     ! DARK MATTER VELOCITY FIELD
     ! --------------------------------------------------------------------------------
 
+    if (rank == 0) write(*,*)
     if (rank == 0) write(*,*) "Computing cross correlation between dm real and reconstructed fields..." 
     do cur_dimension = 1, 3 !! Each x, y, z dimension
 
@@ -5439,6 +5440,12 @@ subroutine clear_groups
      write(*,*) 'Total neutrinos    : ', np_groups_tot(0)
      write(*,*) 'Total dm particles : ', np_groups_tot_dm(0)
      write(*,*) 'Total halos        : ', np_groups_tot_h(0)
+     write(*,*) "np_groups = ", np_groups(:)
+     write(*,*) "np_groups_dm = ", np_groups_dm(:)
+     write(*,*) "np_groups_h = ", np_groups_h(:)
+     write(*,*) "np_buf_groups = ", np_buf_groups(:)
+     write(*,*) "np_buf_groups_dm = ", np_buf_groups_dm(:)
+     write(*,*) "np_buf_groups_h = ", np_buf_groups_h(:)
      write(*,*) "Finished clear_groups ... time elapsed = ", time2-time1
   endif
 
@@ -6416,7 +6423,6 @@ subroutine veltransfer(command)
     ! --------------------------------------------------------------------------------------
 
     if (rank ==0) then
-        write(*,*) 'Reading ', fntf
         open(11, file = fntf)
         do k = 1,nk
             read(11,*) tf(1,k), tf(2,k), tf(3,k), tf(4,k), tf(5,k), tf(6,k), tf(7,k)
@@ -6431,7 +6437,6 @@ subroutine veltransfer(command)
     ! --------------------------------------------------------------------------------------
 
     if (rank == 0) then
-        write(*,*) 'Reading ',vfntf
         open(11, file=vfntf)
         do k=1,nk
             read(11,*) vtf(1,k), vtf(2,k), vtf(3,k), vtf(4,k), vtf(5,k), vtf(6,k), vtf(7,k)

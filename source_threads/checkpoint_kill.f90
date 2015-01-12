@@ -19,7 +19,7 @@
 #endif
 
     character (len=max_path) :: ofile,ofile2
-    character (len=4) :: rank_s
+    character (len=6) :: rank_s
     character (len=7) :: z_s  
 
     integer(kind=4) :: i,j,fstat,blocksize,num_writes,nplow,nphigh
@@ -59,7 +59,7 @@
     ! Checkpoint file names
     !
 
-    write(rank_s,'(i4)') rank
+    write(rank_s,'(i6)') rank
     rank_s=adjustl(rank_s)
 
     write(z_s,'(f7.3)') z_write
@@ -423,22 +423,25 @@
     else
 #endif
 
-        !! Regular format
+#ifdef DISP_MESH
+    do j = 1, np_local
+        xv(1:3,j) = xv(1:3,j) - shake_offset
+    enddo
+#endif
 
         do i=1,num_writes
           nplow=(i-1)*blocksize+1
           nphigh=min(i*blocksize,np_local)
-          do j=nplow,nphigh
-#ifdef DISP_MESH
-            write(12) xv(1:3,j) - shake_offset
-            write(12) xv(4:6,j)
-#else
-            write(12) xv(:,j)
-#endif
-          enddo
+          write(12) xv(:,nplow:nphigh)
         enddo
 
         close(12)
+
+#ifdef DISP_MESH
+    do j = 1, np_local
+        xv(1:3,j) = xv(1:3,j) + shake_offset
+    enddo
+#endif
 
 #ifdef ZIPDM
     endif
@@ -468,9 +471,7 @@
     do i=1,num_writes
       nplow=(i-1)*blocksize+1
       nphigh=min(i*blocksize,np_local)
-      do j=nplow,nphigh
-        write(15) PID(j)
-      enddo
+      write(15) PID(nplow:nphigh)
     enddo
 
     close(15)

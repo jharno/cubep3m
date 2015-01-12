@@ -149,9 +149,9 @@
     enddo !! ispec
 #endif
 
-#endif
+    if (rank == 0) write(*,*) 'Finished projection:',rank
 
-    write(*,*) 'Finished projection:',rank
+#endif
 
 !! Increment projection counter 
 
