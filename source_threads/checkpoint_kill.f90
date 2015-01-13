@@ -39,8 +39,8 @@
     integer :: fstat0, fstat1, fstat2, fstat3
     character (len=max_path) :: fdm_zip0,fdm_zip1,fdm_zip2,fdm_zip3
     character (len=max_path) :: fnu_zip0,fnu_zip1,fnu_zip2,fnu_zip3
-    integer(4) :: v_resolution = 16384
-    real(4) :: vmax, vmax_local, v_r2i
+    integer(4) :: v_resolution = 32767
+    real(4) :: vmax, vmax_local, v_r2i, v_r2i_nu
     integer(4) :: rhoc_dm_i4, rhoc_nu_i4
 #endif
 
@@ -110,10 +110,18 @@
     !
     ! Determine velocity conversion factor
     !
-
+#ifdef NEUTRINOS
+    vmax_local = maxval(abs(xv(4:6,1:np_local)),mask=spread(PID(1:np_local)==pdm,dim=1,ncopies=3))
+    call mpi_allreduce(vmax_local, vmax, 1, mpi_real, mpi_max, mpi_comm_world, ierr)
+    v_r2i = v_resolution/vmax
+    vmax_local = maxval(abs(xv(4:6,1:np_local)),mask=spread(PID(1:np_local)/=pdm,dim=1,ncopies=3))
+    call mpi_allreduce(vmax_local, vmax, 1, mpi_real, mpi_max, mpi_comm_world, ierr)
+    v_r2i_nu = v_resolution/vmax
+#else
     vmax_local = maxval(abs(xv(4:6,1:np_local)))
     call mpi_allreduce(vmax_local, vmax, 1, mpi_real, mpi_max, mpi_comm_world, ierr)
     v_r2i = v_resolution/vmax
+#endif
 #endif
 
     !
@@ -202,8 +210,8 @@
 
 #ifdef ZIP
     if (dozip) then
-        write(20) np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_projection,cur_halofind,mass_p,v_r2i,shake_offset
-        write(21) np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_projection,cur_halofind,mass_p,v_r2i,shake_offset
+        write(20) np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_projection,cur_halofind,mass_p,v_r2i_nu,shake_offset
+        write(21) np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_projection,cur_halofind,mass_p,v_r2i_nu,shake_offset
     else
 #endif
         write(22) np_nu,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_projection,cur_halofind,mass_p
@@ -256,7 +264,7 @@
                             rhoc_i4(i) = rhoc_i4(i) + 1
 #ifdef ZIPDM
                             pos_i1(:, ind, i) = int(mod(xv(1:3,l)/mesh_scale,1.)*256, kind=1)
-                            vel_i2(:, ind, i) = int(xv(4:6,l)*v_r2i, kind=2)
+                            vel_i2(:, ind, i) = nint(xv(4:6,l)*v_r2i, kind=2)
 #else
                             pos_i1(:, ind, i) = xv(1:6,l)
 #endif
@@ -265,7 +273,7 @@
                             rhoc_i4_nu(i) = rhoc_i4_nu(i) + 1
 #ifdef ZIP
                             pos_i1_nu(:, ind_nu, i) = int(mod(xv(1:3,l)/mesh_scale,1.)*256, kind=1)
-                            vel_i2_nu(:, ind_nu, i) = int(xv(4:6,l)*v_r2i, kind=2)
+                            vel_i2_nu(:, ind_nu, i) = nint(xv(4:6,l)*v_r2i_nu, kind=2)
 #else
                             pos_i1_nu(:, ind_nu, i) = xv(1:6,l)
 #endif
@@ -398,7 +406,7 @@
                     do while (l > 0)
                         rhoc_i4(i) = rhoc_i4(i) + 1
                         pos_i1(:, ind, i) = int(mod(xv(1:3,l)/mesh_scale,1.)*256, kind=1)
-                        vel_i2(:, ind, i) = int(xv(4:6,l)*v_r2i, kind=2)
+                        vel_i2(:, ind, i) = nint(xv(4:6,l)*v_r2i, kind=2)
                         ind = ind + 1
                         l = ll(l)
                     enddo !! l

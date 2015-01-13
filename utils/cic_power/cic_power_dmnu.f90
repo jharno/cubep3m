@@ -704,7 +704,7 @@ contains
                         np_uzip = np_uzip + 1
                         read(10) xi1(1,:)
                         read(11) vi2
-                        xvp(1:3, np_uzip) = mesh_scale_sim * ( xi4/256. + (/ii,jj,kk/) - 1 )
+                        xvp(1:3, np_uzip) = mesh_scale_sim * ( (xi4+0.5)/256. + (/ii,jj,kk/) - 1 )
                     enddo
                 enddo
             enddo
@@ -735,7 +735,7 @@ contains
                         np_uzip = np_uzip + 1
                         read(10) xi1(1,:)
                         read(11) vi2
-                        xvp_dm(1:3, np_uzip) = mesh_scale_sim * ( xi4/256. + (/ii,jj,kk/) - 1 )
+                        xvp_dm(1:3, np_uzip) = mesh_scale_sim * ( (xi4+0.5)/256. + (/ii,jj,kk/) - 1 )
                     enddo
                 enddo
             enddo
