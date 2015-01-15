@@ -63,15 +63,15 @@ program dist_init
   integer, parameter      :: nk=611
 !fntf depends on redshift which could vary for neutrinos and dm
 #ifdef NEUTRINOS
-  character(*), parameter :: fntf = 'sim_mnu0p05_transfer_out_z5.dat'
+  character(*), parameter :: fntf = 'interp_mnu0p05_z5.dat'
 #else
-  character(*), parameter :: fntf = 'sim_mnu0p05_transfer_out_z5.dat'
+  character(*), parameter :: fntf = 'interp_mnu0p05_z5.dat'
 #endif
 #ifdef VELTRANSFER
 #ifdef NEUTRINOS
-  character(*), parameter :: vfntf = 'sim_mnu0p05_veltransfer_out_z5.dat'
+  character(*), parameter :: vfntf = 'vinterp_mnu0p05_z5.dat'
 #else
-  character(*), parameter :: vfntf = 'sim_mnu0p05_veltransfer_out_z5.dat'
+  character(*), parameter :: vfntf = 'vinterp_mnu0p05_z5.dat'
 #endif
   real(4), parameter :: Vphys2sim = 1.0/(300. * sqrt(omega_m) * box * (1. + redshift) / 2. / nc)!(180.8892437/mass_neutrino)/(box*300.0*(omega_m)**0.5/2.0/nc)
 #endif
@@ -228,24 +228,24 @@ program dist_init
   call potentialfield
 
 #ifdef ZIP
-#ifdef VELTRANSFER
-  call dm_zip(0)
-  call veltransfer
-  call dm_zip(1)
-#else
-  call dm_zip
-#endif
+# ifdef VELTRANSFER
+    call dm_zip(0)
+    call veltransfer
+    call dm_zip(1)
+# else !! VELTRANSFER
+    call dm_zip
+# endif !! VELTRANSFER
   call pass_particles
   call link_list
   call zip_checkpoint
-#else
-#ifdef VELTRANSFER
-  call dm(0)
-  call veltransfer
-  call dm(1)
-#else
-  call dm
-#endif
+#else !! ZIP
+# ifdef VELTRANSFER
+    call dm(0)
+    call veltransfer
+    call dm(1)
+# else
+    call dm
+# endif
 #endif
 
   if (rank == 0) call writepowerspectra
@@ -1918,7 +1918,8 @@ end function linear_interpolate
 #ifdef VELTRANSFER
     if (COMMAND==1) then
 #endif
-       write(11) np_local, header_garbage
+       !write(11) np_local, header_garbage
+       write(11) np_local,scalefactor,0.0,-3./sqrt(scalefactor),0,1000.,1000.,1000.,1,1,1,1.
 #ifdef VELTRANSFER
     endif
 #endif
@@ -2776,7 +2777,7 @@ subroutine zip_checkpoint
     character (len=6) :: rank_s
     character (len=7) :: z_s
     integer(4), dimension(11) :: header_garbage
-    integer(4), parameter :: v_resolution = 16384
+    integer(4), parameter :: v_resolution = 32767.499
     integer(4) :: thread, ind
     real(4) :: vmax, vmax_local, v_r2i
     real(4) :: shake_offset(3)
@@ -2797,15 +2798,15 @@ subroutine zip_checkpoint
     rank_s=adjustl(rank_s)
 
 #ifdef NEUTRINOS
-    fdm_zip0=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip0_'//rank_s(1:len_trim(rank_s))//'_nu.dat'
-    fdm_zip1=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip1_'//rank_s(1:len_trim(rank_s))//'_nu.dat'
-    fdm_zip2=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip2_'//rank_s(1:len_trim(rank_s))//'_nu.dat'
-    fdm_zip3=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip3_'//rank_s(1:len_trim(rank_s))//'_nu.dat'
+    fdm_zip0=scratch_path//'/node'//trim(rank_s)//'/'//trim(z_s)//'zip0_'//trim(rank_s)//'_nu.dat'
+    fdm_zip1=scratch_path//'/node'//trim(rank_s)//'/'//trim(z_s)//'zip1_'//trim(rank_s)//'_nu.dat'
+    fdm_zip2=scratch_path//'/node'//trim(rank_s)//'/'//trim(z_s)//'zip2_'//trim(rank_s)//'_nu.dat'
+    fdm_zip3=scratch_path//'/node'//trim(rank_s)//'/'//trim(z_s)//'zip3_'//trim(rank_s)//'_nu.dat'
 #else
-    fdm_zip0=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip0_'//rank_s(1:len_trim(rank_s))//'.dat'
-    fdm_zip1=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip1_'//rank_s(1:len_trim(rank_s))//'.dat'
-    fdm_zip2=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip2_'//rank_s(1:len_trim(rank_s))//'.dat'
-    fdm_zip3=scratch_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip3_'//rank_s(1:len_trim(rank_s))//'.dat'
+    fdm_zip0=scratch_path//'/node'//trim(rank_s)//'/'//trim(z_s)//'zip0_'//trim(rank_s)//'.dat'
+    fdm_zip1=scratch_path//'/node'//trim(rank_s)//'/'//trim(z_s)//'zip1_'//trim(rank_s)//'.dat'
+    fdm_zip2=scratch_path//'/node'//trim(rank_s)//'/'//trim(z_s)//'zip2_'//trim(rank_s)//'.dat'
+    fdm_zip3=scratch_path//'/node'//trim(rank_s)//'/'//trim(z_s)//'zip3_'//trim(rank_s)//'.dat'
 #endif
     open(unit=10, file=fdm_zip0, status="replace", iostat=fstat, access="stream", buffered='yes')
     open(unit=11, file=fdm_zip1, status="replace", iostat=fstat, access="stream", buffered='yes')
@@ -2814,9 +2815,10 @@ subroutine zip_checkpoint
 
     header_garbage(:) = 0
     shake_offset(:) = 0
-    write(10) np_local, header_garbage, v_r2i, shake_offset
-    write(11) np_local, header_garbage, v_r2i, shake_offset
-
+    !write(10) np_local, header_garbage, v_r2i, shake_offset
+    !write(11) np_local, header_garbage, v_r2i, shake_offset
+    write(10) np_local,scalefactor,0.0,-3./sqrt(scalefactor),0,1000.0,1000.0,1000.0,1,1,1,1.,v_r2i,0.,0.,0.
+    write(11) np_local,scalefactor,0.0,-3./sqrt(scalefactor),0,1000.0,1000.0,1000.0,1,1,1,1.,v_r2i,0.,0.,0.
     do k = 1, nm_node_dim
         do j = 1, nm_node_dim
             !$omp parallel default(shared) private(i, ind, pp) 
