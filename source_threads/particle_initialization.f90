@@ -222,7 +222,7 @@ print*,'particle_initialize'
 #endif
                     read(11) vi2
                     xv(1:3, np_uzip) = mesh_scale * ( (xi4+0.5)/256. + (/i,j,k/) - 1 )
-                    xv(4:6, np_uzip) = (vi2+0.5) / v_r2i
+                    xv(4:6, np_uzip) = vi2 / v_r2i
                 enddo
             enddo
         enddo
@@ -341,7 +341,7 @@ print*,'particle_initialize'
 #endif
                     read(21) vi2
                     xv(1:3, np_uzip) = mesh_scale * ( (xi4+0.5)/256. + (/i,j,k/) - 1 )
-                    xv(4:6, np_uzip) = (vi2+0.5) / v_r2i
+                    xv(4:6, np_uzip) = vi2 / v_r2i
                 enddo
             enddo
         enddo
@@ -563,7 +563,7 @@ print*,'particle_initialize'
 #endif
                         read(11) vi2
                         xv(1:3, np_uzip) = mesh_scale * ( (xi4+0.5)/256. + (/i,j,k/) - 1 )
-                        xv(4:6, np_uzip) = (vi2+0.5) / v_r2i
+                        xv(4:6, np_uzip) = vi2 / v_r2i
                     enddo
                 enddo
             enddo
@@ -688,7 +688,7 @@ print*,'particle_initialize'
 #endif
                         read(21) vi2
                         xv(1:3, np_uzip) = mesh_scale * ( (xi4+0.5)/256. + (/i,j,k/) - 1 )
-                        xv(4:6, np_uzip) = (vi2+0.5) / v_r2i
+                        xv(4:6, np_uzip) = vi2 / v_r2i
                     enddo
                 enddo
             enddo
@@ -891,7 +891,7 @@ print*,'particle_initialize'
 !print*,'xi1, xi4 =',xi1,xi4
                     read(11) vi2
                     xv(1:3, np_uzip) = mesh_scale * ( (xi4+0.5)/256. + (/i,j,k/) - 1 )
-                    xv(4:6, np_uzip) = (vi2+0.5) / v_r2i
+                    xv(4:6, np_uzip) = vi2 / v_r2i
                 enddo
             enddo
         enddo

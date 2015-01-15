@@ -2777,7 +2777,7 @@ subroutine zip_checkpoint
     character (len=6) :: rank_s
     character (len=7) :: z_s
     integer(4), dimension(11) :: header_garbage
-    integer(4), parameter :: v_resolution = 32767.499
+    real(4), parameter :: v_resolution = 32767.499 
     integer(4) :: thread, ind
     real(4) :: vmax, vmax_local, v_r2i
     real(4) :: shake_offset(3)

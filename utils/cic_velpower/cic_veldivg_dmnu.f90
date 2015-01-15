@@ -1724,7 +1724,7 @@ subroutine read_particles(command)
                         read(10) xi1(1,:)
                         read(11) vi2
                         xvp(1:3, np_uzip) = mesh_scale_sim * ( (xi4+0.5)/256. + (/ii,jj,kk/) - 1 )
-                        xvp(4:6, np_uzip) = (vi2+0.5) / v_r2i
+                        xvp(4:6, np_uzip) = vi2 / v_r2i
                     enddo
                 enddo
             enddo
@@ -1755,7 +1755,7 @@ subroutine read_particles(command)
                         read(10) xi1(1,:)
                         read(11) vi2
                         xvp_dm(1:3, np_uzip) = mesh_scale_sim * ( (xi4+0.5)/256. + (/ii,jj,kk/) - 1 )
-                        xvp_dm(4:6, np_uzip) = (vi2+0.5) / v_r2i
+                        xvp_dm(4:6, np_uzip) = vi2 / v_r2i
                     enddo
                 enddo
             enddo

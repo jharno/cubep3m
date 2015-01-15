@@ -32,7 +32,7 @@
     integer :: fstat0, fstat1, fstat2, fstat3
     character (len=max_path) :: fdm_zip0,fdm_zip1,fdm_zip2,fdm_zip3
     character (len=max_path) :: fnu_zip0,fnu_zip1,fnu_zip2,fnu_zip3
-    integer(4) :: v_resolution = 32767 
+    real(4) :: v_resolution = 32767.499 
     real(4) :: vmax, vmax_local, v_r2i, v_r2i_nu
 #endif
 
