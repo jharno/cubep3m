@@ -34,7 +34,7 @@ program cic_power
   include '../../parameters'
 
   logical, parameter :: correct_kernel=.false.
-  character(len=*), parameter :: checkpoints=cubepm_root//'/input/cross_checkpoints'
+  character(len=*), parameter :: checkpoints=cubepm_root//'/input/checkpoints_cross'
 
   !! nc is the number of cells per box length
   integer, parameter :: hc=nc/2
