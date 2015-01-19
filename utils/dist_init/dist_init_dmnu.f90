@@ -60,18 +60,18 @@ program dist_init
 #endif
 
   !! NEUTRINO sims may use this:
-  integer, parameter      :: nk=611
+  integer, parameter      :: nk=1000
 !fntf depends on redshift which could vary for neutrinos and dm
 #ifdef NEUTRINOS
-  character(*), parameter :: fntf = 'interp_mnu0p05_z5.dat'
+  character(*), parameter :: fntf = 'th2_mnu0p05_z6_tk.dat'
 #else
-  character(*), parameter :: fntf = 'interp_mnu0p05_z5.dat'
+  character(*), parameter :: fntf = 'th2_mnu0p05_z6_tk.dat'
 #endif
 #ifdef VELTRANSFER
 #ifdef NEUTRINOS
-  character(*), parameter :: vfntf = 'vinterp_mnu0p05_z5.dat'
+  character(*), parameter :: vfntf = 'th2_mnu0p05_z6_v_tk.dat'
 #else
-  character(*), parameter :: vfntf = 'vinterp_mnu0p05_z5.dat'
+  character(*), parameter :: vfntf = 'th2_mnu0p05_z6_v_tk.dat'
 #endif
   real(4), parameter :: Vphys2sim = 1.0/(300. * sqrt(omega_m) * box * (1. + redshift) / 2. / nc)!(180.8892437/mass_neutrino)/(box*300.0*(omega_m)**0.5/2.0/nc)
 #endif
