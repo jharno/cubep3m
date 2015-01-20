@@ -67,13 +67,13 @@ program cic_crossvel
 
   !! Matter and velocity transfer functions for redshifts 0, 1, and 10
   character(*), parameter :: cubepm_batch=cubepm_root//'batch/'
-  character(*), parameter :: fntf0 = cubepm_batch//'sim_mnu0p05_transfer_out_z0.dat'
+  character(*), parameter :: fntf0 = cubepm_batch//'ith2_mnu0p05_z0p05_tk.dat'
   character(*), parameter :: fntf1 = fntf0
   character(*), parameter :: fntf10 = fntf0
-  character(*), parameter :: vfntf0 = cubepm_batch//'sim_mnu0p05_veltransfer_out_z0.dat'
+  character(*), parameter :: vfntf0 = cubepm_batch//'ith2_mnu0p05_z0p05_v_tk.dat'
   character(*), parameter :: vfntf1 = vfntf0
   character(*), parameter :: vfntf10 = vfntf0
-  integer, parameter :: nk = 611
+  integer, parameter :: nk = 1000
   integer, parameter :: dmcol = 2
   integer, parameter :: nucol = 6
 
