@@ -5,7 +5,7 @@ doPlot = False
 
 #z of fE
 
-Z=5
+Z=0
 if (Z==10):
     iE = 3 #Index of z=10 file
     ZA = 10.1
@@ -16,6 +16,12 @@ if (Z==5):
     ZA = 5.1
     ZB = 4.9
     ZE = 5.0
+if (Z==0):
+    iE = 12
+    ZA = 0.1
+    ZB = 0.0
+    ZE = 0.05
+    print "Using z = 0.05 as proxy for z=0"
 #Location of transfer functions
 
 dir = './class/' 

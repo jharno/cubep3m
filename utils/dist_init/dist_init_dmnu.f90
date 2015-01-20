@@ -63,15 +63,15 @@ program dist_init
   integer, parameter      :: nk=1000
 !fntf depends on redshift which could vary for neutrinos and dm
 #ifdef NEUTRINOS
-  character(*), parameter :: fntf = 'th2_mnu0p05_z6_tk.dat'
+  character(*), parameter :: fntf = 'ith2_mnu0p05_z5_tk.dat'
 #else
-  character(*), parameter :: fntf = 'th2_mnu0p05_z6_tk.dat'
+  character(*), parameter :: fntf = 'ith2_mnu0p05_z5_tk.dat'
 #endif
 #ifdef VELTRANSFER
 #ifdef NEUTRINOS
-  character(*), parameter :: vfntf = 'th2_mnu0p05_z6_v_tk.dat'
+  character(*), parameter :: vfntf = 'ith2_mnu0p05_z5_v_tk.dat'
 #else
-  character(*), parameter :: vfntf = 'th2_mnu0p05_z6_v_tk.dat'
+  character(*), parameter :: vfntf = 'ith2_mnu0p05_z5_v_tk.dat'
 #endif
   real(4), parameter :: Vphys2sim = 1.0/(300. * sqrt(omega_m) * box * (1. + redshift) / 2. / nc)!(180.8892437/mass_neutrino)/(box*300.0*(omega_m)**0.5/2.0/nc)
 #endif
