@@ -178,6 +178,7 @@
                 write(*,*) 'rank',rank,'file:',ofile
                 call mpi_abort(mpi_comm_world,ierr,ierr)
             endif
+            write(13) shake_offset
             write(13) soffcproj
             write(13) crhoprojsum_nu
             close(13)
