@@ -260,7 +260,11 @@ program cic_crossvel
 #ifdef SLAB
   common xvp, xvp_dm, xvmp_h, recv_cube, velden, velden2, hoc, veldivg, slab2, velden_send_buff, velden_recv_buff, slab_work
 #else
+#ifdef TH2
+  common xvp, xvp_dm, xvmp_h, xp_buf, send_buf, recv_buf, hoc, veldivg, slab2, velden_send_buff, velden_recv_buff
+#else
   common xvp, xvp_dm, xvmp_h, recv_cube, velden, velden2, hoc, veldivg, slab2, velden_send_buff, velden_recv_buff
+#endif
 #endif
   common /pvar/ pkdm, pkrec, pkrec2, pkrec3, pkdivg, pkcurl, pkvel 
 #ifdef CURL
@@ -289,7 +293,11 @@ program cic_crossvel
   !! Start clock
   globaltime1 = mpi_wtime(ierr)
 
+#ifdef TH2
+  do cur_checkpoint = num_checkpoints, num_checkpoints
+#else
   do cur_checkpoint = 1, num_checkpoints
+#endif
 
     ! --------------------------------------------------------------------------------
     ! Initialize some variables

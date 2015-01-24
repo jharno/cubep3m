@@ -239,17 +239,13 @@ call mpi_barrier(mpi_comm_world,ierr)
 
       dt_old = 0.0
       call update_position
-!#ifdef MOVE_GRID_BACK
-!      call move_grid_back
-!#endif
+
 #if defined(ZIP) || defined(ZIPDM)
+    force_grid_back = .true.
     call move_grid_back
-    call link_list
-    call particle_pass
-    call delete_particles
+    force_grid_back = .false.
     call link_list
 #endif
-
 
 #ifdef CHECKPOINT_KILL
       if (kill_step .eqv. .true. .and. kill_step_done .eqv. .false.) then
@@ -278,7 +274,6 @@ call mpi_barrier(mpi_comm_world,ierr)
       endif
 
       if (projection_step.or.halofind_step) then
-        call link_list
         call particle_pass
         if (halofind_step) then
           sec1a = mpi_wtime(ierr)

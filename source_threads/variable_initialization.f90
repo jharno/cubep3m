@@ -246,6 +246,8 @@
     enddo
 #endif
 
+    force_grid_back = .false.
+
     ! NEW TRICK BY JHD TO REMOVE MEMORY RACING CONDITION ON THREADED PLAN
     ! CREATION. 
     do i = 1,cores 

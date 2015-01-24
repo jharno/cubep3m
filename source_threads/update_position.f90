@@ -74,9 +74,9 @@ if (rank==0) then
      offset=(offset-0.5)*mesh_scale ! no shake offset
 # else
      offset=(offset-0.5)*mesh_scale*4.0  - shake_offset
+# endif
      shake_offset=shake_offset+offset
      print*,'current shake offset:',shake_offset
-# endif
 
 endif ! rank==0
 

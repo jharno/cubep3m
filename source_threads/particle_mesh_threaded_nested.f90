@@ -920,6 +920,9 @@
     
     call delete_particles
 
+    !! Prevent drift from going too far
+    call move_grid_back
+
     if (pairwise_ic.or.pair_infall) then
       call report_pair
     endif

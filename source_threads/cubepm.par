@@ -247,6 +247,14 @@ integer(4), parameter   :: nc_pen = nc_node_dim / nodes_dim
 integer(4), parameter   :: dim_y = nodes_dim
 integer(4), parameter   :: dim_z = nodes_dim**2
 
+#ifdef COARSEPROJ
+integer, parameter :: writeCoarseProjEverySteps = 2
+real, parameter    :: writeCoarseProjBelowZ     = 100.
+real, parameter    :: writeCoarseProjAboveA     = 1./(1.+writeCoarseProjBelowZ)
+integer, parameter :: nc_coarseproj_start       = nc_node_dim/2 - nc_tile_dim/2
+integer, parameter :: nc_coarseproj_stop        = nc_coarseproj_start + nc_tile_dim
+#endif
+
 !! Factors needed to make rho_f mean density equal to unity
 integer(4),   parameter :: ratio_nudm     = ratio_nudm_dim**3
 real(4), parameter      :: ratio_omega_nudm = omega_nu / omega_m

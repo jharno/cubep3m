@@ -198,7 +198,11 @@ program cic_power_dmnu
 #ifdef PLPLOT
  common xvp,xvp_dm,xvmp_h,den_buf,den,recv_buf,pkdm,poisson_dm,poisson_nu,poisson_h,pkplot,slab,slab2
 #else
+#ifdef TH2
+ common xvp,xvp_dm,xvmp_h,den_buf,xp_buf,recv_buf,pkdm,poisson_dm,poisson_nu,poisson_h,slab,send_buf
+#else
  common xvp,xvp_dm,xvmp_h,den_buf,den,recv_buf,pkdm,poisson_dm,poisson_nu,poisson_h,slab,slab2
+#endif
 #endif
 #ifdef GROUPS
   common /gvar/ GID
@@ -220,9 +224,13 @@ program cic_power_dmnu
  
     !! Start clock
     globaltime1 = mpi_wtime(ierr)
- 
+
+#ifdef TH2
+    do cur_checkpoint = num_checkpoints, num_checkpoints
+#else 
     do cur_checkpoint = 1, num_checkpoints
-        
+#endif     
+   
         call initvar
 
 #ifndef GROUPS 
