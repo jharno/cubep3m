@@ -93,7 +93,7 @@ program cic_crossvel
 
 #ifdef LOGBIN
 #ifdef TH2
-  integer, parameter :: numbins = 128
+  integer, parameter :: numbins = 64
 #else
   integer, parameter :: numbins = 32
 #endif
