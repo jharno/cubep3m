@@ -303,8 +303,6 @@ subroutine halofind
             if (halo_write) write(12) hpos(:), mass_vir, mass_odc, r_vir, r_odc, x_mean, v_mean, l_CM, v2_wrt_halo, var_x, I_ij, x_mean_nu, v_mean_nu, n_nu 
 #endif
 
-            if (mod(nhalo,1000) == 0) write(*,*) "rhalo", rank, nhalo, n_nu
-
         endif !! i_vir/i_odc test 
 
     enddo !! iloc loop 
