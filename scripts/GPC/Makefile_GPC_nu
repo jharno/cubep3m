@@ -83,7 +83,7 @@ fine_ngp_mass.o: fine_ngp_mass.f90
 #	$(FC) $(FFLAGS) -c $<
 
 halofind_particles.o: halofind_particles.f90
-	$(FC) $(FFLAGS) -c $<
+	$(FC) $(FFLAGS) -openmp -c $<
 
 fft_fine.o: fft_fine.f90
 	$(FC) $(FFLAGS) -I$(SCINET_FFTW_INC) -openmp -c $<

@@ -113,7 +113,7 @@ real, parameter :: writeBoxAboveA = 1./(1.+writeBoxBelowZ)
 
 #if defined(ZIP) || defined(ZIPDM)
 !! Maximum number of particles that may exist in one coarse cell
-real(4), parameter :: dbuf_cell = 10000.
+real(4), parameter :: dbuf_cell = 50000.
 integer(4), parameter :: max_cell_np = int(8*dbuf_cell) + 1
 #endif
 

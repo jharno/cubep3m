@@ -51,7 +51,7 @@ subroutine halofind
     integer(8) :: np_halo_local_vir, np_halo_vir
 
 #ifdef NEUTRINOS
-    real(4), parameter :: nu_search_radius = 2. !! Distance in Mpc/h to search for neutrino properties around each halo  
+    real(4), parameter :: nu_search_radius = 1. !! Distance in Mpc/h to search for neutrino properties around each halo  
     real(4), parameter :: nu_search_radius_cells = nu_search_radius * nf_physical_dim / box 
     real(4) :: g4 = box * nf_buf / real(nf_physical_dim) 
     if (rank == 0) write(*,*) "Neutrino search radius: ", nu_search_radius_cells
@@ -303,6 +303,7 @@ subroutine halofind
             if (halo_write) write(12) hpos(:), mass_vir, mass_odc, r_vir, r_odc, x_mean, v_mean, l_CM, v2_wrt_halo, var_x, I_ij, x_mean_nu, v_mean_nu, n_nu 
 #endif
 
+            if (mod(nhalo,1000) == 0) write(*,*) "rhalo", rank, nhalo, n_nu
 
         endif !! i_vir/i_odc test 
 
@@ -728,6 +729,7 @@ subroutine neutrino_properties(HPOS, RSEARCH, XMEAN, VMEAN, NNU)
     ! the halo centre HPOS
     !
 
+    use omp_lib
     implicit none
 
 #    include "cubepm.fh"
@@ -738,10 +740,14 @@ subroutine neutrino_properties(HPOS, RSEARCH, XMEAN, VMEAN, NNU)
     real(4), dimension(3), intent(out) :: XMEAN, VMEAN
     integer(4), intent(out) :: NNU
 
+    real(8), dimension(3, cores, nested_threads) :: xsum, vsum
+    integer(4), dimension(cores, nested_threads) :: nsum
+    integer(4) :: thread, thread_n
+
     integer :: csbox(3, 2)
     integer :: pp, k, j, i
     real :: r  
-    real :: dr(3), p(3)
+    real :: dr(3), p(6)
 
     !! Coarse mesh cells within the search region
     csbox(:, 1) = int((HPOS(:)-RSEARCH)/mesh_scale) + 1
@@ -754,13 +760,21 @@ subroutine neutrino_properties(HPOS, RSEARCH, XMEAN, VMEAN, NNU)
     csbox(2, 2) = min(csbox(2, 2), hoc_nc_h)
     csbox(3, 1) = max(csbox(3, 1), hoc_nc_l)
     csbox(3, 2) = min(csbox(3, 2), hoc_nc_h)
-   
-    !! Initialize mean velocity and particle counter
-    XMEAN(:) = 0.
-    VMEAN(:) = 0.
-    NNU = 0
 
+    !! Initialize thread arrays
+    xsum = 0. ; vsum = 0. ; nsum = 0
+
+    !$omp parallel num_threads(cores) default(shared) private(i,j,k,pp,p,dr,r,thread,thread_n)
+    thread = 1
+    thread = omp_get_thread_num() + 1
+    !$omp do schedule(dynamic)   
     do k = csbox(3,1), csbox(3,2)
+#ifdef NESTED_OMP
+        !$omp parallel num_threads(nested_threads) default(shared) private(i,j,pp,p,dr,r,thread_n)
+        thread_n = 1
+        thread_n = omp_get_thread_num() + 1
+        !$omp do schedule(dynamic)
+#endif
         do j = csbox(2,1), csbox(2,2)
             do i = csbox(1,1), csbox(1,2)
                 pp = hoc(i, j, k)
@@ -771,24 +785,33 @@ subroutine neutrino_properties(HPOS, RSEARCH, XMEAN, VMEAN, NNU)
 #else
                     if (PID(pp) > 1) then !! this is a neutrino
 #endif
-                        p(:) = xv(:3, pp)
-                        dr   = HPOS(:) - p(:)
+                        p(:) = xv(:, pp)
+                        dr   = HPOS(:) - p(1:3)
                         r    = sqrt(dr(1)**2 + dr(2)**2 + dr(3)**2)
                         if (r <= RSEARCH) then
-                            XMEAN(:) = XMEAN(:) + p(:)
-                            VMEAN(:) = VMEAN(:) + xv(4:6, pp)
-                            NNU = NNU + 1
+                            xsum(:,thread,thread_n) = xsum(:,thread,thread_n) + p(1:3)
+                            vsum(:,thread,thread_n) = vsum(:,thread,thread_n) + p(4:6)
+                            nsum(thread,thread_n)   = nsum(thread,thread_n) + 1
                         endif
                     endif
                     pp = ll(pp)
                 enddo !! pp loop
             enddo !! i loop
         enddo !! j loop
+#ifdef NESTED_OMP 
+      !$omp end do
+      !$omp end parallel
+#endif
     enddo !! k loop
+    !$omp end do
+    !$omp end parallel
 
+    NNU   = sum(nsum)
     if (NNU > 0) then
-        XMEAN(:) = XMEAN(:) / NNU
-        VMEAN(:) = VMEAN(:) / NNU
+        do i = 1, 3
+            XMEAN(i) = sum(xsum(i,:,:)) / NNU
+            VMEAN(i) = sum(vsum(i,:,:)) / NNU
+        enddo
     endif
  
 end subroutine neutrino_properties 

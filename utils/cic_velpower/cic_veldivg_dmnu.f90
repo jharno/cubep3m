@@ -92,7 +92,11 @@ program cic_crossvel
   real, parameter    :: npr=np
 
 #ifdef LOGBIN
-  integer, parameter :: numbins = 32 
+#ifdef TH2
+  integer, parameter :: numbins = 128
+#else
+  integer, parameter :: numbins = 32
+#endif
 #endif
 
   !! internals

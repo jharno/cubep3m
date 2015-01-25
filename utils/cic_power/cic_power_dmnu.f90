@@ -73,7 +73,11 @@ program cic_power_dmnu
   real, parameter    :: npr=np
 
 #ifdef LOGBIN
+#ifdef TH2
+  integer, parameter :: numbins = 128
+#else
   integer, parameter :: numbins = 32 
+#endif
 #endif
 
   !! internals
