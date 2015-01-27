@@ -1,7 +1,7 @@
-export OUTPUT_PATH='/vol-th/home/bnu_ztj_haoran/haoran/tides/LOS12/'
+export OUTPUT_PATH='../output/coarseproj/'
 
 let irank=0
-let nrank=7
+let nrank=511
 
 while [ $irank -le $nrank ]; do
 
