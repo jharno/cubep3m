@@ -174,7 +174,7 @@ subroutine halofind
 
         !! Search for particles by looking at local particle distribution
         call find_halo_particles(halo_vir, mass_proxy, hpos(:), r_vir, i_vir, 1)
-        call find_halo_particles(halo_odc, mass_proxy, hpos(:), r_odc, i_odc, 2)
+        if (i_vir >= min_halo_particles) call find_halo_particles(halo_odc, mass_proxy, hpos(:), r_odc, i_odc, 2)
 
         !! The following conditions must pass to be considered a halo
         if (i_vir >= min_halo_particles .and. i_odc >= min_halo_particles) then
@@ -505,7 +505,16 @@ subroutine find_halo_particles(HODC, HMASS, HPOS, RODC, ITOT, DOVIR)
     integer(4), intent(in) :: DOVIR
     logical :: HALOVIR
 
-    real :: r, dgrid, maxfinegrid, rrefine, rsearch
+#ifdef NESTED_OMP
+    integer(4), parameter :: nt = cores * nested_threads
+#else
+    integer(4), parameter :: nt = cores
+#endif 
+    real(4), dimension(nt) :: maxfinegrid
+    integer(4), dimension(nt) :: imax, jmax, kmax
+    integer(4) :: thread
+
+    real :: r, dgrid, rrefine, rsearch
     integer :: pp, np_search, ii, jj, kk, i, j, k
     integer :: crbox(3, 2), csbox(3, 2), frbox(3, 2)
     integer :: ngrid(3)
@@ -513,8 +522,13 @@ subroutine find_halo_particles(HODC, HMASS, HPOS, RODC, ITOT, DOVIR)
 
     real :: odci, odcj, r1, r2, d1, d2, w1, w2
 
-    integer, parameter :: search_ratio = 3
-    integer, parameter :: refine_ratio = 4
+#ifdef TH2
+    integer, parameter :: search_ratio = 2
+    integer, parameter :: refine_ratio = 2
+#else
+    integer, parameter :: search_ratio = 4
+    integer, parameter :: refine_ratio = 5
+#endif
 
     !
     ! Determine which overdensity we are trying to reach 
@@ -640,21 +654,31 @@ subroutine find_halo_particles(HODC, HMASS, HPOS, RODC, ITOT, DOVIR)
         ! Find refined mesh density maximum
         !
 
-        maxfinegrid = 0.
-
+        !$omp parallel num_threads(nt) default(shared) private(i,j,k,thread)
+        thread = 1
+        thread = omp_get_thread_num() + 1
+        maxfinegrid(thread) = 0.
+        !$omp do
         do k = 1, ngrid(3)
            do j = 1, ngrid(2)
               do i = 1, ngrid(1)
-                 if (finegrid(i, j, k) > maxfinegrid) then
-                    maxfinegrid = finegrid(i, j, k)
-                    HPOS(1) = frbox(1,1) + (i-0.5)*dgrid
-                    HPOS(2) = frbox(2,1) + (j-0.5)*dgrid
-                    HPOS(3) = frbox(3,1) + (k-0.5)*dgrid
+                 if (finegrid(i, j, k) > maxfinegrid(thread)) then
+                    maxfinegrid(thread) = finegrid(i, j, k)
+                    imax(thread)        = i
+                    jmax(thread)        = j
+                    kmax(thread)        = k
                  endif
                  finegrid(i, j, k) = 0. !! Set to zero for next candidate
               enddo
            enddo
         enddo
+        !$omp end do
+        !$omp end parallel
+
+        thread  = maxloc(maxfinegrid, dim=1)
+        HPOS(1) = frbox(1,1) + (imax(thread)-0.5)*dgrid
+        HPOS(2) = frbox(2,1) + (jmax(thread)-0.5)*dgrid
+        HPOS(3) = frbox(3,1) + (kmax(thread)-0.5)*dgrid
 
     endif
 
@@ -664,10 +688,12 @@ subroutine find_halo_particles(HODC, HMASS, HPOS, RODC, ITOT, DOVIR)
 
     if (np_search > max_halo_np) write(*,*) "ERROR: np_search, max_halo_np = ", np_search, max_halo_np
 
+    !$omp parallel do num_threads(nt) default(shared) private(i,dr)
     do i = 1, np_search
         dr = HPOS(:) - pos(i, 1:3)
         pos(i, 4) = sqrt(dr(1)**2 + dr(2)**2 + dr(3)**2)
     enddo
+    !$omp end parallel do
 
     isortpos(:np_search) = (/ (i, i=1, np_search) /)
     call indexedsort(np_search, pos(:, 4), isortpos(:))
