@@ -118,25 +118,25 @@
 ! take the minimum of all the limits 
 
 #ifdef MHD
-#ifdef PPINT
-#ifdef PP_EXT
+# ifdef PPINT
+#   ifdef PP_EXT
         dt = min(dt_e,dt_f_acc,dt_vmax,dt_pp_acc,dt_pp_ext_acc,dt_c_acc,dta,dtc)
-#else
+#   else
         dt = min(dt_e,dt_f_acc,dt_vmax,dt_pp_acc,dt_c_acc,dta,dtc)
-#endif
-#else
+#   endif
+# else
         dt = min(dt_e,dt_f_acc,dt_vmax,dt_c_acc,dta,dtc)
-#endif
+# endif
 #else
-#ifdef PPINT
-#ifdef PP_EXT
+# ifdef PPINT
+#   ifdef PP_EXT
         dt = min(dt_e,dt_f_acc,dt_vmax,dt_pp_acc,dt_pp_ext_acc,dt_c_acc)
-#else
+#   else
         dt = min(dt_e,dt_f_acc,dt_vmax,dt_pp_acc,dt_c_acc)
-#endif
-#else
+#   endif
+# else
         dt = min(dt_e,dt_f_acc,dt_vmax,dt_c_acc)
-#endif
+# endif
 #endif
 
         dt = dt * dt_scale
@@ -201,21 +201,21 @@
         write(*,*) 'Scale factor: ',a,a_mid,a+da
         write(*,*) 'Expansion   : ',ra
 #ifdef MHD
-#ifdef PPINT
+# ifdef PPINT
         write(*,*) 'Time step   : ',dt,dt_e,dt_f_acc,dt_vmax,dt_pp_acc,dt_c_acc,dta,dtc
-#else
+# else
         write(*,*) 'Time step   : ',dt,dt_e,dt_f_acc,dt_vmax,dt_c_acc,dta,dtc
-#endif
+# endif
 #else
-#ifdef PPINT
-#ifdef PP_EXT
+# ifdef PPINT
+#   ifdef PP_EXT
         write(*,*) 'Time step   : ',dt,dt_e,dt_f_acc,dt_vmax,dt_pp_acc,dt_pp_ext_acc,dt_c_acc
-#else
+#   else
         write(*,*) 'Time step   : ',dt,dt_e,dt_f_acc,dt_vmax,dt_pp_acc,dt_c_acc
-#endif
-#else
+#   endif
+# else
         write(*,*) 'Time step   : ',dt,dt_e,dt_f_acc,dt_vmax,dt_c_acc
-#endif
+# endif
 #endif
 
         tau=tau+dt

@@ -17,6 +17,8 @@ implicit none
 #endif
 #ifdef READOFFSET
   logical :: openoffset=.true.
+
+  integer(4) :: ipass
 #endif
 !    integer k_seed, clock
 !    integer, dimension(8) :: values
@@ -64,6 +66,11 @@ if (rank==0) then
     open(91,file='offsets.dat',status='old',access='stream')
     openoffset=.false.
     print*,'opened offset file: offsets.dat'
+    ipass=0
+    do ipass=1,nts+cur_checkpoint+10
+      read(91) offset
+      print*, 'past timesteps',ipass,'offset=', offset
+    enddo
   endif
   read(91,end=999) offset; goto 999
   998 print*,'offsets.dat too short, need more random numbers.'; call mpi_abort(mpi_comm_world,ierr,ierr)

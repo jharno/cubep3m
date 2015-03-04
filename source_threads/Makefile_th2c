@@ -24,7 +24,7 @@ else
   TARGET=cubep3m_nu
 endif
 
-FFLAGS=  -shared-intel -fpp -g  -O3 -fpic -xhost -i_dynamic -mkl -mcmodel=medium -DDIAG -DNGP -DCOARSEPROJ -DPPINT -DMPI_TIME -DLRCKCORR -DNGPH -DDISP_MESH -DNESTED_OMP -DCHECKPOINT_KILL -DMKL $(NFLAGS)  -DWRITELOG -DTH2
+FFLAGS=  -shared-intel -fpp -g  -O3 -fpic -xhost -i_dynamic -mkl -mcmodel=medium -DDIAG -DNGP -DNOPROJ -DCOARSEPROJ -DPPINT -DMPI_TIME -DLRCKCORR -DNGPH -DDISP_MESH -DNESTED_OMP -DCHECKPOINT_KILL -DMKL $(NFLAGS)  -DWRITELOG -DTH2 -DnoSHM -DSHMCP
 
 #V: from hr:
 #FFLAGS=-convert big_endian -shared-intel -fpp -g  -O3 -fpic -xhost -i_dynamic -mcmodel=medium -mt_mpi -DDIAG -DNGP -DPPINT -DMPI_TIME -DLRCKCORR -DNGPH -DDISP_MESH -DNESTED_OMP -DCHECKPOINT_KILL $(NFLAGS)
@@ -94,7 +94,7 @@ fine_ngp_mass.o: fine_ngp_mass.f90
 #	$(FC) $(FFLAGS) -c $<
 
 halofind_particles.o: halofind_particles.f90
-	$(FC) $(FFLAGS) -c $<
+	$(FC) $(FFLAGS) -openmp -c $<
 
 fft_fine.o: fft_fine.f90
 	$(FC) $(FFLAGS) $(MKL_FFTW_INC) -openmp -c $<

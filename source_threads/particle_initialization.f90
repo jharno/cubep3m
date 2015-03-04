@@ -34,6 +34,9 @@ integer(4) :: np_nu
   equivalence(xi1,xi4)
   equivalence(rr_i4,rhoc_i1)
 #endif
+  integer(4) :: hostnm
+  character(len=100) :: myhost
+  real(8) :: t1, t2
 
 if (rank==0) print*,'particle_initialize'
 fstat=0
@@ -86,7 +89,12 @@ elseif (pp_test) then !! pp test
 elseif (shake_test_ic) then !! shake test
         np_local=1; xv(:,1)=0
 else !!================ physical IC ================!!
-  write(rank_s,'(i6)') rank; rank_s=adjustl(rank_s)
+# ifdef SUBV
+    write(rank_s,'(i6)') rank_global
+# else
+    write(rank_s,'(i6)') rank
+# endif
+  rank_s=adjustl(rank_s)
   if (restart_ic) then
     if (rank == 0) z_write = z_checkpoint(restart_checkpoint)
     call mpi_bcast(z_write,1,mpi_real,0,mpi_comm_world,ierr)
@@ -99,6 +107,9 @@ else !!================ physical IC ================!!
     write(z_s,'(f7.3)') z_i
     if (rank==0) print*, 'starting simulation normally from z = ',z_s
   endif
+  
+  t1 = mpi_wtime(ierr)
+
   z_s=adjustl(z_s)
 
 # ifdef ZIP
@@ -114,6 +125,7 @@ else !!================ physical IC ================!!
     if (fstat0 /= 0 .or. fstat1 /= 0 .or. fstat2 /= 0 .or. fstat3 /= 0) then
       write(*,*) 'error opening dm zip checkpoint'
       write(*,*) 'rank',rank,'files:',f_zip0,f_zip1,f_zip2,f_zip3
+      call system('hostname')
       call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
     read(10) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_projection,cur_halofind,mass_p,v_r2i,shake_offset
@@ -175,6 +187,7 @@ else !!================ physical IC ================!!
       if (fstat0 /= 0 .or. fstat1 /= 0 .or. fstat2 /= 0 .or. fstat3 /= 0) then
         write(*,*) 'error opening dm zip checkpoint'
         write(*,*) 'rank',rank,'files:',f_zip0,f_zip1,f_zip2,f_zip3
+        call system('hostname')
         call mpi_abort(mpi_comm_world,ierr,ierr)
       endif
       read(10) np_nu,dummy,dummy,dummy,dummy,dummy,dummy,dummy,cur_checkpoint,cur_projection,cur_halofind,dummy,v_r2i_nu,dummy,dummy,dummy
@@ -232,6 +245,7 @@ else !!================ physical IC ================!!
     if (fstat /= 0) then
       write(*,*) 'error opening checkpoint'
       write(*,*) 'rank',rank,'file:',ofile
+      call system('hostname')
       call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
     read(21) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_projection,cur_halofind,mass_p
@@ -254,6 +268,7 @@ else !!================ physical IC ================!!
       if (fstat /= 0) then
         write(*,*) 'error opening checkpoint'
         write(*,*) 'rank',rank,'file:',ofile
+        call system('hostname')
         call mpi_abort(mpi_comm_world,ierr,ierr)
       endif
       read(21) np_nu,a,t,tau,dummy,dummy,dummy,dummy,cur_checkpoint,cur_projection,cur_halofind,dummy
@@ -272,7 +287,16 @@ else !!================ physical IC ================!!
 #   endif !! NEUTRINOS
 
 # endif !! ZIP
+t2 = mpi_wtime(ierr)
 
+ierr = hostnm(myhost)
+#ifdef SUBV
+  print*, 'rank:',rank,' rank_global:',rank_global, trim(myhost), (t2-t1)/60.,'min'
+#else
+  print*, 'done reading particles by rank:',rank, trim(myhost), (t2-t1)/60.,' min'
+#endif
+
+call mpi_barrier(mpi_comm_world,ierr)
 endif
 
 npl8=int(np_local,kind=8) !! calculate total number of particles and particle mass
@@ -356,7 +380,6 @@ if (rank==0) then !! print some information on the screen
   print*,'Particle mass mass_p =',mass_p
   print*,'v_r2i. v_r2i_nu =',v_r2i,v_r2i_nu
   print*,'Current shake_offset =',shake_offset
-  pause
 endif
 
 end subroutine particle_initialize
