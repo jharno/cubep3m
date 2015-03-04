@@ -248,11 +248,13 @@
 
     force_grid_back = .false.
 
+#ifndef SUBV
     ! NEW TRICK BY JHD TO REMOVE MEMORY RACING CONDITION ON THREADED PLAN
     ! CREATION. 
     do i = 1,cores 
       call cubepm_fftw2('o',i)
     enddo
+#endif
 
 ! Initialize halo finding arrays
 

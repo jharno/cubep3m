@@ -1,0 +1,159 @@
+SHELL = /bin/sh
+FC=mpif90
+P3DFFT_LIB=-L/HOME/bnu_ztj_1/lib/p3dfft_2.5.1/lib/
+P3DFFT_INC=-I/HOME/bnu_ztj_1/lib/p3dfft_2.5.1/include/
+MKL_FFTW_INC=-I/opt/intel/composer_xe_2013_sp1.2.144/mkl/include/fftw/
+MKL_FFTW_LIB=-L/opt/intel/composer_xe_2013_sp1.2.144/mkl/lib/intel64/
+
+#LDLIBS= -lp3dfft -lmkl_intel_lp64 
+LDLIBS= -lp3dfft 	 	            -lm -ldl   -lmkl_intel_lp64
+#                  ^:ld: cannot find -lfftw3f_omp
+#                                 ^ cannot -lfftw3f  
+#                                                       ^ by ys
+#                                                      
+ 
+NEUTRINOS?=1
+ifeq ($(NEUTRINOS), 0)
+  NFLAGS=-DZIP -DZIPDM -DREADOFFSET
+  TARGET=haloonly_dm
+else
+  NFLAGS=-DNEUTRINOS -DPID_FLAG -DZIP -DZIPDM -DREADOFFSET
+  TARGET=haloonly_nu
+endif
+
+FFLAGS=  -shared-intel -fpp -g  -O3 -fpic -xhost -i_dynamic -mkl -mcmodel=medium -DDIAG -DNGP -DNOPROJ -DCOARSEPROJ -DPPINT -DMPI_TIME -DLRCKCORR -DNGPH -DDISP_MESH -DNESTED_OMP -DMKL $(NFLAGS)  -DnoWRITELOG -DTH2 -DnoSHM -DSHMCP -DSUBV
+
+#V: from hr:
+#FFLAGS=-convert big_endian -shared-intel -fpp -g  -O3 -fpic -xhost -i_dynamic -mcmodel=medium -mt_mpi -DDIAG -DNGP -DPPINT -DMPI_TIME -DLRCKCORR -DNGPH -DDISP_MESH -DNESTED_OMP -DCHECKPOINT_KILL $(NFLAGS)
+
+#OBJS= haloonly.o checkpoint.o checkpoint_kill.o coarse_cic_mass.o coarse_cic_mass_buffer.o coarse_force_p3dfft.o coarse_force_buffer.o coarse_mass.o coarse_max_dt.o coarse_mesh.o coarse_power_p3dfft.o coarse_velocity.o cubepm.o delete_particles.o p3dfft_coarse.o fine_cic_mass.o fine_cic_mass_buffer.o fine_ngp_mass.o halofind_particles.o fft_fine.o init_projection.o kernel_checkpoint.o kernel_initialization_p3dfft.o link_list.o move_grid_back.o mpi_initialization_p3dfft.o particle_initialization.o particle_mesh_threaded_nested.o particle_pass.o projection.o report_pair.o report_force.o set_pair.o indexedsort.o timers.o timestep.o update_position.o variable_initialization.o 
+OBJS= checkpoint_kill.o halofind_particles.o haloonly.o link_list.o mpi_initialization_p3dfft.o indexedsort.o fine_ngp_mass.o particle_initialization.o particle_pass.o timers.o variable_initialization.o
+
+run: $(TARGET)
+
+$(TARGET): $(OBJS)
+	$(FC) $(FFLAGS) -openmp  $^ -o $@ $(MKL_FFTW_LIB) $(P3DFFT_LIB) $(LDLIBS) 
+
+haloonly.o: haloonly.f90
+	$(FC) $(FFLAGS) -openmp -c $<
+
+cubepm.o: cubepm.f90
+	$(FC) $(FFLAGS) -openmp -c $<  
+
+checkpoint.o: checkpoint.f90 
+	$(FC) $(FFLAGS) -c $<
+
+checkpoint_kill.o: checkpoint_kill.f90
+	$(FC) $(FFLAGS) -c $<
+
+coarse_cic_mass.o: coarse_cic_mass.f90
+	$(FC) $(FFLAGS) -openmp -c $<
+
+coarse_cic_mass_buffer.o: coarse_cic_mass_buffer.f90
+	$(FC) $(FFLAGS) -openmp -c $<
+
+coarse_force_p3dfft.o: coarse_force_p3dfft.f90
+	$(FC) $(FFLAGS) -openmp -c $<
+
+coarse_force_buffer.o: coarse_force_buffer.f90
+	$(FC) $(FFLAGS) -c $<
+
+coarse_mass.o: coarse_mass.f90 
+	$(FC) $(FFLAGS) -openmp -c $<
+
+coarse_max_dt.o: coarse_max_dt.f90
+	$(FC) $(FFLAGS) -c $<
+
+coarse_mesh.o: coarse_mesh.f90
+	$(FC) $(FFLAGS) -c $<
+
+coarse_power_p3dfft.o: coarse_power_p3dfft.f90
+	$(FC) $(FFLAGS) -c $<
+
+coarse_velocity.o: coarse_velocity.f90 
+	$(FC) $(FFLAGS) -openmp -c $<
+
+delete_particles.o: delete_particles.f90
+	$(FC) $(FFLAGS) -c $<
+
+p3dfft_coarse.o: p3dfft_coarse.f90
+	$(FC) $(FFLAGS) $(MKL_FFTW_INC) $(P3DFFT_INC) -c $<
+
+fine_cic_mass.o: fine_cic_mass.f90
+	$(FC) $(FFLAGS) -c $<
+
+fine_cic_mass_buffer.o: fine_cic_mass_buffer.f90
+	$(FC) $(FFLAGS) -c $<
+
+#fine_mesh.o: fine_mesh.f90 
+#	$(FC) $(FFLAGS) -openmp -c $<
+
+fine_ngp_mass.o: fine_ngp_mass.f90
+	$(FC) $(FFLAGS) -c $<
+
+#fine_velocity.o: fine_velocity.f90 
+#	$(FC) $(FFLAGS) -c $<
+
+halofind_particles.o: halofind_particles.f90
+	$(FC) $(FFLAGS) -openmp -c $<
+
+fft_fine.o: fft_fine.f90
+	$(FC) $(FFLAGS) $(MKL_FFTW_INC) -openmp -c $<
+
+init_projection.o: init_projection.f90
+	$(FC) $(FFLAGS) -c $<
+
+kernel_checkpoint.o: kernel_checkpoint.f90
+	$(FC) $(FFLAGS) -c $<
+
+kernel_initialization_p3dfft.o: kernel_initialization_p3dfft.f90
+	$(FC) $(FFLAGS) -c $<
+
+link_list.o: link_list.f90
+	$(FC) $(FFLAGS) -c $<
+
+move_grid_back.o: move_grid_back.f90
+	$(FC) $(FFLAGS) -c $<
+
+mpi_initialization_p3dfft.o: mpi_initialization_p3dfft.f90
+	$(FC) $(FFLAGS) -c $<
+
+particle_initialization.o: particle_initialization.f90
+	$(FC) $(FFLAGS) -c $<
+
+particle_mesh_threaded_nested.o: particle_mesh_threaded_nested.f90
+	$(FC) $(FFLAGS) -openmp -c $<
+
+particle_pass.o: particle_pass.f90
+	$(FC) $(FFLAGS) -c $<
+
+projection.o: projection.f90
+	$(FC) $(FFLAGS) -c $<
+
+report_pair.o: report_pair.f90
+	$(FC) $(FFLAGS) -c $<
+
+report_force.o: report_force.f90
+	$(FC) $(FFLAGS) -c $<
+
+set_pair.o: set_pair.f90
+	$(FC) $(FFLAGS) -c $<
+
+indexedsort.o: indexedsort.f90
+	$(FC) $(FFLAGS) -c $<
+
+timers.o: timers.f90
+	$(FC) $(FFLAGS) -c $<
+
+timestep.o: timestep.f90 
+	$(FC) $(FFLAGS) -c $<
+
+update_position.o: update_position.f90
+	$(FC) $(FFLAGS) -openmp -c $<
+
+variable_initialization.o: variable_initialization.f90
+	$(FC) $(FFLAGS) -c $<
+
+clean:
+	rm -f *.o *.pc cubep3m cubep3m_p3dfft 
+

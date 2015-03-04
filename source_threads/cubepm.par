@@ -1,6 +1,6 @@
 !! Frequently changed parameters are found in this header file:
 
-include '../parameters'
+#include '../parameters'
 
 !! files / paths 
 
@@ -55,10 +55,10 @@ integer(4), parameter   :: max_nts = 6000
 
 #ifdef NEUTRINOS
 logical, parameter  :: restart_ic =  .true.
-integer(4), parameter   :: restart_checkpoint = 1 ! line number in input/checkpoint
+integer(4), parameter   :: restart_checkpoint = 37
 #else
-logical, parameter	:: restart_ic =  .false.
-integer(4), parameter   :: restart_checkpoint = 1 ! line number in input/checkpoint 
+logical, parameter	:: restart_ic =  .true.
+integer(4), parameter   :: restart_checkpoint = 37 ! line number in input/checkpoint 
 #endif
 
 logical, parameter :: restart_kill = .false. !! Only matters if CHECKPOINT_KILL flag used
@@ -160,7 +160,7 @@ real(4), parameter      :: den_peak_cutoff = 100.
 
 ! lower mass cutoff for cataloging a halo, in particles
 
-integer(4), parameter      :: min_halo_particles = 100 
+integer(4), parameter      :: min_halo_particles = 500 
 
 ! set .true. to limit initial halo mass calculation to exiting after only
 ! completing an entire radial shell
@@ -248,7 +248,7 @@ integer(4), parameter   :: dim_y = nodes_dim
 integer(4), parameter   :: dim_z = nodes_dim**2
 
 #ifdef COARSEPROJ
-integer, parameter :: writeCoarseProjEverySteps = 2
+integer, parameter :: writeCoarseProjEverySteps = 4
 real, parameter    :: writeCoarseProjBelowZ     = 100.
 real, parameter    :: writeCoarseProjAboveA     = 1./(1.+writeCoarseProjBelowZ)
 integer, parameter :: nc_coarseproj_start       = nc_node_dim/2 - nc_tile_dim/2

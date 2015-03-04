@@ -100,22 +100,38 @@ subroutine halofind
     !
 
     z_write = z_halofind(cur_halofind)
+#ifdef SUBV
+    z_write = z_checkpoint(restart_checkpoint)
+#endif
     call mpi_bcast(z_write, 1, mpi_real, 0, mpi_comm_world, ierr)
     write(z_s ,"(f7.3)") z_write 
     z_s = adjustl(z_s)
-    
+#ifdef SUBV
+    write(r_s, "(i5)") rank_global
+#else 
     write(r_s, "(i5)") rank
+#endif
     r_s = adjustl(r_s)
 
-    ofile = output_path//'/node'//r_s(1:len_trim(r_s))//'/'//z_s(1:len_trim(z_s))//"halo"//r_s(1:len_trim(r_s))//".dat"
-
-    open(unit=12, file=ofile, status="replace", iostat=fstat, access="stream")
-
-    if (fstat /= 0) then
-        write(*,*) "Error opening halo catalog for write"
-        write(*,*) "rank", rank, "file:", ofile
-        stop
+#ifndef SUBV
+    ofile = output_path//'/node'//trim(r_s)//'/'//trim(z_s)//"halo"//trim(r_s)//".dat"
+#else
+    ofile ='/WORK/bnu_ztj_1/yuanshuo/tildes/analysis/node'//trim(r_s)//'/'//trim(z_s)//'halo'//trim(r_s)//'.dat'
+    if (cart_coords(1)>0 .and. cart_coords(1)<=nodes_dim_subv .and. &
+        cart_coords(2)>0 .and. cart_coords(2)<=nodes_dim_subv .and. &
+        cart_coords(3)>0 .and. cart_coords(3)<=nodes_dim_subv) then
+      ofile='/WORK/bnu_ztj_1/yuanshuo/tildes/analysis/node'//trim(r_s)//'/'//trim(z_s)//'halo'//trim(r_s)//'.dat'
+    else
+      ofile='/WORK/bnu_ztj_1/yuanshuo/tildes/analysis/node'//trim(r_s)//'/garbage_'//trim(z_s)//'halo'//trim(r_s)//'.dat'
     endif
+#endif
+open(unit=12, file=ofile, status="replace", iostat=fstat, access="stream", buffered='yes')
+print*, "opened ",ofile
+if (fstat /= 0) then
+  write(*,*) "Error opening halo catalog for write"
+  write(*,*) "rank", rank, "file:", ofile
+  stop
+endif
 
     !
     ! Determine which candidates are to be considered halos and write their properties to file.
