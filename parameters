@@ -20,7 +20,7 @@ character(*), parameter :: shm_path    = '/dev/shm/'
   integer(4),   parameter :: nodes_dim_global = 24
   integer(4),   parameter :: first_coord(3)      = (/0,0,0/)
 #else
-  integer(4),   parameter :: nodes_sim=24
+  integer(4),   parameter :: nodes_dim=24
 #endif
 
 ! fine mesh tiles / node / dimension
