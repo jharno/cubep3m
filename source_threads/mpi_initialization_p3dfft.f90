@@ -63,7 +63,7 @@
 
 #   ifdef SUBV
       cart_coords_global=cart_coords+first_coord-1
-      cart_coords_global=mod(cart_coords_global+24,24)
+      cart_coords_global=mod(cart_coords_global+nodes_dim_global,nodes_dim_global)
       rank_global=nodes_dim_global**2*cart_coords_global(1)+nodes_dim_global*cart_coords_global(2)+cart_coords_global(3)
       if (cart_coords(1)>0 .and. cart_coords(1)<=nodes_dim_subv .and. &
           cart_coords(2)>0 .and. cart_coords(2)<=nodes_dim_subv .and. &
