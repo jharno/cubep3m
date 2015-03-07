@@ -17,7 +17,7 @@ program dist_init
   implicit none
 
   include 'mpif.h'
-  include '../../parameters'
+#include '../../parameters'
 #ifdef SFFTW3
   include 'fftw3-mpi.f03'
 #endif
