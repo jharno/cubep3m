@@ -116,13 +116,12 @@ subroutine halofind
 #ifndef SUBV
     ofile = output_path//'/node'//trim(r_s)//'/'//trim(z_s)//"halo"//trim(r_s)//".dat"
 #else
-    ofile ='/WORK/bnu_ztj_1/yuanshuo/tildes/analysis/node'//trim(r_s)//'/'//trim(z_s)//'halo'//trim(r_s)//'.dat'
     if (cart_coords(1)>0 .and. cart_coords(1)<=nodes_dim_subv .and. &
         cart_coords(2)>0 .and. cart_coords(2)<=nodes_dim_subv .and. &
         cart_coords(3)>0 .and. cart_coords(3)<=nodes_dim_subv) then
-      ofile='/WORK/bnu_ztj_1/yuanshuo/tildes/analysis/node'//trim(r_s)//'/'//trim(z_s)//'halo'//trim(r_s)//'.dat'
+      ofile='/WORK/bnu_ztj_1/yuanshuo/tildes/analysis'//'/node'//trim(r_s)//'/'//trim(z_s)//'halo'//trim(r_s)//'.dat'
     else
-      ofile='/WORK/bnu_ztj_1/yuanshuo/tildes/analysis/node'//trim(r_s)//'/garbage_'//trim(z_s)//'halo'//trim(r_s)//'.dat'
+      ofile='/WORK/bnu_ztj_1/yuanshuo/tildes/analysis'//'/node'//trim(r_s)//'/garbage_'//trim(z_s)//'halo'//trim(r_s)//'.dat'
     endif
 #endif
 open(unit=12, file=ofile, status="replace", iostat=fstat, access="stream", buffered='yes')
@@ -309,12 +308,24 @@ endif
 #endif
 #endif
 
-#ifndef NEUTRINOS
-#ifdef PID_FLAG
-            if (halo_write) write(12) hpos(:), mass_vir, mass_odc, r_vir, r_odc, x_mean, v_mean, l_CM, v2_wrt_halo, var_x, pid_halo, xv_halo
+!!
+#ifdef SUBV
+  !!nc/node_dim = nf_node_dim
+  hpos=hpos+((/first_coord(3),first_coord(2),first_coord(1)/)-1)*(nc/nodes_dim)
+  hpos=mod(hpos+nc/nodes_dim*nodes_dim_global,nc/nodes_dim*nodes_dim_global*1.)
 #else
-            if (halo_write) write(12) hpos(:), mass_vir, mass_odc, r_vir, r_odc, x_mean, v_mean, l_CM, v2_wrt_halo, var_x
+  ! keep hpos
 #endif
+!!
+
+
+
+#ifndef NEUTRINOS
+# ifdef PID_FLAG
+            if (halo_write) write(12) hpos(:), mass_vir, mass_odc, r_vir, r_odc, x_mean, v_mean, l_CM, v2_wrt_halo, var_x, pid_halo, xv_halo
+# else
+            if (halo_write) write(12) hpos(:), mass_vir, mass_odc, r_vir, r_odc, x_mean, v_mean, l_CM, v2_wrt_halo, var_x
+# endif
 #else
             if (halo_write) write(12) hpos(:), mass_vir, mass_odc, r_vir, r_odc, x_mean, v_mean, l_CM, v2_wrt_halo, var_x, I_ij, x_mean_nu, v_mean_nu, n_nu 
 #endif
