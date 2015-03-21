@@ -119,13 +119,20 @@ subroutine halofind
     if (cart_coords(1)>0 .and. cart_coords(1)<=nodes_dim_subv .and. &
         cart_coords(2)>0 .and. cart_coords(2)<=nodes_dim_subv .and. &
         cart_coords(3)>0 .and. cart_coords(3)<=nodes_dim_subv) then
-      ofile='/WORK/bnu_ztj_1/yuanshuo/tildes/analysis'//'/node'//trim(r_s)//'/'//trim(z_s)//'halo'//trim(r_s)//'.dat'
+#     ifdef NEUTRINOS
+        ofile='/WORK/bnu_ztj_1/yuanshuo/tildes/analysis'//'/node'//trim(r_s)//'/'//trim(z_s)//'halo'//trim(r_s)//'.dat'
+#     else
+        ofile='/WORK/bnu_ztj_1/yuanshuo/tildes/analysisdm'//'/node'//trim(r_s)//'/'//trim(z_s)//'halo'//trim(r_s)//'.dat'
+#     endif
     else
-      ofile='/WORK/bnu_ztj_1/yuanshuo/tildes/analysis'//'/node'//trim(r_s)//'/garbage_'//trim(z_s)//'halo'//trim(r_s)//'.dat'
+#     ifdef NEUTRINOS
+        ofile='/WORK/bnu_ztj_1/yuanshuo/tildes/analysis'//'/node'//trim(r_s)//'/garbage_'//trim(z_s)//'halo'//trim(r_s)//'.dat'
+#     else
+        ofile='/WORK/bnu_ztj_1/yuanshuo/tildes/analysisdm'//'/node'//trim(r_s)//'/garbage_'//trim(z_s)//'halo'//trim(r_s)//'.dat'
+#     endif
     endif
 #endif
 open(unit=12, file=ofile, status="replace", iostat=fstat, access="stream", buffered='yes')
-print*, "opened ",ofile
 if (fstat /= 0) then
   write(*,*) "Error opening halo catalog for write"
   write(*,*) "rank", rank, "file:", ofile
@@ -146,6 +153,12 @@ endif
     offset(1) = cart_coords(3)*nf_physical_node_dim
     offset(2) = cart_coords(2)*nf_physical_node_dim
     offset(3) = cart_coords(1)*nf_physical_node_dim
+
+#ifdef SUBV
+  offset(1)=offset(1)+(first_coord(3)-1)*nf_physical_node_dim
+  offset(2)=offset(2)+(first_coord(2)-1)*nf_physical_node_dim
+  offset(3)=offset(3)+(first_coord(1)-1)*nf_physical_node_dim
+#endif
 
     !! Initialize so that no particles are yet part of a halo
     hpart_odc = 0
@@ -173,6 +186,7 @@ endif
     write(12) nhalo
     write(12) halo_vir
     write(12) halo_odc
+    write(12) shake_offset
 
     if (rank == 0) then
 
@@ -303,19 +317,29 @@ endif
             !! Subtract shake offset
             hpos = hpos - shake_offset
             x_mean = x_mean - shake_offset
-#ifdef NEUTRINOS 
+# ifdef NEUTRINOS 
             x_mean_nu = x_mean_nu - shake_offset
+# endif
 #endif
+
+!! fix the dm+nu offset problem
+#ifdef SUBV
+# ifdef NEUTRINOS
+    hpos = hpos + shake_offset
+    x_mean = x_mean + shake_offset
+    x_mean_nu = x_mean_nu + shake_offset
+# endif
 #endif
 
 !!
-#ifdef SUBV
+!!#ifdef SUBV
   !!nc/node_dim = nf_node_dim
-  hpos=hpos+((/first_coord(3),first_coord(2),first_coord(1)/)-1)*(nc/nodes_dim)
-  hpos=mod(hpos+nc/nodes_dim*nodes_dim_global,nc/nodes_dim*nodes_dim_global*1.)
-#else
+  !hpos=hpos+((/first_coord(3),first_coord(2),first_coord(1)/)-1)*(nc/nodes_dim)
+  !hpos=mod(hpos+nc/nodes_dim*nodes_dim_global,nc/nodes_dim*nodes_dim_global*1.)
+!if(rank==0) print*, 'nc=',nc, ' nc_node_dim=',nc_node_dim, ' nc/nodes_dim=',nc/nodes_dim
+!!#else
   ! keep hpos
-#endif
+!!#endif
 !!
 
 
