@@ -1,0 +1,3 @@
+#define NGP
+#define VERBOSITY 0
+#define DEBUG

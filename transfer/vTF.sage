@@ -20,15 +20,15 @@ if (ZE == 0):
     print "Computing at " + str(ZE) + " as proxy for " + str(0)
 #Location of transfer functions
 
-mnu='mnu0p05'
+mnu='3mnu0p2'
 
 #dir = '/Users/derekinman/Research/Camb/mnu1p0/linear/'
 #dir = '/Users/derekinman/Research/Camb/mnu0p2/non_linear/'
 #prefix = 'nu_'+mnu+'_transfer_out_z'
 #suffix = '.dat'
 
-dir = './mnu0p05/' #/Users/derekinman/Research/Camb/simulation/mnu0p05/'
-prefix = 'sim_mnu0p05_transfer_out_z'
+dir = './3mnu0p2/' #/Users/derekinman/Research/Camb/simulation/mnu0p05/'
+prefix = 'sim_3mnu0p2_transfer_out_z'
 suffix = '.dat'
 
 if (Z == 10):
@@ -40,7 +40,7 @@ if (Z == 0):
     fE = prefix+'0p05'+suffix
     fA = prefix+'0p1'+suffix
     fB = prefix+'0'+suffix
-    fO = 'sim_mnu0p05_veltransfer_out_z0'+suffix
+    fO = 'sim_3mnu0p2_veltransfer_out_z0'+suffix
 #scale factor
 a = 1.0/(1.0+ZE)
 
