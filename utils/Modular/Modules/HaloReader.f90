@@ -34,23 +34,23 @@ contains
       & halo array dim 1 is incorrect')
 
     !Open File
-    open(unit=1,file=trim(hfile),status='old',iostat=stat,access='stream')
+    open(unit=11,file=trim(hfile),status='old',iostat=stat,access='stream')
     if (stat .NE. 0) call halo_error_stop('Error: could not open file: '//trim(hfile))
 
     !Check that number of halos is acceptable
-    read(1) nh
+    read(11) nh
     if (nh > size(halos,dim=2)) call halo_error_stop('Error: particle number exceeds max_nh')
 
     !Read header information (unused)
-    read(1) header(:)
+    read(11) header(:)
 
     !Read halos
     do i=1,nh
-       read(1) halos(1:34,i)
-       read(1) dummy
+       read(11) halos(1:34,i)
+       read(11) dummy
        halos(35,i) = real(dummy)
     end do
-    close(1)
+    close(11)
 
 #if VERBOSITY > 0
     if (rank==0) write(*,*) '[Module - HaloReader] Finished reading halos'
