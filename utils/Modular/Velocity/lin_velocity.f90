@@ -44,7 +44,7 @@ program lin_velocity
   call read_transfer(dtf,fdtf)
   call read_transfer(vtf,fvtf)
 
-  vtf(2:nvtfk,:) = -1.0*vtf(2:nvtfk,:)
+  vtf(2:ntf,:) = -1.0*vtf(2:ntf,:)
 
   !Read in dm density field and fourier transform
   if (rank==0) write(*,*) 'Reading in density fields'
