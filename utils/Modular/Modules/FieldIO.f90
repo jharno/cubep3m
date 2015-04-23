@@ -12,13 +12,13 @@ contains
     character(len=*), intent(in) :: fileI
     integer :: stat
     if (rank==0) write(*,*) 'Entering subroutine read_field3'
-    open(unit=11,file=trim(adjustl(fileI)),status='old',iostat=stat,access='stream')
+    open(unit=21,file=trim(adjustl(fileI)),status='old',iostat=stat,access='stream')
     if (stat/=0) then
       write(*,*) 'ERROR in module FieldIO in subroutine read_filed3 opening file: '//trim(adjustl(fileI))
       call mpi_abort(mpi_comm_world,ierr,ierr)
     end if
-    read(11) grid
-    close(11)
+    read(21) grid
+    close(21)
     if (rank==0) write(*,*) 'Finished subroutine read_field3'
   end subroutine read_field3
 
@@ -28,13 +28,13 @@ contains
     real, dimension(:,:,:), intent(in) :: grid
     integer :: stat
     if (rank==0) write(*,*) 'Entering subroutine write_den'
-    open(unit=11,file=trim(adjustl(fileO)),status='replace',iostat=stat,access='stream')
+    open(unit=21,file=trim(adjustl(fileO)),status='replace',iostat=stat,access='stream')
     if (stat/=0) then
       write(*,*) 'ERROR in FieldIO in subroutine write_den opening file: '//trim(adjustl(fileO))
       call mpi_abort(mpi_comm_world,ierr,ierr)
     end if
-    write(11) grid
-    close(11)
+    write(21) grid
+    close(21)
     if (rank==0) write(*,*) 'Finished subroutine write_den'
   end subroutine write_field3
 

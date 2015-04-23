@@ -94,15 +94,15 @@ contains
     real, dimension(:), intent(in) :: kbins, kpow, pow,ker
     integer :: i,stat
     if (rank==0) write(*,*) 'Entering subroutine write_spectrum'
-    open(unit=12,file=trim(adjustl(fileO)),status='replace',iostat=stat)
+    open(unit=21,file=trim(adjustl(fileO)),status='replace',iostat=stat)
     if (stat/=0) then
       write(*,*) 'ERROR in program density_ps in subroutine write_spectrum opening file: '//trim(adjustl(fileO))
       call mpi_abort(mpi_comm_world,ierr,ierr)
     end if
     do i=1,size(pow)
-      write(12,*) kbins(i), kpow(i), pow(i),ker(i)
+      write(21,*) kbins(i), kpow(i), pow(i),ker(i)
     end do
-    close(12)
+    close(21)
     if (rank==0) write(*,*) 'Finished subroutine write_spectrum'
   end subroutine write_spectrum
 

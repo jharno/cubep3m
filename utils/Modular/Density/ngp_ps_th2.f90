@@ -40,15 +40,15 @@ program ngp_ps_th2
   
   !Determine checkpoints
   checkpoints=-1
-  open(unit=11,file=checkpoints_file,iostat=stat,status='old')
+  open(unit=21,file=checkpoints_file,iostat=stat,status='old')
   if (stat/=0) call error("Could not open file: "//checkpoints_file)
   i=1
   do
-     read(unit=11,end=41,fmt='(f20.10)') checkpoints(i)
+     read(unit=21,end=41,fmt='(f20.10)') checkpoints(i)
      i=i+1
   end do
   41 num_checkpoints = i-1
-  close(11)
+  close(21)
 
 #if (VERBOSITY>0)
   if (rank==0) write(*,*) "Number of checkpoints: ",num_checkpoints

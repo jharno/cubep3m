@@ -19,15 +19,15 @@ contains
     nt = size(tfa,dim=1)
     nk = size(tfa,dim=2)
 
-    open(unit=11,file=fn,status='old',iostat=stat)
+    open(unit=21,file=fn,status='old',iostat=stat)
     if (stat/=0) then
        write(*,*) 'ERROR in module Transfer in subroutine read_transfer with file: '//fn
        call mpi_abort(mpi_comm_world,ierr,ierr)
     end if
     do i=1,nk
-       read(11,*) tfa(:,i)
+       read(21,*) tfa(:,i)
     end do
-    close(11)
+    close(21)
 
     if (rank==0) write(*,*) 'Finished subroutine read_transfer'
 
