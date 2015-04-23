@@ -15,7 +15,7 @@ module Variables
   !Particle parameters
   integer, parameter :: np_max = 25000000
   !integer, parameter :: np_buffer = (2.0*np_max/3.0)
-  integer, parameter :: np_total = (nc/4)**3
+  integer(8), parameter :: np_total = (nc/4)**3
   
   !Halo parameters
   integer, parameter :: max_halo = 9999

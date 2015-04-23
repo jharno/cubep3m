@@ -2,6 +2,7 @@ module Parameters
   implicit none
   public
   
+  integer, parameter :: Nglobal_dim = 24 ! nodes_dim in runing cubep3m. set to 24 for TianNu
   integer, parameter :: Ncells = 288 !# cells in each node = nc / nodes_dim
   real, parameter :: Lbox = 100 !Physical size of box in h/Mpc
   

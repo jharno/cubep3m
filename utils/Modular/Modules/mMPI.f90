@@ -8,7 +8,7 @@ module mMPI
 
 	integer, dimension(6) :: cart_neighbor
 	integer, dimension(3) :: slab_coord, cart_coords
-	integer :: slab_rank, mpi_comm_cart, cart_rank, rank, ierr
+	integer :: slab_rank, mpi_comm_cart, cart_rank, rank, rank_io, ierr
 	character(len=8) :: rank_s
 
 	real :: time_start, time_end
@@ -52,8 +52,6 @@ contains
 		if (ierr /= mpi_success) call mpi_error_stop('Error in subroutine &
 			&start_mpi at call to mpi_comm_rank')
 
-		write(rank_s,'(i8)') rank
-
 		slab_coord(3) = rank / nodes_slab
 		slab_rank = rank - slab_coord(3) * nodes_slab
 		slab_coord(2) = slab_rank / nodes_dim
@@ -75,6 +73,13 @@ contains
 		call mpi_cart_coords(mpi_comm_cart, cart_rank, ndim, cart_coords, ierr)
 		if (ierr /= mpi_success) call mpi_error_stop('Error in subroutine &
 			&start_mpi at call to mpi_cart_coords')
+
+if (nodes_dim /= Nglobal_dim) then
+  rank_io=Nglobal_dim**2*cart_coords(1)+Nglobal_dim*cart_coords(2)+cart_coords(3)
+  write(rank_s,'(i8)') rank_io
+else
+  write(rank_s,'(i8)') rank
+endif
 
 		do j=0, ndim-1
 			call mpi_cart_shift(mpi_comm_cart, j, 1, cart_neighbor(2*(j+1)-1), &
