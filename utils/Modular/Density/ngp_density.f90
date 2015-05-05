@@ -111,7 +111,8 @@ contains
     implicit none
     real, dimension(:,:,:), intent(inout) :: grid
     real :: locmpi, glompi, mp, ntot
-
+    real(8) :: r8,gr8
+    integer :: i,j,k    
     if (rank==0) write(*,*) 'Entering subroutine normalize_den'
 
     !Diagnostics
@@ -125,10 +126,22 @@ contains
     if(ierr/=mpi_success) call mpi_abort(mpi_comm_world,ierr,ierr)
     if (rank.eq.0) write(*,*) '-->Min value of cube = ', glompi
 
-    locmpi = sum(grid)
-    call mpi_allreduce(locmpi,glompi,1,mpi_real,mpi_sum,mpi_comm_world,ierr)
+!    locmpi = sum(grid)
+!    call mpi_allreduce(locmpi,glompi,1,mpi_real,mpi_sum,mpi_comm_world,ierr)
+!    if (ierr/=mpi_success) call mpi_abort(mpi_comm_world, ierr, ierr)
+!    ntot = glompi
+
+    do k=1,Ncells
+       do j=1,Ncells
+          do i=1,Ncells
+             r8 = r8+grid(i,j,k)
+          end do
+       end do
+    end do
+
+    call mpi_allreduce(r8,gr8,1,mpi_real8,mpi_sum,mpi_comm_world,ierr)
     if (ierr/=mpi_success) call mpi_abort(mpi_comm_world, ierr, ierr)
-    ntot = glompi
+    ntot = real(gr8,kind=4)
 
     !Compute mass
     mp = (1.0*Ncells)**3*Nmpi/Ntot
