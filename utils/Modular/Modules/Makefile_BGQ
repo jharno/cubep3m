@@ -1,0 +1,23 @@
+fort=mpif90
+xflags=-O3 -q64 -O2 -qhot -qarch=qp -qtune=qp -qsmp=omp -WF,-DIBM,-DBGQ
+oflags=-c $(xflags)
+dflags=-O0 -C -B -O0
+
+MOD_FILES := $(wildcard *.F90)
+OBJ_FILES := $(addprefix ,$(notdir $(MOD_FILES:.F90=.o)))
+
+PENCIL_INC=/home/p/pen/emberson/lib/p3dfft_2.5.1/include
+PENCIL_LIB=/home/p/pen/emberson/lib/p3dfft_2.5.1/lib
+
+all: Modules
+
+Modules: $(OBJ_FILES)
+	@echo "Finished making modules: $(value MOD_FILES)"
+
+include Dependencies
+
+%.o: %.F90 
+	$(fort) $(oflags) -o $@ $< -I$(PENCIL_INC) -L$(PENCIL_LIB) -lp3dfft -lfftw3f
+
+clean:
+	rm *.mod *.o *.x *~
