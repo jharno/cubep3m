@@ -1,4 +1,5 @@
-#include './preprocessor'
+#define FIELD 0
+!Field = 0 (dm), 1 (nu), 2 (rel)   
 program lin_velocity
   use Parameters
   use Variables
@@ -20,7 +21,13 @@ program lin_velocity
   character(len=*), parameter :: fdtf = dir//'transfer/ith2_mnu0p05_z0p05_tk.dat'
   character(len=*), parameter :: fvtf = dir//'transfer/ith2_mnu0p05_z0p05_v_tk.dat'
 
+#if FIELD == 0
+  character(len=*), parameter :: folder = 'dm'
+#elif FIELD == 1
   character(len=*), parameter :: folder = 'nu'
+#elif FIELD == 2
+  character(len=*), parameter :: folder = 'rel'
+#endif
 
   integer, parameter :: kcol = 1
   integer, parameter :: dcol = 2
@@ -53,7 +60,16 @@ program lin_velocity
   call cp_fftw(1)
 
   !call apply_tf(slab,dtf(kcol,:),(vtf(dcol,:)-vtf(ncol,:))/dtf(dcol,:))
-  call apply_tf(slab,dtf(kcol,:),(vtf(ncol,:))/dtf(dcol,:))   
+  !call apply_tf(slab,dtf(kcol,:),(vtf(ncol,:))/dtf(dcol,:))   
+
+#if FIELD==0
+  call apply_tf(slab,dtf(kcol,:),vtf(dcol,:)/dtf(dcol,:))
+#elif FIELD==1
+  call apply_tf(slab,dtf(kcol,:),(vtf(ncol,:))/dtf(dcol,:))
+#elif FIELD==2
+  call apply_tf(slab,dtf(kcol,:),(vtf(dcol,:)-vtf(ncol,:))/dtf(dcol,:))
+#endif
+
 #ifdef DEBUG
   if (rank==0) write(*,*) slab(1:2,1:2,1:2)
   do k=1,size(slab,dim=3)
