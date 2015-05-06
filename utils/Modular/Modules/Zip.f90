@@ -22,6 +22,7 @@ contains
 
     !MPI variables
     real :: locmpi, glompi, mp, ntot
+    real(8) :: lr8, gr8
 
     equivalence(i1,i4)
 
@@ -86,10 +87,15 @@ contains
     if (rank.eq.0) write(*,*) '-->Min value of cube = ', glompi
 #endif
 
-    locmpi = sum(grid)
-    call mpi_allreduce(locmpi,glompi,1,mpi_real,mpi_sum,mpi_comm_world,ierr)
+!    locmpi = sum(grid)
+!    call mpi_allreduce(locmpi,glompi,1,mpi_real,mpi_sum,mpi_comm_world,ierr)
+!    if (ierr/=mpi_success) call mpi_abort(mpi_comm_world, ierr, ierr)
+!    ntot = glompi
+
+    lr8 = sum(grid*1.d0)
+    call mpi_allreduce(lr8,gr8,1,mpi_real8,mpi_sum,mpi_comm_world,ierr)
     if (ierr/=mpi_success) call mpi_abort(mpi_comm_world, ierr, ierr)
-    ntot = glompi
+    ntot = real(gr8,kind=4)
 
     !Compute mass                                                                                                                                                                            
     mp = (1.0*Ncells)**3*Nmpi/Ntot

@@ -131,13 +131,15 @@ contains
 !    if (ierr/=mpi_success) call mpi_abort(mpi_comm_world, ierr, ierr)
 !    ntot = glompi
 
-    do k=1,Ncells
-       do j=1,Ncells
-          do i=1,Ncells
-             r8 = r8+grid(i,j,k)
-          end do
-       end do
-    end do
+!    do k=1,Ncells
+!       do j=1,Ncells
+!          do i=1,Ncells
+!             r8 = r8+grid(i,j,k)
+!          end do
+!       end do
+!    end do
+    
+    r8 = sum(grid*1.d0)
 
     call mpi_allreduce(r8,gr8,1,mpi_real8,mpi_sum,mpi_comm_world,ierr)
     if (ierr/=mpi_success) call mpi_abort(mpi_comm_world, ierr, ierr)
