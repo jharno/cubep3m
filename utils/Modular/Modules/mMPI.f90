@@ -11,7 +11,7 @@ module mMPI
 	integer :: slab_rank, mpi_comm_cart, cart_rank, rank, rank_io, ierr
 	character(len=8) :: rank_s
 
-	real :: time_start, time_end
+	real(8) :: time_start, time_end
 
 	public :: rank
 	public :: rank_s
@@ -106,7 +106,7 @@ endif
 
 	subroutine get_time(time)
 		implicit none
-		real :: time
+		real(8) :: time
 		time_end = mpi_wtime(ierr)
 		if (ierr /= mpi_success) call mpi_error_stop('Error in subroutine &
 			&get_time at call to mpi_wtime')
