@@ -113,6 +113,12 @@ endif
 		time = time_end-time_start
 	end subroutine get_time
 
+        subroutine one_write(str)
+                implicit none
+                character(len=*), intent(in) :: str
+                if (rank.eq.0) write(*,*) str
+        end subroutine one_write
+
 	subroutine end_mpi
 		implicit none
 		time_end = mpi_wtime(ierr)
