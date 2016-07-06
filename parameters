@@ -8,20 +8,10 @@ character(*), parameter :: scratch_path   = ic_path
 character(*), parameter :: output_path    = ic_path
 
 ! path to cubepm root directory 
-character(*), parameter :: cubepm_root    = '../'
-
-! path to shm directory
-character(*), parameter :: shm_path    = '/dev/shm/'
+character(*), parameter :: cubepm_root    = ic_path//'workdir/'
 
 ! nodes / dimension, total nodes = nodes_dim**3
-#ifdef SUBV
-  integer(4),   parameter :: nodes_dim_subv = 2 !! sub-volume
-  integer(4),   parameter :: nodes_dim        = nodes_dim_subv + 2
-  integer(4),   parameter :: nodes_dim_global = 24
-  integer(4),   parameter :: first_coord(3)      = (/0,0,0/)
-#else
-  integer(4),   parameter :: nodes_dim=24
-#endif
+integer(4),   parameter :: nodes_dim      = 2
 
 ! fine mesh tiles / node / dimension
 integer(4),   parameter :: tiles_node_dim = 6
@@ -31,7 +21,7 @@ integer(4),   parameter :: cores = 4
 integer(4),   parameter :: nested_threads = 6
 
 ! density buffer fraction (1.0 == no buffer, 2.0 == 2x avg density, etc)
-real(4), parameter :: density_buffer = 0.3 !1.7
+real(4), parameter :: density_buffer = 2.0 
 
 ! size of fine mesh tile in cells / dimension
 ! this must be set as:
@@ -42,11 +32,11 @@ real(4), parameter :: density_buffer = 0.3 !1.7
 integer(4),   parameter :: nf_tile        = 240
 
 ! boxsize of simulation in Mpc/h
-real(4),      parameter :: box            = nodes_dim*50
+real(4),      parameter :: box            = 1000.0 
 
 ! initial redshift
-real(4),      parameter :: z_i            = 100
-real(4),      parameter :: z_i_nu         = 5
+real(4),      parameter :: z_i            = 100.0
+real(4),      parameter :: z_i_nu         = 5.0
 
 ! neutrino parameters
 real(4),      parameter :: H0             = 67.
