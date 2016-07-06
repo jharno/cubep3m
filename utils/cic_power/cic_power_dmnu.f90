@@ -31,6 +31,7 @@
 !!   -DHALOMASS: Use individual halo masses in computation of halo density fields (otherwise all halos are treated as single particles)
 !!   -DSPLITHALOS: Splits halos according to some mass condition and computes the cross spectrum between them.
 !!                 Only works if -DGROUPS is used.
+!!   -DEID: Uses energy IDs to reconstruct power spectra for arbitrary neutrino mass.
 !!   -DPLPLOT: Plots power spectra at end.
 !!   -DDEBUG: Output useful debugging information.
 
@@ -78,6 +79,30 @@ program cic_power_dmnu
 #else
   integer, parameter :: numbins = 32 
 #endif
+#endif
+
+#ifdef SPLITHALOS
+  logical, parameter :: writeHaloFields = .true.
+  integer, parameter :: numHaloFields   = 4
+  real(4), dimension(numHaloFields,2) :: halorange
+#endif
+
+#ifdef EID
+  !! Neutrino masses to reconstruct from these neutrinos 
+  integer :: cur_nurec
+  integer, parameter :: num_eid_masses = 3
+  real, parameter, dimension(num_eid_masses) :: eid_masses = (/ 0.05, 0.1, 0.2 /) 
+  real :: mnu_rec
+
+  !! Location of CDF table
+  integer, parameter :: nv = 10000
+  character(*), parameter :: cdfTable = 'CDFTable.txt'
+  real(4), dimension(2,nv) :: cdf    !Col1 is v, col2 is cdf
+
+  !! Physical parameters required for mass reweighting
+  real(4), parameter :: kbT = 8.61733238e-5 * (4./11.)**(1./3.) * 2.725
+  real(4), parameter :: clight = 3.e5
+  real(4) :: scalefactor
 #endif
 
   !! internals
@@ -143,6 +168,12 @@ program cic_power_dmnu
   real, dimension(0:nc_node_dim+1,0:nc_node_dim+1,0:nc_node_dim+1) :: den 
   real, dimension(0:nc_node_dim+1,0:nc_node_dim+1) :: den_buf 
 
+#ifdef EID
+  !! Energy ID array for neutrinos only
+  integer(2), dimension(max_np) :: eid
+  integer(2), dimension(np_buffer) ::  eid_buf, send_eid_buf, recv_eid_buf
+#endif
+
   !! Power spectrum arrays
   real, dimension(3,nc) :: pkdm
   real, dimension(3,nc) :: poisson_dm, poisson_nu, poisson_h
@@ -179,6 +210,8 @@ program cic_power_dmnu
   integer(1) :: GID(max_np)
 #endif
 
+  logical :: cleardup
+
   !! For threading 
   integer :: kt
 #ifdef SLAB
@@ -211,6 +244,12 @@ program cic_power_dmnu
 #ifdef GROUPS
   common /gvar/ GID
 #endif
+#ifdef SPLITHALOS
+  common / shvar / halorange
+#endif
+#ifdef EID
+  common / evar / eid, eid_buf, send_eid_buf, recv_eid_buf
+#endif
 
 ! ---------------------------------------------------------------------------------------------------
 ! MAIN
@@ -236,6 +275,18 @@ program cic_power_dmnu
 #endif     
    
         call initvar
+
+#ifdef EID
+       !! Broadcast scale factor to all ranks
+       scalefactor = 1. / (1 + z_checkpoint(cur_checkpoint))
+       call mpi_bcast(scalefactor, 1, mpi_real, 0, mpi_comm_world, ierr)
+
+       !! Read velocity bins
+       call ReadCDFTable
+
+       !! Only used if writing density fields
+       cleardup = .false. 
+#endif
 
 #ifndef GROUPS 
         ! ---------------------------------------------------------------------------------------------------
@@ -271,6 +322,32 @@ program cic_power_dmnu
         call powerspectrum(slab,slab,pkdm)
 #endif
         if (rank == 0) call writepowerspectra(0)
+
+#ifdef EID
+        ! ---------------------------------------------------------------------------------------------------
+        ! RECONSTRUCTED NEUTRINO AUTO POWER
+        ! ---------------------------------------------------------------------------------------------------
+
+        do cur_nurec = 1, num_eid_masses
+            
+            !! Neutrino mass to reconstruct
+            mnu_rec = eid_masses(cur_nurec)
+
+#ifdef GROUPS
+            call darkmatter(100, 0, 0)
+            call swap_slab12
+            call darkmatter(100, 1, 0)
+            call powerspectrum(slab,slab2,pkdm)
+#else
+            call darkmatter(100)
+            call powerspectrum(slab,slab,pkdm)
+#endif
+
+            !! Write power spectra to file
+            if (rank == 0) call writepowerspectra(100)
+
+        enddo
+#endif
     
         ! ---------------------------------------------------------------------------------------------------
         ! DARK MATTER AUTO POWER
@@ -309,9 +386,21 @@ program cic_power_dmnu
         if (rank == 0) call writepowerspectra(2)
 
 #if defined(SPLITHALOS) && defined(GROUPS)
+        if (writeHaloFields) then
+            ! ---------------------------------------------------------------------------------------------------
+            ! WRITE OUT HALO DENSITY FIELDS FOR HALOS IN DIFFERENT MASS RANGES
+            ! ---------------------------------------------------------------------------------------------------
+            
+            call get_halo_mass_bins(numHaloFields) 
+            do kt = 1, numHaloFields 
+                call cic_halomass(kt)
+            enddo
+        endif
+
         ! ---------------------------------------------------------------------------------------------------
         ! HALO AUTO POWER BASED ON LOW AND HIGH MASS POPULATIONS
         ! ---------------------------------------------------------------------------------------------------
+
         call assign_groups(-1)
         call darkmatter(2, 0, -1)
         call swap_slab12
@@ -372,6 +461,18 @@ program cic_power_dmnu
         call powerspectrum(slab,slab2,pkdm)
         if (rank == 0) call writepowerspectra(5)
 
+
+#if defined(EID) && defined(write_den_eid) && defined(GROUPS)
+        ! ---------------------------------------------------------------------------------------------------
+        ! WRITE RECONSTRUCTED NEUTRINO FIELDS TO FILE 
+        ! ---------------------------------------------------------------------------------------------------
+        cleardup = .true.
+        do cur_nurec = 1, num_eid_masses
+            mnu_rec = eid_masses(cur_nurec)
+            call darkmatter(100, 0, 1)
+        enddo
+#endif
+
     enddo
 
     !! Output timing stats
@@ -408,11 +509,13 @@ contains
       write(*,*) 'mpirun nodes=',nodes_returned,'cic_pow nodes=',nodes 
       call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
+#ifdef SLAB
     if (mod(nc,nodes) /= 0) then
       write(*,*) 'cannot evenly decompose mesh into slabs'
       write(*,*) 'nc=',nc,'nodes=',nodes,'mod(nc,nodes) != 0'
       call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
+#endif
     call mpi_comm_rank(mpi_comm_world,rank,ierr)
     if (ierr /= mpi_success) call mpi_abort(mpi_comm_world,ierr,ierr)
 
@@ -529,6 +632,15 @@ contains
     equivalence(rhoc_i4, rhoc_i1)
 #endif
 
+#ifdef EID
+    character(len=200) :: f_eid
+    real(4), dimension(11) :: eid_header_dummy  
+    integer(4) :: np_local_eid
+    integer(2) :: eid_gar_2
+    integer(4) :: eid_gar_4
+    integer(4) :: fstate
+#endif
+
     !! these are unnecessary headers from the checkpoint
     real(4) :: a,t,tau,dt_f_acc,dt_c_acc,dt_pp_acc,mass_p
     integer(4) :: nts,sim_checkpoint,sim_projection,sim_halofind
@@ -574,6 +686,9 @@ contains
            check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'xv'// &
                    rank_string(1:len_trim(rank_string))//'_nu.dat'
         endif
+#endif
+#ifdef EID
+        f_eid = ic_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'PID'//rank_string(1:len_trim(rank_string))//'_nu.dat'
 #endif
     else if (command == 1) then
 #ifdef ZIPDM
@@ -622,6 +737,14 @@ contains
           call mpi_abort(mpi_comm_world,ierr,ierr)
         endif
 #endif
+#ifdef EID
+        open(40, file=f_eid, status="old", iostat=fstate, access="stream", buffered='yes') 
+        if (fstate /= 0) then
+            write(*,*) 'error opening eid checkpoint'
+            write(*,*) 'rank',rank,'file:', f_eid
+            call mpi_abort(mpi_comm_world,ierr,ierr)
+        endif
+#endif
     else if (command == 1) then
 #ifdef ZIPDM
         open(10, file=f_zip0, status="old", iostat=fstat0, access="stream", buffered='yes')
@@ -657,6 +780,13 @@ contains
         read(11) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint,sim_projection,sim_halofind,mass_p,v_r2i,shake_offset
 #else
         read(21) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint,sim_projection,sim_halofind,mass_p
+#endif
+#ifdef EID
+        read(40) np_local_eid, eid_header_dummy
+        if (np_local /= np_local_eid) then
+            write(*,*) "ERROR: np_local not consistent in EID file", rank, np_local, np_local_eid
+            call mpi_abort(mpi_comm_world,ierr,ierr)
+        endif
 #endif
     else if (command == 1) then
 #ifdef ZIPDM
@@ -731,6 +861,13 @@ contains
             read(21) xvp(:,j)
             read(21) garbage3
         enddo
+#endif
+
+#ifdef EID
+        do j = 1, np_local
+            read(40) eid_gar_2, eid(j), eid_gar_4 
+        enddo
+        close(40)
 #endif
 
     else if (command == 1) then !! Dark matter
@@ -1210,7 +1347,11 @@ end subroutine cp_fftw
     character*180 :: fn
     character*5  :: prefix
     character*7  :: z_write
+#ifdef EID
+    character(len=7) :: rec_write
+#endif
     integer :: command
+
     real time1,time2
     call cpu_time(time1)
 
@@ -1242,6 +1383,12 @@ end subroutine cp_fftw
         fn=output_path//z_write(1:len_trim(z_write))//prefix//'_dmha.dat'
     else if (command == -1) then !! Halo power spectra from two mass populations
         fn=output_path//z_write(1:len_trim(z_write))//prefix//'_hahapop.dat'
+#ifdef EID
+    else if (command == 100) then !! Reconstructed neutrino power spectra
+        write(rec_write, '(f7.3)') mnu_rec 
+        rec_write = adjustl(rec_write)
+        fn=output_path//z_write(1:len_trim(z_write))//prefix//'_nunu_rec_'//rec_write(1:len_trim(rec_write))//'.dat'
+#endif
     endif
 
     write(*,*) 'Writing ',fn
@@ -1320,6 +1467,9 @@ subroutine darkmatter(command)
     integer :: command
 #ifdef GROUPS
     integer(4) :: glook, canwrite
+#endif
+#ifdef EID
+    character(len=7) :: rec_write
 #endif
 
     real time1,time2
@@ -1420,6 +1570,53 @@ subroutine darkmatter(command)
 #endif
 #endif
 
+#ifdef write_den_eid
+    if (canwrite == 1) then
+        !! generate checkpoint names on each node
+        if (rank==0) then
+           z_write = z_checkpoint(cur_checkpoint)
+           print *,'Wrinting density to file for z = ',z_write
+        endif
+
+        call mpi_bcast(z_write,1,mpi_real,0,mpi_comm_world,ierr)
+
+        write(z_string,'(f7.3)') z_write
+        z_string=adjustl(z_string)
+        write(rank_string,'(i4)') rank
+        rank_string=adjustl(rank_string)
+
+        if (command == 100) then !! Reconstructed neutrinos
+            write(rec_write, '(f7.3)') mnu_rec
+            rec_write = adjustl(rec_write)
+
+            if (cleardup == .false.) then
+                if (glook == 0) then
+                check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'den'//&
+                           rank_string(1:len_trim(rank_string))//'_nurec_'//rec_write(1:len_trim(rec_write))//'_g0.bin'
+                else
+                check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'den'//&
+                           rank_string(1:len_trim(rank_string))//'_nurec_'//rec_write(1:len_trim(rec_write))//'_g1.bin'
+                endif
+            else
+                check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'den'//&
+                           rank_string(1:len_trim(rank_string))//'_nurec_'//rec_write(1:len_trim(rec_write))//'.bin'
+            endif
+
+            !! open and write density file   
+            open(unit=21,file=check_name,status="replace",iostat=fstat,access="stream")
+
+            if (fstat /= 0) then
+              write(*,*) 'error opening density file'
+              write(*,*) 'rank',rank,'file:',check_name
+              call mpi_abort(mpi_comm_world,ierr,ierr)
+            endif
+
+            write(21) cube
+
+        endif
+    endif
+#endif
+
     sum_dm_local=sum(cube) 
     call mpi_reduce(sum_dm_local,sum_dm,1,mpi_real,mpi_sum,0,mpi_comm_world,ierr)
     if (rank == 0) print *,'DM total mass=',sum_dm
@@ -1457,7 +1654,7 @@ subroutine darkmatter(command)
           write(*,*) 'DM max    ',dmaxt
           write(*,*) 'Delta sum ',real(dsum,8)
           write(*,*) 'Delta var ',real(dvar,8)
-      else if (command == 0) then
+      else if (command == 0 .or. command == 100) then
           write(*,*) 'NU min    ',dmint
           write(*,*) 'NU max    ',dmaxt
           write(*,*) 'Delta sum ',real(dsum,8)
@@ -1696,6 +1893,10 @@ subroutine pass_particles(command)
             if (command == 0) then
                 xp_buf(1:3, np_buf) = xvp(1:3, pp)
                 xvp(:, pp)        = xvp(:, np_local)
+#ifdef EID
+                eid_buf(np_buf)   = eid(pp)
+                eid(pp)           = eid(np_local)
+#endif
                 np_local          = np_local - 1
             else if (command == 1) then
                 xp_buf(1:3, np_buf) = xvp_dm(1:3, pp)
@@ -1742,6 +1943,12 @@ subroutine pass_particles(command)
         npo = npo + 1
         send_buf((npo-1)*nume+1:npo*nume) = xp_buf(:, pp)
         xp_buf(:, pp) = xp_buf(:, np_buf)
+#ifdef EID
+        if (command == 0) then
+            send_eid_buf(npo) = eid_buf(pp)
+            eid_buf(pp)       = eid_buf(np_buf)
+        endif
+#endif
         np_buf = np_buf - 1
         cycle
       endif
@@ -1768,9 +1975,23 @@ subroutine pass_particles(command)
     call mpi_wait(srequest, sstatus, sierr)
     call mpi_wait(rrequest, rstatus, rierr)
 
+#ifdef EID
+    if (command == 0) then
+        call mpi_isend(send_eid_buf, npo, mpi_short, cart_neighbor(6), tag, mpi_comm_world, srequest, sierr)
+        call mpi_irecv(recv_eid_buf, npi, mpi_short, cart_neighbor(5), tag, mpi_comm_world, rrequest, rierr)
+        call mpi_wait(srequest, sstatus, sierr)
+        call mpi_wait(rrequest, rstatus, rierr)
+    endif
+#endif
+
     do pp = 1, npi
       xp_buf(:, np_buf + pp) = recv_buf((pp-1)*nume+1:pp*nume)
       xp_buf(1, np_buf + pp) = max(xp_buf(1, np_buf+pp) - ub, lb)
+#ifdef EID
+      if (command == 0) then
+        eid_buf(np_buf + pp) = recv_eid_buf(pp)
+      endif
+#endif
     enddo
 
 #ifdef DEBUG
@@ -1791,6 +2012,10 @@ subroutine pass_particles(command)
         if (command == 0) then
             np_local = np_local + 1
             xvp(1:3, np_local) = x(1:3)
+#ifdef EID
+            eid(np_local)      = eid_buf(np_buf+pp)
+            eid_buf(np_buf+pp) = eid_buf(np_buf+npi)
+#endif
         else if (command == 1) then
             np_local_dm = np_local_dm + 1
             xvp_dm(1:3, np_local_dm) = x(1:3)
@@ -1828,6 +2053,12 @@ subroutine pass_particles(command)
         npo = npo + 1
         send_buf((npo-1)*nume+1:npo*nume) = xp_buf(:, pp)
         xp_buf(:, pp) = xp_buf(:, np_buf)
+#ifdef EID
+        if (command == 0) then
+            send_eid_buf(npo) = eid_buf(pp)
+            eid_buf(pp)       = eid_buf(np_buf)
+        endif
+#endif
         np_buf = np_buf - 1
         cycle
       endif
@@ -1847,9 +2078,23 @@ subroutine pass_particles(command)
     call mpi_wait(srequest, sstatus, sierr)
     call mpi_wait(rrequest, rstatus, rierr)
 
+#ifdef EID
+    if (command == 0) then
+        call mpi_isend(send_eid_buf, npo, mpi_short, cart_neighbor(5), tag, mpi_comm_world, srequest, sierr) 
+        call mpi_irecv(recv_eid_buf, npi, mpi_short, cart_neighbor(6), tag, mpi_comm_world, rrequest, rierr)
+        call mpi_wait(srequest, sstatus, sierr)
+        call mpi_wait(rrequest, rstatus, rierr)
+    endif
+#endif
+
     do pp = 1, npi
       xp_buf(:, np_buf+pp) = recv_buf((pp-1)*nume+1:pp*nume)
       xp_buf(1, np_buf+pp) = min(xp_buf(1,np_buf+pp) + ub, ub-eps)
+#ifdef EID
+      if (command == 0) then
+        eid_buf(np_buf+pp) = recv_eid_buf(pp)
+      endif
+#endif
     enddo
 
     pp = 1
@@ -1861,6 +2106,10 @@ subroutine pass_particles(command)
         if (command == 0) then
             np_local = np_local + 1
             xvp(1:3, np_local) = x(1:3)
+#ifdef EID
+            eid(np_local)      = eid_buf(np_buf+pp)
+            eid_buf(np_buf+pp) = eid_buf(np_buf+npi)
+#endif
         else if (command == 1) then
             np_local_dm = np_local_dm + 1
             xvp_dm(1:3, np_local_dm) = x(1:3)
@@ -1890,6 +2139,12 @@ subroutine pass_particles(command)
         npo = npo + 1
         send_buf((npo-1)*nume+1:npo*nume) = xp_buf(:, pp)
         xp_buf(:, pp) = xp_buf(:, np_buf)
+#ifdef EID
+        if (command == 0) then
+            send_eid_buf(npo) = eid_buf(pp)
+            eid_buf(pp)       = eid_buf(np_buf)
+        endif
+#endif
         np_buf = np_buf - 1
         cycle
       endif
@@ -1909,9 +2164,23 @@ subroutine pass_particles(command)
     call mpi_wait(srequest, sstatus, sierr)
     call mpi_wait(rrequest, rstatus, rierr)
 
+#ifdef EID
+    if (command == 0) then
+        call mpi_isend(send_eid_buf, npo, mpi_short, cart_neighbor(4), tag, mpi_comm_world, srequest, sierr)
+        call mpi_irecv(recv_eid_buf, npi, mpi_short, cart_neighbor(3), tag, mpi_comm_world, rrequest, rierr)
+        call mpi_wait(srequest, sstatus, sierr)
+        call mpi_wait(rrequest, rstatus, rierr)
+    endif
+#endif
+
     do pp = 1, npi
       xp_buf(:, np_buf+pp) = recv_buf((pp-1)*nume+1:pp*nume)
       xp_buf(2, np_buf+pp) = max(xp_buf(2, np_buf+pp)-ub, lb)
+#ifdef EID
+      if (command == 0) then
+        eid_buf(np_buf+pp) = recv_eid_buf(pp)
+      endif
+#endif
     enddo
 
     pp = 1
@@ -1923,6 +2192,10 @@ subroutine pass_particles(command)
         if (command == 0) then
             np_local = np_local + 1
             xvp(1:3, np_local) = x(1:3)
+#ifdef EID
+            eid(np_local)      = eid_buf(np_buf+pp)
+            eid_buf(np_buf+pp) = eid_buf(np_buf+npi)
+#endif
         else if (command == 1) then
             np_local_dm = np_local_dm + 1
             xvp_dm(1:3, np_local_dm) = x(1:3)
@@ -1952,6 +2225,12 @@ subroutine pass_particles(command)
         npo = npo+1
         send_buf((npo-1)*nume+1:npo*nume) = xp_buf(:, pp)
         xp_buf(:, pp) = xp_buf(:, np_buf)
+#ifdef EID
+        if (command == 0) then
+            send_eid_buf(npo) = eid_buf(pp)
+            eid_buf(pp)       = eid_buf(np_buf)
+        endif
+#endif
         np_buf = np_buf - 1
         cycle
       endif
@@ -1971,9 +2250,23 @@ subroutine pass_particles(command)
     call mpi_wait(srequest, sstatus, sierr)
     call mpi_wait(rrequest, rstatus, rierr)
 
+#ifdef EID
+    if (command == 0) then
+        call mpi_isend(send_eid_buf, npo, mpi_short, cart_neighbor(3), tag, mpi_comm_world, srequest, sierr)
+        call mpi_irecv(recv_eid_buf, npi, mpi_short, cart_neighbor(4), tag, mpi_comm_world, rrequest, rierr)
+        call mpi_wait(srequest, sstatus, sierr)
+        call mpi_wait(rrequest, rstatus, rierr)
+    endif
+#endif
+
     do pp = 1, npi
       xp_buf(:, np_buf+pp) = recv_buf((pp-1)*nume+1:pp*nume)
       xp_buf(2, np_buf+pp) = min(xp_buf(2, np_buf+pp)+ub, ub-eps)
+#ifdef EID
+      if (command == 0) then
+        eid_buf(np_buf+pp) = recv_eid_buf(pp)
+      endif
+#endif
     enddo
 
     pp = 1
@@ -1985,6 +2278,10 @@ subroutine pass_particles(command)
         if (command == 0) then
             np_local = np_local+1
             xvp(1:3, np_local) = x(1:3)
+#ifdef EID
+            eid(np_local)      = eid_buf(np_buf+pp)
+            eid_buf(np_buf+pp) = eid_buf(np_buf+npi)
+#endif
         else if (command == 1) then
             np_local_dm = np_local_dm+1
             xvp_dm(1:3, np_local_dm) = x(1:3)
@@ -2014,6 +2311,12 @@ subroutine pass_particles(command)
         npo = npo + 1
         send_buf((npo-1)*nume+1:npo*nume) = xp_buf(:, pp)
         xp_buf(:, pp) = xp_buf(:, np_buf)
+#ifdef EID
+        if (command == 0) then
+            send_eid_buf(npo) = eid_buf(pp)
+            eid_buf(pp)       = eid_buf(np_buf)
+        endif
+#endif
         np_buf = np_buf - 1
         cycle
       endif
@@ -2033,9 +2336,23 @@ subroutine pass_particles(command)
     call mpi_wait(srequest,sstatus,sierr)
     call mpi_wait(rrequest,rstatus,rierr)
 
+#ifdef EID
+    if (command == 0) then
+        call mpi_isend(send_eid_buf, npo, mpi_short, cart_neighbor(2), tag, mpi_comm_world, srequest, sierr)
+        call mpi_irecv(recv_eid_buf, npi, mpi_short, cart_neighbor(1), tag, mpi_comm_world, rrequest, rierr)
+        call mpi_wait(srequest,sstatus,sierr)
+        call mpi_wait(rrequest,rstatus,rierr)
+    endif
+#endif
+
     do pp=1,npi
       xp_buf(:,np_buf+pp)=recv_buf((pp-1)*nume+1:pp*nume)
       xp_buf(3,np_buf+pp)=max(xp_buf(3,np_buf+pp)-ub,lb)
+#ifdef EID
+      if (command == 0) then
+        eid_buf(np_buf+pp) = recv_eid_buf(pp)
+      endif
+#endif
     enddo
 
     pp=1
@@ -2047,6 +2364,10 @@ subroutine pass_particles(command)
         if (command == 0) then
             np_local=np_local+1
             xvp(1:3,np_local)=x(1:3)
+#ifdef EID
+            eid(np_local)      = eid_buf(np_buf+pp)
+            eid_buf(np_buf+pp) = eid_buf(np_buf+npi)
+#endif
         else if (command == 1) then
             np_local_dm=np_local_dm+1
             xvp_dm(1:3,np_local_dm)=x(1:3)
@@ -2076,6 +2397,12 @@ subroutine pass_particles(command)
         npo=npo+1
         send_buf((npo-1)*nume+1:npo*nume)=xp_buf(:,pp)
         xp_buf(:,pp)=xp_buf(:,np_buf)
+#ifdef EID
+        if (command == 0) then
+            send_eid_buf(npo) = eid_buf(pp)
+            eid_buf(pp)       = eid_buf(np_buf)
+        endif
+#endif
         np_buf=np_buf-1
         cycle
       endif
@@ -2095,9 +2422,23 @@ subroutine pass_particles(command)
     call mpi_wait(srequest,sstatus,sierr)
     call mpi_wait(rrequest,rstatus,rierr)
 
+#ifdef EID
+    if (command == 0) then
+        call mpi_isend(send_eid_buf, npo, mpi_short, cart_neighbor(1), tag, mpi_comm_world, srequest, sierr)
+        call mpi_irecv(recv_eid_buf, npi, mpi_short, cart_neighbor(2), tag, mpi_comm_world, rrequest, rierr)
+        call mpi_wait(srequest,sstatus,sierr)
+        call mpi_wait(rrequest,rstatus,rierr)
+    endif
+#endif
+
     do pp=1,npi
       xp_buf(:,np_buf+pp)=recv_buf((pp-1)*nume+1:pp*nume)
       xp_buf(3,np_buf+pp)=min(xp_buf(3,np_buf+pp)+ub,ub-eps)
+#ifdef EID
+      if (command == 0) then
+        eid_buf(np_buf+pp) = recv_eid_buf(pp)
+      endif
+#endif
     enddo
 
     pp=1
@@ -2109,6 +2450,10 @@ subroutine pass_particles(command)
         if (command == 0) then
             np_local=np_local+1
             xvp(1:3,np_local)=x(1:3)
+#ifdef EID
+            eid(np_local)      = eid_buf(np_buf+pp)
+            eid_buf(np_buf+pp) = eid_buf(np_buf+npi)
+#endif
         else if (command == 1) then
             np_local_dm=np_local_dm+1
             xvp_dm(1:3,np_local_dm)=x(1:3)
@@ -2259,6 +2604,105 @@ subroutine initialize_random_number
     return
 
 end subroutine initialize_random_number
+
+!------------------------------------------------------------!
+
+#if defined(SPLITHALOS) && defined(GROUPS)
+subroutine get_halo_mass_bins(nh)
+    !
+    ! Subroutine to find the mass ranges for each bin of halos that will
+    ! be written to file
+    !
+
+    implicit none
+    integer(4), intent(in) :: nh
+
+    real(4), allocatable :: mhalo_local(:), mhalo(:)
+    integer(4), allocatable :: isort(:)
+    integer(4) :: nn, np0
+    integer(4) :: dn 
+    integer(4) :: i, k, i1, i2
+    real(4) :: r
+
+    !! Initialize halorange array
+    halorange(:,:) = 0
+
+    !! Determine maximum number of halos on one node
+    call mpi_allreduce(np_local_h, np0, 1, mpi_integer, mpi_max, mpi_comm_world, ierr)
+
+    if (np0 > 0) then !! Only contiue if there are actually halos
+
+        !! Allocate halo mass arays
+        allocate(mhalo_local(np0))
+        allocate(mhalo(np0*nodes))
+        allocate(isort(np0*nodes))
+
+        !! Fill up local halo masses
+        mhalo_local(:) = -1.
+        do k = 1, np_local_h
+            mhalo_local(k) = xvmp_h(4,k)
+        enddo
+
+        !! Send maximum number of halos from each node
+        call mpi_gather(mhalo_local, np0, mpi_real, mhalo, np0, mpi_real, 0, mpi_comm_world, ierr)
+
+        if (rank == 0) then
+
+            !! Move invalid entries to the end of the array
+            nn = np0*nodes
+            k  = 1
+            do
+                if (k > nn) exit
+                if (mhalo(k) <= 0.) then
+                    r = mhalo(nn)
+                    mhalo(nn) = mhalo(k)
+                    mhalo(k)  = r
+                    nn = nn - 1
+                else
+                    k = k + 1
+                endif
+
+            enddo
+
+            !! Sort the array in ascending order
+            isort(1:nn) = (/ (k, k=1, nn) /)
+            call indexedsort(nn, mhalo, isort)
+
+            !! Get deltan for the bins
+            dn = nn/nh
+
+            !! Fill in the bins
+            do i = 1, nh
+                i1 = 1 + (i-1)*dn
+                i2 = i1 + dn - 1 
+                halorange(i,1) = mhalo(i1)
+                halorange(i,2) = mhalo(i2)
+            enddo
+            halorange(1,1) = 0.
+
+        endif
+
+        !! Broadcast bins to all nodes
+        call mpi_bcast(halorange, 2*nh, mpi_real, 0, mpi_comm_world, ierr)
+
+        !! Print some info to screen
+        if (rank == 0) then
+            do i = 1, nh    
+                write(*,*) "Halo bin: ", i, halorange(i,:)
+            enddo 
+        endif
+
+        !! Clear up memory
+        deallocate(mhalo_local)
+        deallocate(mhalo)
+        deallocate(isort)
+
+    endif
+
+    return
+
+end subroutine get_halo_mass_bins
+#endif
 
 !------------------------------------------------------------!
 
@@ -2470,6 +2914,142 @@ end subroutine sum_halo_masses_groups
 
 !------------------------------------------------------------!
 
+#if defined(SPLITHALOS) && defined(GROUPS)
+subroutine cic_halomass(nh)
+    !
+    ! Makes a halo density field for a given mass range and then write to file
+    !
+
+    integer(4), intent(in) :: nh
+    integer :: i,i1,i2,j1,j2,k1,k2,fstat
+    real    :: x,y,z,dx1,dx2,dy1,dy2,dz1,dz2
+    real(4) :: m1, m2, mh, mp, z_write
+    integer(8) :: nn_loc, nn_global
+    character(len=2) :: i_string
+    character(len=7) :: z_string
+    character(len=4) :: rank_string
+    character(len=200) :: check_name
+
+    m1 = halorange(nh,1) 
+    m2 = halorange(nh,2)
+
+    if (m2 > m1 .and. np_local_h > 0) then !! Don't do anything if there are no halos
+
+        !! Initialize density field
+        do i = 0, nc_node_dim+1
+           den(:,:,i) = 0.
+        enddo
+
+        !
+        ! Put halos on the mesh
+        !
+
+        nn_loc = 0
+
+        do i = 1, np_local_h
+
+            x  = xvmp_h(1,i)-0.5
+            y  = xvmp_h(2,i)-0.5
+            z  = xvmp_h(3,i)-0.5
+            mh = xvmp_h(4,i)
+
+            if (mh > m1 .and. mh <= m2) then
+
+               i1=floor(x)+1
+               i2=i1+1
+               dx1=i1-x
+               dx2=1-dx1
+               j1=floor(y)+1
+               j2=j1+1
+               dy1=j1-y
+               dy2=1-dy1
+               k1=floor(z)+1
+               k2=k1+1
+               dz1=k1-z
+               dz2=1-dz1
+
+               if (i1 < 0 .or. i2 > nc_node_dim+1 .or. j1 < 0 .or. &
+                   j2 > nc_node_dim+1 .or. k1 < 0 .or. k2 > nc_node_dim+1) then
+                 print *,'particle out of bounds',i1,i2,j1,j2,k1,k2,nc_node_dim
+               endif
+
+               den(i1,j1,k1)=den(i1,j1,k1)+dx1*dy1*dz1
+               den(i2,j1,k1)=den(i2,j1,k1)+dx2*dy1*dz1
+               den(i1,j2,k1)=den(i1,j2,k1)+dx1*dy2*dz1
+               den(i2,j2,k1)=den(i2,j2,k1)+dx2*dy2*dz1
+               den(i1,j1,k2)=den(i1,j1,k2)+dx1*dy1*dz2
+               den(i2,j1,k2)=den(i2,j1,k2)+dx2*dy1*dz2
+               den(i1,j2,k2)=den(i1,j2,k2)+dx1*dy2*dz2
+               den(i2,j2,k2)=den(i2,j2,k2)+dx2*dy2*dz2
+
+               nn_loc = nn_loc + 1
+
+            endif
+
+        enddo
+
+        call mpi_allreduce(nn_loc, nn_global, 1, mpi_integer8, mpi_sum, mpi_comm_world, ierr)
+
+        !
+        ! Normalize the density field
+        !
+
+        mp = ncr**3 / nn_global
+
+        do i = 0, nc_node_dim+1 
+            do j1 = 0, nc_node_dim+1
+                den(:,j1,i) = mp*den(:,j1,i) 
+            enddo
+        enddo
+
+        if (rank == 0) write(*,*) "Done making density field ", m1, m2, nn_global, mp
+
+        !
+        ! Take care of boundaries
+        !
+
+        call mesh_buffer
+        cube = den(1:nc_node_dim,1:nc_node_dim,1:nc_node_dim)
+
+        !
+        ! Write to file
+        !
+
+        if (rank==0) then
+           z_write = z_checkpoint(cur_checkpoint)
+           print *,'Wrinting density to file for z = ',z_write
+        endif
+
+        call mpi_bcast(z_write,1,mpi_real,0,mpi_comm_world,ierr)
+
+        write(z_string,'(f7.3)') z_write
+        z_string=adjustl(z_string)
+        write(rank_string,'(i4)') rank
+        rank_string=adjustl(rank_string)
+        write(i_string, '(i2)') nh
+        i_string = adjustl(i_string) 
+
+        check_name=output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'den'//&
+               rank_string(1:len_trim(rank_string))//'_halo_'//i_string(1:len_trim(i_string))//'.bin'
+
+        !! open and write density file   
+        open(unit=21,file=check_name,status="replace",iostat=fstat,access="stream")
+
+        if (fstat /= 0) then
+          write(*,*) 'error opening density file'
+          write(*,*) 'rank',rank,'file:',check_name
+          call mpi_abort(mpi_comm_world,ierr,ierr)
+        endif
+
+        write(21) cube
+
+    endif
+
+end subroutine cic_halomass
+#endif
+
+!------------------------------------------------------------!
+
 #ifdef GROUPS
   subroutine cicmass(command, glook)
 #else
@@ -2479,6 +3059,9 @@ end subroutine sum_halo_masses_groups
     real :: mp
     integer :: i,i1,i2,j1,j2,k1,k2,np_total
     real    :: x,y,z,dx1,dx2,dy1,dy2,dz1,dz2,vf,v(3)
+#ifdef EID
+    real(8) :: mp_sum, mp_sum_global
+#endif
     integer :: command
 #ifdef GROUPS
     integer(4) :: glook
@@ -2499,6 +3082,10 @@ end subroutine sum_halo_masses_groups
         mp = (ncr/np)**3
 #endif
         np_total = np_local
+#ifdef EID
+    else if (command == 100) then
+        np_total = np_local
+#endif
     else
 #ifdef GROUPS
         mp = ncr**3 / mh_groups_h(glook)
@@ -2509,6 +3096,10 @@ end subroutine sum_halo_masses_groups
     endif 
 
     mh = 1. !! Halo masses (only changes when command==2 and -DHALOMASS)
+
+#ifdef EID
+    mp_sum = 0.
+#endif
 
     do i=1,np_total 
 #ifdef GROUPS
@@ -2523,6 +3114,15 @@ end subroutine sum_halo_masses_groups
          x=xvp_dm(1,i)-0.5
          y=xvp_dm(2,i)-0.5
          z=xvp_dm(3,i)-0.5
+#ifdef EID
+       else if (command == 100) then
+         x=xvp(1,i)-0.5
+         y=xvp(2,i)-0.5
+         z=xvp(3,i)-0.5
+         vf = NeutrinoVelocity(eid(i))
+         mp = MassAssignment(vf)
+         mp_sum = mp_sum + mp
+#endif
        else
          x=xvmp_h(1,i)-0.5
          y=xvmp_h(2,i)-0.5
@@ -2561,6 +3161,25 @@ end subroutine sum_halo_masses_groups
        den(i1,j2,k2)=den(i1,j2,k2)+dx1*dy2*dz2
        den(i2,j2,k2)=den(i2,j2,k2)+dx2*dy2*dz2
     enddo
+
+#ifdef EID
+    !
+    ! Renormalize den based on mass reassingmnets
+    !
+
+    if (command == 100) then
+
+        call mpi_allreduce(mp_sum, mp_sum_global, 1, mpi_double, mpi_sum, mpi_comm_world, ierr)
+        mp = real(ncr**3/mp_sum_global, kind=4)
+        do k1 = 0, nc_node_dim+1
+            do j1 = 0, nc_node_dim+1
+                do i1 = 0, nc_node_dim+1
+                    den(i1, j1, k1) = den(i1, j1, k1) * mp
+                enddo
+            enddo
+        enddo
+    endif
+#endif
 
     return
   end subroutine cicmass
@@ -2903,6 +3522,77 @@ subroutine swap_slab12
     !$omp end parallel do
 
 end subroutine swap_slab12
+
+!!------------------------------------------------------------------!!
+
+#ifdef EID
+subroutine ReadCDFTable
+
+    implicit none
+
+    integer :: k
+    real :: ffac
+
+    if (rank == 0) then
+
+        !! Read in the Table where the first column gives velocity (in non-standard units)
+        write(*,*) 'Reading ',cdfTable
+        open(42, file=cdfTable)
+        do k = 1, nv
+            read(42,*) cdf(1,k), cdf(2,k)
+        enddo
+        close(42)
+
+        !! Convert the velocity to km/s
+        ffac = 50.2476 / mass_neutrino / scalefactor 
+        write(*,*) "Converting to km/s with ffac = ", ffac
+        do k = 1, nv
+            cdf(1,k) = cdf(1,k) * ffac
+        enddo
+
+        !! Print some info to screen
+        write(*,*) "min/max velocities: ", cdf(1,1), cdf(1,nv)
+
+    endif
+
+    call mpi_bcast(cdf, 2*nv, mpi_real, 0, mpi_comm_world, ierr)
+
+end subroutine ReadCDFTable
+
+!!------------------------------------------------------------------!!
+
+real(4) function NeutrinoVelocity(ebin)
+
+    implicit none
+
+    integer(2) :: ebin
+
+    if (ebin < 1 .or. ebin > nv) then
+        write(*,*) "ERROR: ebin invalid ", ebin
+        call mpi_abort(mpi_comm_world, ierr, ierr)
+    endif
+
+    NeutrinoVelocity = cdf(1, ebin)
+
+end function NeutrinoVelocity
+
+!!------------------------------------------------------------------!!
+
+real(4) function MassAssignment(vel)
+
+    implicit none
+
+    real(4) :: vel
+    
+    real(4) :: bsim, brec
+
+    bsim = clight * kbT / scalefactor / mass_neutrino 
+    brec = clight * kbT / scalefactor / mnu_rec 
+
+    MassAssignment = (bsim/brec)**3 * ( (exp(vel/bsim)+1.) / (exp(vel/brec)+1.) )
+
+end function MassAssignment
+#endif
 
 !!------------------------------------------------------------------!!
 
