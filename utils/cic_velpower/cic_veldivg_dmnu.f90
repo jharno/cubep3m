@@ -32,6 +32,7 @@
 !!               by the mass density field. Only do this for neutrinos since they do not have many empty cells.
 !!   -DRECONSTRUCT_DIVG: Compute cross-correlations between divergence fields and reconstructed velocity fields
 !!                       using transfer functions. (Can use as a consistency check)
+!!   -DEID: Uses energy IDs to reconstruct power spectra for arbitrary neutrino mass.
 !!   -Dwrite_vel_groups: Writes velocity fields to binary files for different groups
 !!   -Dwrite_vel: Writes velocity fields to bianry files only if total population
 
@@ -92,11 +93,7 @@ program cic_crossvel
   real, parameter    :: npr=np
 
 #ifdef LOGBIN
-#ifdef TH2
-  integer, parameter :: numbins = 64
-#else
-  integer, parameter :: numbins = 32
-#endif
+  integer, parameter :: numbins = 32 
 #endif
 
   !! internals
@@ -128,6 +125,24 @@ program cic_crossvel
   integer(4), parameter :: max_np_dm = max_np / ratio_nudm_dim**3
   integer(4), parameter :: max_np_h = 1000000
 
+#ifdef EID
+  !! Neutrino masses to reconstruct from these neutrinos 
+  integer :: cur_nurec
+  integer, parameter :: num_eid_masses = 3
+  real, parameter, dimension(num_eid_masses) :: eid_masses = (/ 0.05, 0.1, 0.2 /)
+  real :: mnu_rec
+
+  !! Location of CDF table
+  integer, parameter :: nv = 10000
+  character(*), parameter :: cdfTable = 'CDFTable.txt'
+  real(4), dimension(2,nv) :: cdf    !Col1 is v, col2 is cdf
+
+  !! Physical parameters required for mass reweighting
+  real(4), parameter :: kbT = 8.61733238e-5 * (4./11.)**(1./3.) * 2.725
+  real(4), parameter :: clight = 3.e5
+  real(4) :: scalefactor
+#endif
+
   !! parallelization variables
   integer(4), dimension(6) :: cart_neighbor
   integer(4), dimension(3) :: slab_coord, cart_coords
@@ -150,8 +165,17 @@ program cic_crossvel
   real, dimension(6,np_buffer) :: xp_buf
   real, dimension(6*np_buffer) :: send_buf, recv_buf
 
+#ifdef EID
+  !! Energy ID array for neutrinos only
+  integer(2), dimension(max_np) :: eid
+  integer(2), dimension(np_buffer) ::  eid_buf, send_eid_buf, recv_eid_buf
+#endif
+
   !! Power spectrum arrays
   real, dimension(3, 3, nc, 6) :: pkvel, pkcurl
+#ifdef EID
+  real, dimension(3, 3, nc) :: pkrecvel
+#endif
   real, dimension(3, nc, 6) :: pkdivg
   real, dimension(4, 3, nc, 2) :: pkrec
   real, dimension(3, 3, nc, 3, 2) :: pkrec2
@@ -279,6 +303,9 @@ program cic_crossvel
 #ifdef MOMENTUM
   common /mvar/ velden4
 #endif
+#ifdef EID
+  common / evar / eid, eid_buf, send_eid_buf, recv_eid_buf
+#endif
 
 ! -------------------------------------------------------------------------------------------------------
 ! MAIN
@@ -310,6 +337,16 @@ program cic_crossvel
     call initvar
     call init_cell_search(0)
     call init_cell_search(2)
+
+#ifdef EID
+    ! --------------------------------------------------------------------------------
+    ! Read velocity bins for neutrino mass reconstructions
+    ! --------------------------------------------------------------------------------
+
+    scalefactor = 1. / (1 + z_checkpoint(cur_checkpoint))
+    call mpi_bcast(scalefactor, 1, mpi_real, 0, mpi_comm_world, ierr)
+    call ReadCDFTable
+#endif
 
     ! --------------------------------------------------------------------------------
     ! Read, pass, and sort neutrino particles into two separate groups
@@ -519,6 +556,38 @@ program cic_crossvel
         endif
     endif
 
+#if defined(EID) && defined(MOMENTUM)
+
+    ! --------------------------------------------------------------------------------
+    ! RECONSTRUCTED NEUTRINOS
+    ! -------------------------------------------------------------------------------- 
+
+    do cur_nurec = 1, num_eid_masses
+
+        !! Neutrino mass to reconstruct
+        mnu_rec = eid_masses(cur_nurec)
+
+        do cur_dimension = 1, 3 !! Each x, y, z dimension
+    
+            if (rank == 0) write(*,*) "Computing reconstructed neutrino total velocity for dim = ", cur_dimension, mnu_rec
+            call velocity_density(cur_dimension, 100, g0, N_closest_nu)
+            call darkmatter(0)
+            call swap_slab12(0)
+            call velocity_density(cur_dimension, 100, g1, N_closest_nu)
+            call darkmatter(0)
+            call powerspectrum(slab, slab2, pkrecvel(cur_dimension,:,:), 0)
+            if (rank == 0) write(*,*)
+
+        enddo
+
+        if (rank == 0) then
+            call writepowerspectra(0, 100)
+        endif
+
+    enddo
+
+#endif
+
     ! --------------------------------------------------------------------------------
     ! Compute the power spectrum of the divergence component of velocity for each of 
     ! the three fields as well as the various relative velocity fields. Again we use
@@ -678,6 +747,39 @@ program cic_crossvel
         if (rank == 0) call writepowerspectra(1, 6)
         if (rank == 0) write(*,*)
     endif
+
+#if defined(EID) && defined(MOMENTUM)
+
+    ! --------------------------------------------------------------------------------
+    ! RECONSTRUCTED NEUTRINOS
+    ! -------------------------------------------------------------------------------- 
+
+    do cur_nurec = 1, num_eid_masses
+
+        !! Neutrino mass to reconstruct
+        mnu_rec = eid_masses(cur_nurec)
+
+        if (rank == 0) write(*,*) "Computing reconstructed neutrino velocity divergence", mnu_rec
+        do cur_dimension = 1, 3
+            call velocity_density(cur_dimension, 100, g0, N_closest_nu)
+            call pass_veldensity
+            call velocity_divergence
+        enddo
+        call darkmatter(1)
+        call swap_slab12(0)
+        do cur_dimension = 1, 3
+            call velocity_density(cur_dimension, 100, g1, N_closest_nu)
+            call pass_veldensity
+            call velocity_divergence
+        enddo
+        call darkmatter(1)
+        call powerspectrum(slab, slab2, pkrecvel(1,:,:), 1)
+        if (rank == 0) call writepowerspectra(1, 100)
+        if (rank == 0) write(*,*)
+
+    enddo
+
+#endif
 
 #ifdef CURL
     ! --------------------------------------------------------------------------------
@@ -948,6 +1050,19 @@ program cic_crossvel
      call order_xvp_ll(1, g0)
      call order_xvp_ll(2, g0)
 
+#if defined(EID) && defined(MOMENTUM) && defined(write_vel)
+    ! ---------------------------------------------------------------------------------------------------
+    ! WRITE RECONSTRUCTED NEUTRINO FIELDS TO FILE 
+    ! ---------------------------------------------------------------------------------------------------
+    do cur_nurec = 1, num_eid_masses
+        mnu_rec = eid_masses(cur_nurec)
+        do cur_dimension = 1, 3
+            call velocity_density(cur_dimension, 100, g0, N_closest_nu)
+            call writevelocityfield_totpop(100, -1)
+        enddo
+    enddo
+#endif
+
     ! --------------------------------------------------------------------------------
     ! DARK MATTER VELOCITY FIELD
     ! --------------------------------------------------------------------------------
@@ -1062,6 +1177,54 @@ program cic_crossvel
         enddo
         write(*,*)
     endif
+
+#ifdef write_vel
+    if (.not. turn_off_halos) then
+        ! --------------------------------------------------------------------------------
+        ! Now write some of the halo fields to file
+        ! --------------------------------------------------------------------------------
+
+        ! --------------------------------------------------------------------------------
+        ! HALO VELOCITY FIELD
+        ! --------------------------------------------------------------------------------
+
+        if (rank == 0) write(*,*)
+        if (rank == 0) write(*,*) "Computing the halo velocity field..."
+
+        do cur_dimension = 1, 3 !! Each x, y, z dimension
+            call velocity_density(cur_dimension, 2, g0, N_closest_h)
+            call writevelocityfield_totpop(2, -1)
+        enddo
+
+        ! --------------------------------------------------------------------------------                                                            
+        ! NEUTRINO-HALO RELATIVE FIELD
+        ! --------------------------------------------------------------------------------
+
+        if (rank == 0) write(*,*)
+        if (rank == 0) write(*,*) "Computing the nu-halo velocity field..."
+        do cur_dimension = 1, 3 !! Each x, y, z dimension
+            call velocity_density(cur_dimension, 0, g0, N_closest_nu)
+            call swap_velden12(0)
+            call velocity_density(cur_dimension, 2, g0, N_closest_h)
+            call relative_velocity
+            call writevelocityfield_totpop(4, -1)
+        enddo
+
+        ! --------------------------------------------------------------------------------                                                            
+        ! DARK MATTER-HALO RELATIVE FIELD
+        ! --------------------------------------------------------------------------------
+
+        if (rank == 0) write(*,*)
+        if (rank == 0) write(*,*) "Computing the dm-halo velocity field..."
+        do cur_dimension = 1, 3 !! Each x, y, z dimension
+            call velocity_density(cur_dimension, 1, g0, N_closest_dm)
+            call swap_velden12(0)
+            call velocity_density(cur_dimension, 2, g0, N_closest_h)
+            call relative_velocity
+            call writevelocityfield_totpop(5, -1)
+        enddo
+    endif
+#endif
 
 #ifdef RECONSTRUCT_DIVG 
 
@@ -1189,12 +1352,14 @@ subroutine mpi_initialize
       write(*,*) 'mpirun nodes = ', nodes_returned, ' cic_pow nodes = ',nodes 
       call mpi_abort(mpi_comm_world, ierr, ierr)
     endif
-    
+
+#ifdef SLAB    
     if (mod(nc, nodes) /= 0) then
       write(*,*) 'cannot evenly decompose mesh into slabs'
       write(*,*) 'nc = ', nc, ' nodes = ', nodes, ' mod(nc, nodes) != 0'
       call mpi_abort(mpi_comm_world, ierr, ierr)
     endif
+#endif
 
     call mpi_comm_rank(mpi_comm_world, rank, ierr)
     if (ierr /= mpi_success) call mpi_abort(mpi_comm_world, ierr, ierr)
@@ -1544,6 +1709,15 @@ subroutine read_particles(command)
     equivalence(rhoc_i4, rhoc_i1)
 #endif
 
+#ifdef EID
+    character(len=200) :: f_eid
+    real(4), dimension(11) :: eid_header_dummy
+    integer(4) :: np_local_eid
+    integer(2) :: eid_gar_2
+    integer(4) :: eid_gar_4
+    integer(4) :: fstate
+#endif
+
     !! These are unnecessary headers from the checkpoint
     real(4) :: a, t, tau, dt_f_acc, dt_c_acc, dt_pp_acc, mass_p
     integer(4) :: nts, sim_checkpoint, sim_projection, sim_halofind
@@ -1594,6 +1768,9 @@ subroutine read_particles(command)
                    rank_string(1:len_trim(rank_string))//'_nu.dat'
         endif
 #endif
+#ifdef EID
+        f_eid = ic_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_string(1:len_trim(z_string))//'PID'//rank_string(1:len_trim(rank_string))//'_nu.dat'
+#endif
     else if (command == 1) then
 #ifdef ZIPDM
         if(z_write .eq. z_i) then
@@ -1641,6 +1818,14 @@ subroutine read_particles(command)
           call mpi_abort(mpi_comm_world,ierr,ierr)
         endif
 #endif
+#ifdef EID
+        open(40, file=f_eid, status="old", iostat=fstate, access="stream", buffered='yes')
+        if (fstate /= 0) then
+            write(*,*) 'error opening eid checkpoint'
+            write(*,*) 'rank',rank,'file:', f_eid
+            call mpi_abort(mpi_comm_world,ierr,ierr)
+        endif
+#endif
     else if (command == 1) then 
 #ifdef ZIPDM
         open(10, file=f_zip0, status="old", iostat=fstat0, access="stream", buffered='yes')
@@ -1676,6 +1861,13 @@ subroutine read_particles(command)
         read(11) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint,sim_projection,sim_halofind,mass_p,v_r2i,shake_offset
 #else
         read(21) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,sim_checkpoint,sim_projection,sim_halofind,mass_p
+#endif
+#ifdef EID
+        read(40) np_local_eid, eid_header_dummy
+        if (np_local /= np_local_eid) then
+            write(*,*) "ERROR: np_local not consistent in EID file", rank, np_local, np_local_eid
+            call mpi_abort(mpi_comm_world,ierr,ierr)
+        endif
 #endif
     else if (command == 1) then
 #ifdef ZIPDM
@@ -1750,6 +1942,13 @@ subroutine read_particles(command)
         do j=1, np_local
             read(21) xvp(:,j)
         enddo
+#endif
+
+#ifdef EID
+        do j = 1, np_local
+            read(40) eid_gar_2, eid(j), eid_gar_4
+        enddo
+        close(40)
 #endif
 
     else if (command == 1) then !! Dark matter
@@ -2244,6 +2443,9 @@ subroutine writepowerspectra(command, index)
     character*180 :: fn
     character*3  :: prefix
     character*7  :: z_write
+#ifdef EID
+    character(len=7) :: rec_write
+#endif
     real    :: vsim2phys, zcur
     integer(4) :: command, index
 
@@ -2276,6 +2478,12 @@ subroutine writepowerspectra(command, index)
         fn = '_nuha'//fn
     else if (index == 6) then
         fn = '_dmha'//fn
+#ifdef EID
+    else if (index == 100) then
+        write(rec_write, '(f7.3)') mnu_rec
+        rec_write = adjustl(rec_write)
+        fn = '_nunu_rec_'//rec_write(1:len_trim(rec_write))//fn
+#endif
     endif
 
     !! Determine whether we are dealing with total velocity or divergence
@@ -2320,22 +2528,51 @@ subroutine writepowerspectra(command, index)
 
     if (command == 0) then
 
-        !! Sum over all three dimensions 
-        do i = 1, nc
-            do j = 1, 3
-                pkdm(1, i) = pkdm(1, i) + pkvel(j, 1, i, index) 
-                pkdm(2, i) = pkdm(2, i) + pkvel(j, 2, i, index)
+#ifdef EID
+        if (index == 100) then
+
+            !! Sum over all three dimensions 
+            do i = 1, nc
+                do j = 1, 3
+                    pkdm(1, i) = pkdm(1, i) + pkrecvel(j, 1, i)
+                    pkdm(2, i) = pkdm(2, i) + pkrecvel(j, 2, i)
+                enddo
+                pkdm(3, i) = pkrecvel(1, 3, i)
             enddo
-            pkdm(3, i) = pkvel(1, 3, i, index)
-        enddo
+
+        else
+#endif
+            !! Sum over all three dimensions 
+            do i = 1, nc
+                do j = 1, 3
+                    pkdm(1, i) = pkdm(1, i) + pkvel(j, 1, i, index) 
+                    pkdm(2, i) = pkdm(2, i) + pkvel(j, 2, i, index)
+                enddo
+                pkdm(3, i) = pkvel(1, 3, i, index)
+            enddo
+#ifdef EID
+        endif
+#endif
 
     else if (command == 1) then
 
-        do i = 1, nc
-            pkdm(1, i) = pkdivg(1, i, index)
-            pkdm(2, i) = pkdivg(2, i, index)
-            pkdm(3, i) = pkdivg(3, i, index)
-        enddo
+#ifdef EID
+        if (index == 0) then
+            do i = 1, nc
+                pkdm(1, i) = pkrecvel(1, 1, i)
+                pkdm(2, i) = pkrecvel(1, 2, i)
+                pkdm(3, i) = pkrecvel(1, 3, i)
+            enddo
+        else
+#endif
+            do i = 1, nc
+                pkdm(1, i) = pkdivg(1, i, index)
+                pkdm(2, i) = pkdivg(2, i, index)
+                pkdm(3, i) = pkdivg(3, i, index)
+            enddo
+#ifdef EID
+        endif
+#endif
 
     else if (command == 2) then
 
@@ -2582,6 +2819,10 @@ subroutine pass_particles(command)
             if (command == 0) then
                 xp_buf(:, np_buf) = xvp(:, pp)
                 xvp(:, pp)        = xvp(:, np_local)
+#ifdef EID
+                eid_buf(np_buf)   = eid(pp)
+                eid(pp)           = eid(np_local)
+#endif
                 np_local          = np_local - 1
             else if (command == 1) then
                 xp_buf(:, np_buf) = xvp_dm(:, pp)
@@ -2628,6 +2869,12 @@ subroutine pass_particles(command)
         npo = npo + 1
         send_buf((npo-1)*6+1:npo*6) = xp_buf(:, pp)
         xp_buf(:, pp) = xp_buf(:, np_buf)
+#ifdef EID
+        if (command == 0) then
+            send_eid_buf(npo) = eid_buf(pp)
+            eid_buf(pp)       = eid_buf(np_buf)
+        endif
+#endif
         np_buf = np_buf - 1
         cycle
       endif
@@ -2654,9 +2901,23 @@ subroutine pass_particles(command)
     call mpi_wait(srequest, sstatus, sierr)
     call mpi_wait(rrequest, rstatus, rierr)
 
+#ifdef EID
+    if (command == 0) then
+        call mpi_isend(send_eid_buf, npo, mpi_short, cart_neighbor(6), tag, mpi_comm_world, srequest, sierr)
+        call mpi_irecv(recv_eid_buf, npi, mpi_short, cart_neighbor(5), tag, mpi_comm_world, rrequest, rierr)
+        call mpi_wait(srequest, sstatus, sierr)
+        call mpi_wait(rrequest, rstatus, rierr)
+    endif
+#endif
+
     do pp = 1, npi
       xp_buf(:, np_buf + pp) = recv_buf((pp-1)*6+1:pp*6)
       xp_buf(1, np_buf + pp) = max(xp_buf(1, np_buf+pp) - ub, lb)
+#ifdef EID
+      if (command == 0) then
+        eid_buf(np_buf + pp) = recv_eid_buf(pp)
+      endif
+#endif
     enddo
 
 #ifdef DEBUG
@@ -2677,6 +2938,10 @@ subroutine pass_particles(command)
         if (command == 0) then
             np_local = np_local + 1
             xvp(:, np_local) = x
+#ifdef EID
+            eid(np_local)      = eid_buf(np_buf+pp)
+            eid_buf(np_buf+pp) = eid_buf(np_buf+npi)
+#endif
         else if (command == 1) then
             np_local_dm = np_local_dm + 1
             xvp_dm(:, np_local_dm) = x
@@ -2714,6 +2979,12 @@ subroutine pass_particles(command)
         npo = npo + 1
         send_buf((npo-1)*6+1:npo*6) = xp_buf(:, pp)
         xp_buf(:, pp) = xp_buf(:, np_buf)
+#ifdef EID
+        if (command == 0) then
+            send_eid_buf(npo) = eid_buf(pp)
+            eid_buf(pp)       = eid_buf(np_buf)
+        endif
+#endif
         np_buf = np_buf - 1
         cycle 
       endif
@@ -2733,9 +3004,23 @@ subroutine pass_particles(command)
     call mpi_wait(srequest, sstatus, sierr)
     call mpi_wait(rrequest, rstatus, rierr)
 
+#ifdef EID
+    if (command == 0) then
+        call mpi_isend(send_eid_buf, npo, mpi_short, cart_neighbor(5), tag, mpi_comm_world, srequest, sierr)
+        call mpi_irecv(recv_eid_buf, npi, mpi_short, cart_neighbor(6), tag, mpi_comm_world, rrequest, rierr)
+        call mpi_wait(srequest, sstatus, sierr)
+        call mpi_wait(rrequest, rstatus, rierr)
+    endif
+#endif
+
     do pp = 1, npi
       xp_buf(:, np_buf+pp) = recv_buf((pp-1)*6+1:pp*6)
       xp_buf(1, np_buf+pp) = min(xp_buf(1,np_buf+pp) + ub, ub-eps)
+#ifdef EID
+      if (command == 0) then
+        eid_buf(np_buf+pp) = recv_eid_buf(pp)
+      endif
+#endif
     enddo
 
     pp = 1
@@ -2747,6 +3032,10 @@ subroutine pass_particles(command)
         if (command == 0) then
             np_local = np_local + 1
             xvp(:, np_local) = x
+#ifdef EID
+            eid(np_local)      = eid_buf(np_buf+pp)
+            eid_buf(np_buf+pp) = eid_buf(np_buf+npi)
+#endif
         else if (command == 1) then
             np_local_dm = np_local_dm + 1
             xvp_dm(:, np_local_dm) = x
@@ -2776,6 +3065,12 @@ subroutine pass_particles(command)
         npo = npo + 1
         send_buf((npo-1)*6+1:npo*6) = xp_buf(:, pp)
         xp_buf(:, pp) = xp_buf(:, np_buf)
+#ifdef EID
+        if (command == 0) then
+            send_eid_buf(npo) = eid_buf(pp)
+            eid_buf(pp)       = eid_buf(np_buf)
+        endif
+#endif
         np_buf = np_buf - 1
         cycle 
       endif
@@ -2795,9 +3090,23 @@ subroutine pass_particles(command)
     call mpi_wait(srequest, sstatus, sierr)
     call mpi_wait(rrequest, rstatus, rierr)
 
+#ifdef EID
+    if (command == 0) then
+        call mpi_isend(send_eid_buf, npo, mpi_short, cart_neighbor(4), tag, mpi_comm_world, srequest, sierr)
+        call mpi_irecv(recv_eid_buf, npi, mpi_short, cart_neighbor(3), tag, mpi_comm_world, rrequest, rierr)
+        call mpi_wait(srequest, sstatus, sierr)
+        call mpi_wait(rrequest, rstatus, rierr)
+    endif
+#endif
+
     do pp = 1, npi
       xp_buf(:, np_buf+pp) = recv_buf((pp-1)*6+1:pp*6)
       xp_buf(2, np_buf+pp) = max(xp_buf(2, np_buf+pp)-ub, lb)
+#ifdef EID
+      if (command == 0) then
+        eid_buf(np_buf+pp) = recv_eid_buf(pp)
+      endif
+#endif
     enddo
 
     pp = 1
@@ -2809,6 +3118,10 @@ subroutine pass_particles(command)
         if (command == 0) then
             np_local = np_local + 1
             xvp(:, np_local) = x
+#ifdef EID
+            eid(np_local)      = eid_buf(np_buf+pp)
+            eid_buf(np_buf+pp) = eid_buf(np_buf+npi)
+#endif
         else if (command == 1) then
             np_local_dm = np_local_dm + 1
             xvp_dm(:, np_local_dm) = x
@@ -2838,6 +3151,12 @@ subroutine pass_particles(command)
         npo = npo+1
         send_buf((npo-1)*6+1:npo*6) = xp_buf(:, pp)
         xp_buf(:, pp) = xp_buf(:, np_buf)
+#ifdef EID
+        if (command == 0) then
+            send_eid_buf(npo) = eid_buf(pp)
+            eid_buf(pp)       = eid_buf(np_buf)
+        endif
+#endif
         np_buf = np_buf - 1
         cycle
       endif
@@ -2857,9 +3176,23 @@ subroutine pass_particles(command)
     call mpi_wait(srequest, sstatus, sierr)
     call mpi_wait(rrequest, rstatus, rierr)
 
+#ifdef EID
+    if (command == 0) then
+        call mpi_isend(send_eid_buf, npo, mpi_short, cart_neighbor(3), tag, mpi_comm_world, srequest, sierr)
+        call mpi_irecv(recv_eid_buf, npi, mpi_short, cart_neighbor(4), tag, mpi_comm_world, rrequest, rierr)
+        call mpi_wait(srequest, sstatus, sierr)
+        call mpi_wait(rrequest, rstatus, rierr)
+    endif
+#endif
+
     do pp = 1, npi
       xp_buf(:, np_buf+pp) = recv_buf((pp-1)*6+1:pp*6)
       xp_buf(2, np_buf+pp) = min(xp_buf(2, np_buf+pp)+ub, ub-eps)
+#ifdef EID
+      if (command == 0) then
+        eid_buf(np_buf+pp) = recv_eid_buf(pp)
+      endif
+#endif
     enddo
 
     pp = 1
@@ -2871,6 +3204,10 @@ subroutine pass_particles(command)
         if (command == 0) then
             np_local = np_local+1
             xvp(:, np_local) = x
+#ifdef EID
+            eid(np_local)      = eid_buf(np_buf+pp)
+            eid_buf(np_buf+pp) = eid_buf(np_buf+npi)
+#endif
         else if (command == 1) then
             np_local_dm = np_local_dm+1
             xvp_dm(:, np_local_dm) = x
@@ -2900,6 +3237,12 @@ subroutine pass_particles(command)
         npo = npo + 1
         send_buf((npo-1)*6+1:npo*6) = xp_buf(:, pp)
         xp_buf(:, pp) = xp_buf(:, np_buf)
+#ifdef EID
+        if (command == 0) then
+            send_eid_buf(npo) = eid_buf(pp)
+            eid_buf(pp)       = eid_buf(np_buf)
+        endif
+#endif
         np_buf = np_buf - 1
         cycle 
       endif
@@ -2919,9 +3262,23 @@ subroutine pass_particles(command)
     call mpi_wait(srequest,sstatus,sierr)
     call mpi_wait(rrequest,rstatus,rierr)
 
+#ifdef EID
+    if (command == 0) then
+        call mpi_isend(send_eid_buf, npo, mpi_short, cart_neighbor(2), tag, mpi_comm_world, srequest, sierr)
+        call mpi_irecv(recv_eid_buf, npi, mpi_short, cart_neighbor(1), tag, mpi_comm_world, rrequest, rierr)
+        call mpi_wait(srequest,sstatus,sierr)
+        call mpi_wait(rrequest,rstatus,rierr)
+    endif
+#endif
+
     do pp=1,npi
       xp_buf(:,np_buf+pp)=recv_buf((pp-1)*6+1:pp*6)
       xp_buf(3,np_buf+pp)=max(xp_buf(3,np_buf+pp)-ub,lb)
+#ifdef EID
+      if (command == 0) then
+        eid_buf(np_buf+pp) = recv_eid_buf(pp)
+      endif
+#endif
     enddo
 
     pp=1
@@ -2933,6 +3290,10 @@ subroutine pass_particles(command)
         if (command == 0) then
             np_local=np_local+1
             xvp(:,np_local)=x
+#ifdef EID
+            eid(np_local)      = eid_buf(np_buf+pp)
+            eid_buf(np_buf+pp) = eid_buf(np_buf+npi)
+#endif
         else if (command == 1) then
             np_local_dm=np_local_dm+1
             xvp_dm(:,np_local_dm)=x
@@ -2962,6 +3323,12 @@ subroutine pass_particles(command)
         npo=npo+1
         send_buf((npo-1)*6+1:npo*6)=xp_buf(:,pp)
         xp_buf(:,pp)=xp_buf(:,np_buf)
+#ifdef EID
+        if (command == 0) then
+            send_eid_buf(npo) = eid_buf(pp)
+            eid_buf(pp)       = eid_buf(np_buf)
+        endif
+#endif
         np_buf=np_buf-1
         cycle
       endif
@@ -2981,9 +3348,23 @@ subroutine pass_particles(command)
     call mpi_wait(srequest,sstatus,sierr)
     call mpi_wait(rrequest,rstatus,rierr)
 
+#ifdef EID
+    if (command == 0) then
+        call mpi_isend(send_eid_buf, npo, mpi_short, cart_neighbor(1), tag, mpi_comm_world, srequest, sierr)
+        call mpi_irecv(recv_eid_buf, npi, mpi_short, cart_neighbor(2), tag, mpi_comm_world, rrequest, rierr)
+        call mpi_wait(srequest,sstatus,sierr)
+        call mpi_wait(rrequest,rstatus,rierr)
+    endif
+#endif
+
     do pp=1,npi
       xp_buf(:,np_buf+pp)=recv_buf((pp-1)*6+1:pp*6)
       xp_buf(3,np_buf+pp)=min(xp_buf(3,np_buf+pp)+ub,ub-eps)
+#ifdef EID
+      if (command == 0) then
+        eid_buf(np_buf+pp) = recv_eid_buf(pp)
+      endif
+#endif
     enddo
 
     pp=1
@@ -2995,6 +3376,10 @@ subroutine pass_particles(command)
         if (command == 0) then
             np_local=np_local+1
             xvp(:,np_local)=x
+#ifdef EID
+            eid(np_local)      = eid_buf(np_buf+pp)
+            eid_buf(np_buf+pp) = eid_buf(np_buf+npi)
+#endif
         else if (command == 1) then
             np_local_dm=np_local_dm+1
             xvp_dm(:,np_local_dm)=x
@@ -3145,6 +3530,9 @@ subroutine buffer_particles_groups(command, glook)
         if (xvp(1, pp) >= nc_node_dim-rnf_buf) then
            np_buf = np_buf + 1
            send_buf((np_buf-1)*6+1:np_buf*6) = xvp(:, pp)
+#ifdef EID
+           send_eid_buf(np_buf) = eid(pp) 
+#endif
         endif
      enddo
   else if (command == 1) then
@@ -3198,6 +3586,15 @@ subroutine buffer_particles_groups(command, glook)
   call mpi_wait(srequest, sstatus, sierr)
   call mpi_wait(rrequest, rstatus, rierr)
 
+#ifdef EID
+  if (command == 0) then
+      call mpi_isend(send_eid_buf, np_buf, mpi_short, cart_neighbor(6), tag, mpi_comm_world, srequest, sierr)
+      call mpi_irecv(recv_eid_buf, nppx, mpi_short, cart_neighbor(5), tag, mpi_comm_world, rrequest, rierr)
+      call mpi_wait(srequest, sstatus, sierr)
+      call mpi_wait(rrequest, rstatus, rierr)
+  endif
+#endif
+
   !! Start filling in buffer particles at pp_down+1
   if (glook == g0) then
      if (command == 0) then
@@ -3222,6 +3619,9 @@ subroutine buffer_particles_groups(command, glook)
      do pp = 1, nppx
         xvp(:, pp_down+pp) = recv_buf((pp-1)*6+1:(pp-1)*6+6)
         xvp(1, pp_down+pp) = max(xvp(1,pp_down+pp)-nc_node_dim, -rnf_buf)
+#ifdef EID
+        eid(pp_down+pp) = recv_eid_buf(pp)
+#endif
      enddo
   else if (command == 1) then
      do pp = 1, nppx
@@ -3282,6 +3682,9 @@ subroutine buffer_particles_groups(command, glook)
         if (xvp(1, pp) < rnf_buf) then
            np_buf = np_buf + 1
            send_buf((np_buf-1)*6+1:np_buf*6) = xvp(:, pp)
+#ifdef EID
+           send_eid_buf(np_buf) = eid(pp)
+#endif
         endif
      enddo
   else if (command == 1) then
@@ -3335,6 +3738,15 @@ subroutine buffer_particles_groups(command, glook)
   call mpi_wait(srequest, sstatus, sierr)
   call mpi_wait(rrequest, rstatus, rierr)
 
+#ifdef EID
+  if (command == 0) then
+      call mpi_isend(send_eid_buf, np_buf, mpi_short, cart_neighbor(5), tag, mpi_comm_world, srequest, sierr)
+      call mpi_irecv(recv_eid_buf, npmx, mpi_short, cart_neighbor(6), tag, mpi_comm_world, rrequest, rierr)
+      call mpi_wait(srequest, sstatus, sierr)
+      call mpi_wait(rrequest, rstatus, rierr)
+  endif
+#endif
+
   !! Start filling in buffer particles at pp_down+1
   if (glook == g0) then
      if (command == 0) then
@@ -3358,6 +3770,9 @@ subroutine buffer_particles_groups(command, glook)
   if (command == 0) then
      do pp = 1, npmx
         xvp(:, pp_down+pp) = recv_buf((pp-1)*6+1:(pp-1)*6+6)
+#ifdef EID
+        eid(pp_down+pp) = recv_eid_buf(pp)
+#endif
         if (abs(xvp(1, pp_down+pp)) .lt. eps) then
            if(xvp(1, pp_down+pp) < 0.) then
               xvp(1, pp_down+pp) = -eps
@@ -3441,6 +3856,9 @@ subroutine buffer_particles_groups(command, glook)
         if (xvp(2, pp) >= nc_node_dim-rnf_buf) then
            np_buf = np_buf + 1
            send_buf((np_buf-1)*6+1:np_buf*6) = xvp(:, pp)
+#ifdef EID
+           send_eid_buf(np_buf) = eid(pp)
+#endif
         endif
      enddo
   else if (command == 1) then
@@ -3494,6 +3912,15 @@ subroutine buffer_particles_groups(command, glook)
   call mpi_wait(srequest, sstatus, sierr)
   call mpi_wait(rrequest, rstatus, rierr)
 
+#ifdef EID
+  if (command == 0) then
+      call mpi_isend(send_eid_buf, np_buf, mpi_short, cart_neighbor(4), tag, mpi_comm_world, srequest, sierr)
+      call mpi_irecv(recv_eid_buf, nppy, mpi_short, cart_neighbor(3), tag, mpi_comm_world, rrequest, rierr)
+      call mpi_wait(srequest, sstatus, sierr)
+      call mpi_wait(rrequest, rstatus, rierr)
+  endif
+#endif
+
   if (glook == g0) then
      if (command == 0) then
         pp_down = np_groups(g0) + np_buf_groups(g0)
@@ -3517,6 +3944,9 @@ subroutine buffer_particles_groups(command, glook)
      do pp = 1, nppy
         xvp(:, pp_down+pp) = recv_buf((pp-1)*6+1:(pp-1)*6+6)
         xvp(2, pp_down+pp) = max(xvp(2,pp_down+pp)-nc_node_dim, -rnf_buf)
+#ifdef EID
+        eid(pp_down+pp) = recv_eid_buf(pp)
+#endif
      enddo
   else if (command == 1) then
      do pp = 1, nppy
@@ -3577,6 +4007,9 @@ subroutine buffer_particles_groups(command, glook)
         if (xvp(2, pp) < rnf_buf) then
            np_buf = np_buf + 1
            send_buf((np_buf-1)*6+1:np_buf*6) = xvp(:, pp)
+#ifdef EID
+           send_eid_buf(np_buf) = eid(pp)
+#endif
         endif
      enddo
   else if (command == 1) then
@@ -3630,6 +4063,15 @@ subroutine buffer_particles_groups(command, glook)
   call mpi_wait(srequest, sstatus, sierr)
   call mpi_wait(rrequest, rstatus, rierr)
 
+#ifdef EID
+  if (command == 0) then
+      call mpi_isend(send_eid_buf, np_buf, mpi_short, cart_neighbor(3), tag, mpi_comm_world, srequest, sierr)
+      call mpi_irecv(recv_eid_buf, npmy, mpi_short, cart_neighbor(4), tag, mpi_comm_world, rrequest, rierr)
+      call mpi_wait(srequest, sstatus, sierr)
+      call mpi_wait(rrequest, rstatus, rierr)
+  endif
+#endif
+
   if (glook == g0) then
      if (command == 0) then
         pp_down = np_groups(g0) + np_buf_groups(g0)
@@ -3652,6 +4094,9 @@ subroutine buffer_particles_groups(command, glook)
   if (command == 0) then
      do pp = 1, npmy
         xvp(:, pp_down+pp) = recv_buf((pp-1)*6+1:(pp-1)*6+6)
+#ifdef EID
+        eid(pp_down+pp) = recv_eid_buf(pp)
+#endif
         if (abs(xvp(2, pp_down+pp)) .lt. eps) then
            if(xvp(2, pp_down+pp) < 0.) then
               xvp(2, pp_down+pp) = -eps
@@ -3735,6 +4180,9 @@ subroutine buffer_particles_groups(command, glook)
         if (xvp(3, pp) >= nc_node_dim-rnf_buf) then
            np_buf = np_buf + 1
            send_buf((np_buf-1)*6+1:np_buf*6) = xvp(:, pp)
+#ifdef EID
+           send_eid_buf(np_buf) = eid(pp)
+#endif
         endif
      enddo
   else if (command == 1) then
@@ -3788,6 +4236,15 @@ subroutine buffer_particles_groups(command, glook)
   call mpi_wait(srequest, sstatus, sierr)
   call mpi_wait(rrequest, rstatus, rierr)
 
+#ifdef EID
+  if (command == 0) then
+      call mpi_isend(send_eid_buf, np_buf, mpi_short, cart_neighbor(2), tag, mpi_comm_world, srequest, sierr)
+      call mpi_irecv(recv_eid_buf, nppz, mpi_short, cart_neighbor(1), tag, mpi_comm_world, rrequest, rierr)
+      call mpi_wait(srequest, sstatus, sierr)
+      call mpi_wait(rrequest, rstatus, rierr)
+  endif
+#endif
+
   if (glook == g0) then
      if (command == 0) then
         pp_down = np_groups(g0) + np_buf_groups(g0)
@@ -3811,6 +4268,9 @@ subroutine buffer_particles_groups(command, glook)
      do pp = 1, nppz
         xvp(:, pp_down+pp) = recv_buf((pp-1)*6+1:(pp-1)*6+6)
         xvp(3, pp_down+pp) = max(xvp(3,pp_down+pp)-nc_node_dim, -rnf_buf)
+#ifdef EID
+        eid(pp_down+pp) = recv_eid_buf(pp)
+#endif
      enddo
   else if (command == 1) then
      do pp = 1, nppz
@@ -3871,6 +4331,9 @@ subroutine buffer_particles_groups(command, glook)
         if (xvp(3, pp) < rnf_buf) then
            np_buf = np_buf + 1
            send_buf((np_buf-1)*6+1:np_buf*6) = xvp(:, pp)
+#ifdef EID
+           send_eid_buf(np_buf) = eid(pp)
+#endif
         endif
      enddo
   else if (command == 1) then
@@ -3924,6 +4387,15 @@ subroutine buffer_particles_groups(command, glook)
   call mpi_wait(srequest, sstatus, sierr)
   call mpi_wait(rrequest, rstatus, rierr)
 
+#ifdef EID
+  if (command == 0) then
+      call mpi_isend(send_eid_buf, np_buf, mpi_short, cart_neighbor(1), tag, mpi_comm_world, srequest, sierr)
+      call mpi_irecv(recv_eid_buf, npmz, mpi_short, cart_neighbor(2), tag, mpi_comm_world, rrequest, rierr)
+      call mpi_wait(srequest, sstatus, sierr)
+      call mpi_wait(rrequest, rstatus, rierr)
+  endif
+#endif
+
   if (glook == g0) then
      if (command == 0) then
         pp_down = np_groups(g0) + np_buf_groups(g0)
@@ -3946,6 +4418,9 @@ subroutine buffer_particles_groups(command, glook)
   if (command == 0) then
      do pp = 1, npmz
         xvp(:, pp_down+pp) = recv_buf((pp-1)*6+1:(pp-1)*6+6)
+#ifdef EID
+        eid(pp_down+pp) = recv_eid_buf(pp)
+#endif
         if (abs(xvp(3, pp_down+pp)) .lt. eps) then
            if(xvp(3, pp_down+pp) < 0.) then
               xvp(3, pp_down+pp) = -eps
@@ -4092,7 +4567,11 @@ subroutine velocity_density(cdim, command, glook, nfind)
   if (rank == 0) write(*,*) "Starting velocity_density c, g, n = ", command, glook, nfind
 
 #ifdef MOMENTUM
+#ifdef EID
+    if (command == 0 .or. command == 100) then !! NEUTRINOS
+#else
     if (command == 0) then !! NEUTRINOS 
+#endif
 
         call matter_density(command, glook)
         call momentum_density(command, cdim, glook)
@@ -5129,7 +5608,7 @@ subroutine writevelocityfield(command, glook)
              "vel"//dim_string//rank_string(1:len_trim(rank_string))//g_string//".bin"
     else if (command == 2) then
         fn = output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_write(1:len_trim(z_write))//&
-             "vel"//dim_string//rank_string(1:len_trim(rank_string))//"_halo"//g_string//".bin"
+             "vel"//dim_string//rank_string(1:len_trim(rank_string))//"_ha"//g_string//".bin"
     else if (command == 3) then
         fn = output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_write(1:len_trim(z_write))//&
              "vel"//dim_string//rank_string(1:len_trim(rank_string))//"_nu-dm"//g_string//".bin"
@@ -5171,6 +5650,9 @@ subroutine writevelocityfield_totpop(command, command2)
     character(len=4)   :: rank_string
     character(len=1)   :: dim_string
     character(len=3)   :: g_string
+#ifdef EID
+    character(len=7) :: rec_write
+#endif
     real :: vsim2phys, zcur
 
     integer :: command, command2
@@ -5210,12 +5692,19 @@ subroutine writevelocityfield_totpop(command, command2)
     if (command == 0) then
         fn = output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_write(1:len_trim(z_write))//&
              "vel"//dim_string//rank_string(1:len_trim(rank_string))//"_nu"//g_string//".bin"
+#ifdef EID
+    else if (command == 100) then
+        write(rec_write, '(f7.3)') mnu_rec
+        rec_write = adjustl(rec_write)
+        fn = output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_write(1:len_trim(z_write))//&
+             "vel"//dim_string//rank_string(1:len_trim(rank_string))//"_nurec_"//rec_write(1:len_trim(rec_write))//".bin"
+#endif
     else if (command == 1) then
         fn = output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_write(1:len_trim(z_write))//&
              "vel"//dim_string//rank_string(1:len_trim(rank_string))//g_string//".bin"
     else if (command == 2) then
         fn = output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_write(1:len_trim(z_write))//&
-             "vel"//dim_string//rank_string(1:len_trim(rank_string))//"_halo"//g_string//".bin"
+             "vel"//dim_string//rank_string(1:len_trim(rank_string))//"_ha"//g_string//".bin"
     else if (command == 3) then
         fn = output_path//'/node'//rank_string(1:len_trim(rank_string))//'/'//z_write(1:len_trim(z_write))//&
              "vel"//dim_string//rank_string(1:len_trim(rank_string))//"_nu-dm"//g_string//".bin"
@@ -5264,6 +5753,9 @@ subroutine order_xvp_groups(command)
   real(4) :: r
   integer(1) :: g
   real :: xvtemp(6)
+#ifdef EID
+  integer(2) :: eidtemp
+#endif
 
   real(8) time1, time2
   time1 = mpi_wtime(ierr)
@@ -5290,6 +5782,11 @@ subroutine order_xvp_groups(command)
            xvtemp(:) = xvp(:,np_local - np1)
            xvp(:,max_np-np1) = xvp(:,pp)
            xvp(:,pp) = xvtemp(:)
+#ifdef EID
+           eidtemp = eid(np_local-np1)
+           eid(max_np-np1) = eid(pp)
+           eid(pp) = eidtemp
+#endif
            np1 = np1 + 1
         endif
      enddo
@@ -5402,6 +5899,9 @@ subroutine clear_groups
      if (command == 0) then
         do pp = 0, (pp_up-pp_down)
            xvp(:,pp_start+pp) = xvp(:,pp_down+pp)
+#ifdef EID
+           eid(pp_start+pp) = eid(pp_down+pp)
+#endif
         enddo
      else if (command == 1) then
         do pp = 0, (pp_up-pp_down)
@@ -5480,6 +5980,9 @@ subroutine order_xvp_ll(command, glook)
   integer(1) :: glook
   real       :: xvtemp(6), xvswap(6)
   logical    :: found,equal
+#ifdef EID
+  integer(2) :: eidtemp, eidswap
+#endif
 
   real(8) :: time1, time2 
   time1 = mpi_wtime(ierr)
@@ -5531,6 +6034,9 @@ subroutine order_xvp_ll(command, glook)
      base = hoc_nc_h - hoc_nc_l + 1
      index2 = 0
      xvtemp(:) = xvp(:,pp)
+#ifdef EID
+     eidtemp = eid(pp)
+#endif
 
      do
         !! if we are looking at the last coarse cell, it means that everything is already sorted
@@ -5552,6 +6058,9 @@ subroutine order_xvp_ll(command, glook)
            if ( index <= index2 ) then
               pp = pp + 1
               xvtemp(:) = xvp(:,pp)
+#ifdef EID
+              eidtemp = eid(pp)
+#endif
            !! else we put it in its right cell
            else
               !! determines its position
@@ -5560,8 +6069,16 @@ subroutine order_xvp_ll(command, glook)
               xvswap(:) = xvp(:,pp2)
               xvp(:,pp) = xvswap(:)
               xvp(:,pp2) = xvtemp(:)
+#ifdef EID
+              eidswap  = eid(pp2)
+              eid(pp)  = eidswap
+              eid(pp2) = eidtemp
+#endif
               !! new particle we are looking at
               xvtemp(:) = xvswap(:)
+#ifdef EID
+              eidtemp = eidswap
+#endif
               !! update the position for the cell
               hoc(i,j,k) = hoc(i,j,k) - 1
            endif
@@ -5691,15 +6208,21 @@ end subroutine order_xvp_ll
 
 ! -------------------------------------------------------------------------------------------------------
 
-subroutine make_hoc(command, glook)
+subroutine make_hoc(command_input, glook)
   !
   ! Reconstructs hoc just before velocity density (this way hoc can be equivalenced)
   !
 
   implicit none
+  integer, intent(in) :: command_input
   integer      :: command,pp,pp_down,pp_up,k,j,i
   real         :: xvtemp(6)
   integer(1)   :: glook
+
+  command = command_input
+#ifdef EID
+  if (command == 100) command = 0
+#endif
 
   ! --------------------------------------------------------
   ! Determine xvp spot we have to look at
@@ -5922,7 +6445,7 @@ subroutine relative_velocity
 
     !$omp parallel do num_threads(nt) default(shared) private(kt)                                                                                     
     do kt = 0, nc_node_dim+1
-        velden(:,:,kt) = velden(:,:,kt) - velden2(:,:,kt)
+        velden(:,:,kt) = velden2(:,:,kt) - velden(:,:,kt)
     enddo
     !$omp end parallel do
 
@@ -5933,16 +6456,18 @@ end subroutine relative_velocity
 #ifdef MOMENTUM
 subroutine momentum_density(command, cdim, glook)
     !
-    ! Compute the momentum density field for the given species and given group
-    ! in the given velocity direction.
+    ! Compute the momentum density field for the given species and given group in the given velocity direction.
     !
 
     implicit none
 
-    real       :: mp,xvtemp(3),vtemp,dx1(3),dx2(3)
+    real       :: mp,xvtemp(3),vtemp,dx1(3),dx2(3),vf
     integer    :: command,cdim
     integer    :: ic,jc,kc,pp,pp_up,pp_down,pp_down0,index1(3),index2(3),thread
     integer(1) :: glook
+#ifdef EID
+    real(8) :: mp_sum, mp_sum_global
+#endif
     real(8) time1, time2    
 
     time1 = mpi_wtime(ierr)
@@ -5970,7 +6495,11 @@ subroutine momentum_density(command, cdim, glook)
     if (glook == g0) then
         pp_down0 = 1
     else if (glook == g1) then
+#ifdef EID
+        if (command == 0 .or. command == 100) then
+#else
         if (command == 0) then
+#endif
             pp_down0 = max_np + 1 - np_groups(g1) - np_buf_groups(g1)
         else if (command == 1) then
             pp_down0 = max_np_dm + 1 - np_groups_dm(g1) - np_buf_groups_dm(g1)
@@ -5988,7 +6517,12 @@ subroutine momentum_density(command, cdim, glook)
     !! In principle these loops could be threaded since fine mesh cells are included in coarse cells.
     thread = 1
 
+#ifdef EID
+    mp_sum = 0.
+    if (command == 0 .or. command == 100) then !! NEUTRINOS
+#else
     if (command == 0) then !! NEUTRINOS
+#endif
 
         do kc = 0, nm_node_dim+1
             do jc = 0, nm_node_dim+1
@@ -6015,6 +6549,13 @@ subroutine momentum_density(command, cdim, glook)
                         index2(1:3) = 1 + index1(1:3)
                         dx1(1:3) = real(index1(1:3)) - xvtemp(1:3)
                         dx2(1:3) = 1.0 - dx1(1:3)
+#ifdef EID
+                        if (command == 100) then
+                            vf = NeutrinoVelocity(eid(pp))
+                            mp = MassAssignment(vf)
+                            mp_sum = mp_sum + mp
+                        endif
+#endif
 
                         if (index1(1) >= 0 .and. index2(1) <= nc_node_dim + 1 .and. &
                             index1(2) >= 0 .and. index2(2) <= nc_node_dim + 1 .and. &
@@ -6035,6 +6576,26 @@ subroutine momentum_density(command, cdim, glook)
                 enddo !! ic
             enddo !! jc
         enddo !! kc
+
+#ifdef EID
+        !
+        ! Renormalize based on mass reassignments
+        !
+
+        if (command == 100) then
+
+            call mpi_allreduce(mp_sum, mp_sum_global, 1, mpi_double, mpi_sum, mpi_comm_world, ierr)
+            mp = real(ncr**3/mp_sum_global, kind=4)
+            do kc = 0, nc_node_dim+1
+                do jc = 0, nc_node_dim+1
+                    do ic = 0, nc_node_dim+1
+                        velden4(ic, jc, kc) = velden4(ic, jc, kc) * mp
+                    enddo
+                enddo
+            enddo
+
+        endif
+#endif
 
     else if (command == 1) then !! DARK MATTER
 
@@ -6189,9 +6750,12 @@ subroutine matter_density(command, glook)
     !
 
     implicit none
-    real       :: mp,xvtemp(3),dx1(3),dx2(3)
+    real       :: mp,xvtemp(3),dx1(3),dx2(3),vf
     integer    :: ic,jc,kc,pp,pp_up,pp_down,pp_down0,index1(3),index2(3),command,thread
     integer(1) :: glook
+#ifdef EID
+    real(8) :: mp_sum, mp_sum_global
+#endif
     real(8) time1, time2
 
     time1 = mpi_wtime(ierr)
@@ -6219,7 +6783,11 @@ subroutine matter_density(command, glook)
     if (glook == g0) then
         pp_down0 = 1
     else if (glook == g1) then
+#ifdef EID
+        if (command == 0 .or. command == 100) then
+#else
         if (command == 0) then
+#endif
             pp_down0 = max_np + 1 - np_groups(g1) - np_buf_groups(g1)
         else if (command == 1) then
             pp_down0 = max_np_dm + 1 - np_groups_dm(g1) - np_buf_groups_dm(g1)
@@ -6237,7 +6805,12 @@ subroutine matter_density(command, glook)
     !! In principle these loops could be threaded since fine mesh cells are included in coarse cells.
     thread = 1
 
+#ifdef EID
+    mp_sum = 0.
+    if (command == 0 .or. command == 100) then !! NEUTRINOS
+#else
     if (command == 0) then !! NEUTRINOS
+#endif
 
         do kc = 0, nm_node_dim+1
             do jc = 0, nm_node_dim+1
@@ -6263,6 +6836,13 @@ subroutine matter_density(command, glook)
                         index2(1:3) = 1 + index1(1:3)
                         dx1(1:3) = real(index1(1:3)) - xvtemp(1:3)
                         dx2(1:3) = 1.0 - dx1(1:3)
+#ifdef EID
+                        if (command == 100) then
+                            vf = NeutrinoVelocity(eid(pp))
+                            mp = MassAssignment(vf)
+                            mp_sum = mp_sum + mp
+                        endif
+#endif
 
                         if (index1(1) >= 0 .and. index2(1) <= nc_node_dim + 1 .and. &
                             index1(2) >= 0 .and. index2(2) <= nc_node_dim + 1 .and. &
@@ -6283,6 +6863,26 @@ subroutine matter_density(command, glook)
                 enddo !! ic
             enddo !! jc
         enddo !! kc
+
+#ifdef EID
+        !
+        ! Renormalize based on mass reassignments
+        !
+    
+        if (command == 100) then
+
+            call mpi_allreduce(mp_sum, mp_sum_global, 1, mpi_double, mpi_sum, mpi_comm_world, ierr)
+            mp = real(ncr**3/mp_sum_global, kind=4)
+            do kc = 0, nc_node_dim+1
+                do jc = 0, nc_node_dim+1
+                    do ic = 0, nc_node_dim+1
+                        velden(ic, jc, kc) = velden(ic, jc, kc) * mp
+                    enddo
+                enddo
+            enddo
+
+        endif
+#endif
 
     else if (command == 1) then !! DARK MATTER
 
@@ -6849,6 +7449,78 @@ subroutine writebuffer_velden
   return
 
 end subroutine writebuffer_velden
+
+! -------------------------------------------------------------------------------------------------------
+
+#ifdef EID
+subroutine ReadCDFTable
+
+    implicit none
+
+    integer :: k
+    real :: ffac
+
+    if (rank == 0) then
+
+        !! Read in the Table where the first column gives velocity (in
+        !non-standard units)
+        write(*,*) 'Reading ',cdfTable
+        open(42, file=cdfTable)
+        do k = 1, nv
+            read(42,*) cdf(1,k), cdf(2,k)
+        enddo
+        close(42)
+
+        !! Convert the velocity to km/s
+        ffac = 50.2476 / mass_neutrino / scalefactor
+        write(*,*) "Converting to km/s with ffac = ", ffac
+        do k = 1, nv
+            cdf(1,k) = cdf(1,k) * ffac
+        enddo
+
+        !! Print some info to screen
+        write(*,*) "min/max velocities: ", cdf(1,1), cdf(1,nv)
+
+    endif
+
+    call mpi_bcast(cdf, 2*nv, mpi_real, 0, mpi_comm_world, ierr)
+
+end subroutine ReadCDFTable
+
+! -------------------------------------------------------------------------------------------------------
+
+real(4) function NeutrinoVelocity(ebin)
+
+    implicit none
+
+    integer(2) :: ebin
+
+    if (ebin < 1 .or. ebin > nv) then
+        write(*,*) "ERROR: ebin invalid ", ebin
+        call mpi_abort(mpi_comm_world, ierr, ierr)
+    endif
+
+    NeutrinoVelocity = cdf(1, ebin)
+
+end function NeutrinoVelocity
+
+! -------------------------------------------------------------------------------------------------------
+
+real(4) function MassAssignment(vel)
+
+    implicit none
+
+    real(4) :: vel
+
+    real(4) :: bsim, brec
+
+    bsim = clight * kbT / scalefactor / mass_neutrino
+    brec = clight * kbT / scalefactor / mnu_rec
+
+    MassAssignment = (bsim/brec)**3 * ( (exp(vel/bsim)+1.) / (exp(vel/brec)+1.) )
+
+end function MassAssignment
+#endif
 
 ! -------------------------------------------------------------------------------------------------------
 
