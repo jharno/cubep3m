@@ -17,9 +17,10 @@ program dist_init
   implicit none
 
   include 'mpif.h'
-#include '../../parameters'
+  include '../../parameters'
 #ifdef SFFTW3
   include 'fftw3-mpi.f03'
+  integer(C_INTPTR_T), parameter :: nct = nc
 #endif
 
   integer, parameter  :: num_threads = cores*nested_threads 
@@ -609,9 +610,7 @@ subroutine di_fftw(command)
 
     implicit none
 #ifdef SLAB
-#ifdef SFFTW3
-    include 'fftw3-mpi.f03'
-#else
+#ifndef SFFTW3
     include 'fftw_f77.i'
     integer(4), parameter :: order = FFTW_NORMAL_ORDER
 #endif
@@ -633,8 +632,8 @@ subroutine di_fftw(command)
 #ifdef SLAB
 #ifdef SFFTW3
       call fftwf_mpi_init
-      plan  = fftwf_mpi_plan_dft_r2c_3d(nc, nc, nc, slab, slab_cmplx, mpi_comm_world, FFTW_ESTIMATE)
-      iplan = fftwf_mpi_plan_dft_c2r_3d(nc, nc, nc, slab_cmplx, slab, mpi_comm_world, FFTW_ESTIMATE)
+      plan  = fftwf_mpi_plan_dft_r2c_3d(nct, nct, nct, slab, slab_cmplx, mpi_comm_world, FFTW_ESTIMATE)
+      iplan = fftwf_mpi_plan_dft_c2r_3d(nct, nct, nct, slab_cmplx, slab, mpi_comm_world, FFTW_ESTIMATE)
 #else
       call rfftw3d_f77_mpi_create_plan(plan,mpi_comm_world,nc, nc,nc, FFTW_REAL_TO_COMPLEX, FFTW_ESTIMATE)
       call rfftw3d_f77_mpi_create_plan(iplan,mpi_comm_world,nc, nc,nc, FFTW_COMPLEX_TO_REAL, FFTW_ESTIMATE)
