@@ -137,6 +137,9 @@ integer(4), dimension(nc_node_dim) :: rhoc_i4
 real(4), dimension(6, max_cell_np, nc_node_dim) :: pos_i1
 integer(2) :: vel_i2
 #endif
+#ifdef PID_FLAG
+integer(8), dimension(max_cell_np, nc_node_dim) :: pid_i8
+#endif
 #ifdef NEUTRINOS
 #ifdef ZIP
 integer(4), dimension(nc_node_dim) :: rhoc_i4_nu
@@ -210,6 +213,9 @@ common / bdvar / nsubcuberanks
 
 #if defined(ZIP) || defined(ZIPDM)
 common / zipvar / rhoc_i4, pos_i1, vel_i2
+#ifdef PID_FLAG
+common / izipvard / pid_i8
+#endif
 #ifdef NEUTRINOS
 common / zipvarnu / rhoc_i4_nu, pos_i1_nu, vel_i2_nu
 #ifdef NUPID

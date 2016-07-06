@@ -365,6 +365,18 @@
 
     !! Zipped format
 
+#ifdef PID_FLAG
+    !! Open PID file and write header
+    open(unit=15, file=ofile2, status="replace", iostat=fstat, access="stream", buffered="yes")
+    if (fstat /= 0) then
+      write(*,*) 'error opening PID file for write'
+      write(*,*) 'rank',rank,'file:',ofile2
+      call mpi_abort(mpi_comm_world,ierr,ierr)
+    endif
+    write(15) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_proj,cur_halo,mass_p
+    if (rank == 0) write(*,*) "YOU SHOULD BE SEEING THIS"
+#endif
+
     do k = 1, nc_node_dim
         do j = 1, nc_node_dim
             !$omp parallel default(shared) private(i,l,ind)
@@ -377,6 +389,9 @@
                     rhoc_i4(i) = rhoc_i4(i) + 1
                     pos_i1(:, ind, i) = int(mod(xv(1:3,l)/mesh_scale,1.)*256, kind=1)
                     vel_i2(:, ind, i) = nint(xv(4:6,l)*v_r2i, kind=2)
+#ifdef PID_FLAG
+                    pid_i8(ind, i) = PID(l)
+#endif
                     ind = ind + 1
                     l = ll(l)
                 enddo !! l
@@ -392,11 +407,17 @@
             do i = 1, nc_node_dim
                 write(10) pos_i1(:, 1:rhoc_i4(i), i)
                 write(11) vel_i2(:, 1:rhoc_i4(i), i)
+#ifdef PID_FLAG
+                write(15) pid_i8(1:rhoc_i4(i), i)
+#endif
             enddo
         enddo !! j
     enddo !! k
 
     close(10); close(11); close(12); close(13)
+#ifdef PID_FLAG
+    close(15)
+#endif
 
 #else
 
@@ -431,6 +452,7 @@
     !
 
 #ifndef NEUTRINOS
+#ifndef ZIPDM
 #ifdef PID_FLAG
     open(unit=15, file=ofile2, status="replace", iostat=fstat, access="stream")
 
@@ -454,6 +476,7 @@
     close(15)
 #endif
 #endif    
+#endif
 
     !
     ! Write gas checkpoint
