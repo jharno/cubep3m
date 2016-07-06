@@ -22,17 +22,7 @@
     if (force_grid_back) then
 
         doremove = .true.
-  !      remove_offset = shake_offset
-
-#ifndef NEUTRINOS
-  remove_offset = shake_offset 
-#else
-  if (a > 0.999) then
-    remove_offset = shake_offset 
-  else
-    remove_offset = 0
-  endif
-#endif
+        remove_offset = shake_offset
 
     else
 

@@ -26,11 +26,8 @@
        ! We went for simplicity and hard coded dims in cubepm.par. 
       
        pen_dims = (/dim_y,dim_z/)
-       if (rank == 0) write(*,*) "Calling p3dfft_setup"
        call p3dfft_setup(pen_dims, nc_dim, nc_dim, nc_dim, .true.)
-       if (rank == 0) write(*,*) "Calling p3ddfft_get_dims #1"  
        call p3dfft_get_dims(istart, iend, isize, 1, mypadd)
-       if (rank == 0) write(*,*) "Calling p3dfft_get_dims #2"  
        call p3dfft_get_dims(fstart, fend, fsize, 2)
 
        ! Now each node knows about the actual coordinates of the pencil it is associated with.
@@ -46,28 +43,20 @@
 
       !! Call pack routine if we are going forward
       if (command > 0) then 
-        if (rank == 0) write(*,*) "Calling pack_pencils" 
         call pack_pencils
-        if (rank == 0) write(*,*) "Done pack_pencils"  
       endif
 
       !! Do the FFT
       if (command > 0) then 
-        if (rank == 0) write(*,*) "Calling ftran_r2c" 
         call ftran_r2c(slab, slab, "fft")
-        if (rank == 0) write(*,*) "Done ftran_r2c" 
-      else
-        if (rank == 0) write(*,*) "Calling btran_c2r"   
+      else 
         call btran_c2r(slab, slab, "tff")
-        if (rank == 0) write(*,*) "Done ftran_r2c"  
         slab=slab/(real(nc_dim)*real(nc_dim)*real(nc_dim))
       endif
 
      !! Unpack the pencil data 
       if (command < 0) then 
-         if (rank == 0) write(*,*) "Calling unpack_pencils"  
          call unpack_pencils
-         if (rank == 0) write(*,*) "Done unpack_pencils"  
       endif
     
     else !! If command == 0 we delete the plans

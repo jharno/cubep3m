@@ -9,10 +9,8 @@ integer(4), dimension(0:nodes_dim-1) :: pen_neighbor_to
 integer(4), dimension(0:nodes_dim-1) :: pen_neighbor_fm
 integer(4), dimension(6) :: cart_neighbor
 integer(4), dimension(3) :: slab_coord, cart_coords
-integer(4) :: slab_rank, mpi_comm_cart, cart_rank, rank, ierr
-#ifdef SUBV
-  integer(4) :: rank_global,cart_coords_global(3)
-#endif
+integer(4) :: slab_rank, mpi_comm_cart, cart_rank, rank, ierr  
+
 integer(8) :: plan, iplan, fftw2_plan(cores), fftw2_iplan(cores)
 
 logical :: firstfftw, firstfftw_nest
@@ -188,8 +186,7 @@ equivalence (rho_f, rho_c)
 
 equivalence (send_buf, force_c_buffer, fast_buf, slab_work) 
 
-!equivalence (cmplx_rho_f, tmp_kern_c) 
-equivalence (tmp_kern_c, cmplx_rho_f) 
+equivalence (cmplx_rho_f, tmp_kern_c) 
 
 equivalence (recv_buf, recv_cube, fast_pos)
 
@@ -266,14 +263,11 @@ common / equiv3 / rho_f
 
 common / equiv4 / send_buf
 
-!common / equiv5 / cmplx_rho_f
-common / equiv5 /  tmp_kern_c 
+common / equiv5 / cmplx_rho_f
 
 common / equiv6 / recv_buf 
 
 common / equiv7 / xv
 
 common / lvar / firstfftw, firstfftw_nest, firstfftw2, projection_step, checkpoint_step, halofind_step, final_step, force_grid_back
-#ifdef SUBV
-  common / var_haloonly / rank_global,cart_coords_global !! haloonly
-#endif
+

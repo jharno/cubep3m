@@ -35,14 +35,8 @@
     real(4) :: v_resolution = 32767.499 
     real(4) :: vmax, vmax_local, v_r2i, v_r2i_nu
 #endif
- character (len=max_path) :: ffdm_zip0,ffdm_zip1,ffdm_zip2,ffdm_zip3,ffnu_zip0,ffnu_zip1,ffnu_zip2,ffnu_zip3
- character (len=200) :: cmd
-    integer(4) :: hostnm
-    character(len=100) :: myhost
-    real(8) :: t1, t2
 
     !! label files with the same z as in the checkpoints file
-    ierr = hostnm(myhost)
     if (rank == 0) z_write=z_checkpoint(cur_checkpoint)
     call mpi_bcast(z_write,1,mpi_real,0,mpi_comm_world,ierr)
 
@@ -68,10 +62,6 @@
     ofile=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'xv'// &
          rank_s(1:len_trim(rank_s))//'.dat'
 #else
-    ffdm_zip0=shm_path//trim(z_s)//'zip0_'//trim(rank_s)//'.dat'
-    ffdm_zip1=shm_path//trim(z_s)//'zip1_'//trim(rank_s)//'.dat'
-    ffdm_zip2=shm_path//trim(z_s)//'zip2_'//trim(rank_s)//'.dat'
-    ffdm_zip3=shm_path//trim(z_s)//'zip3_'//trim(rank_s)//'.dat'
     fdm_zip0=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip0_'//rank_s(1:len_trim(rank_s))//'.dat'
     fdm_zip1=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip1_'//rank_s(1:len_trim(rank_s))//'.dat'
     fdm_zip2=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip2_'//rank_s(1:len_trim(rank_s))//'.dat'
@@ -84,10 +74,6 @@
     ofile_nu=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'xv'// &
          rank_s(1:len_trim(rank_s))//'_nu.dat'
 #else
-    ffnu_zip0=shm_path//trim(z_s)//'zip0_'//trim(rank_s)//'_nu.dat'
-    ffnu_zip1=shm_path//trim(z_s)//'zip1_'//trim(rank_s)//'_nu.dat'
-    ffnu_zip2=shm_path//trim(z_s)//'zip2_'//trim(rank_s)//'_nu.dat'
-    ffnu_zip3=shm_path//trim(z_s)//'zip3_'//trim(rank_s)//'_nu.dat'
     fnu_zip0=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip0_'//rank_s(1:len_trim(rank_s))//'_nu.dat'
     fnu_zip1=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip1_'//rank_s(1:len_trim(rank_s))//'_nu.dat'
     fnu_zip2=output_path//'/node'//rank_s(1:len_trim(rank_s))//'/'//z_s(1:len_trim(z_s))//'zip2_'//rank_s(1:len_trim(rank_s))//'_nu.dat'
@@ -147,24 +133,13 @@
       call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
 #else
-# ifdef SHM
-    open(unit=10, file=ffdm_zip0, status="replace", iostat=fstat0,access="stream", buffered='yes')
-    open(unit=11, file=ffdm_zip1, status="replace", iostat=fstat1,access="stream", buffered='yes')
-    open(unit=12, file=ffdm_zip2, status="replace", iostat=fstat2,access="stream", buffered='yes')
-    open(unit=13, file=ffdm_zip3, status="replace", iostat=fstat3,access="stream", buffered='yes')
-# else
     open(unit=10, file=fdm_zip0, status="replace", iostat=fstat0, access="stream", buffered='yes')
     open(unit=11, file=fdm_zip1, status="replace", iostat=fstat1, access="stream", buffered='yes')
     open(unit=12, file=fdm_zip2, status="replace", iostat=fstat2, access="stream", buffered='yes')
     open(unit=13, file=fdm_zip3, status="replace", iostat=fstat3, access="stream", buffered='yes')
-# endif
     if (fstat0 /= 0 .or. fstat1 /= 0 .or. fstat2 /= 0 .or. fstat3 /= 0) then
-      write(*,*) trim(myhost),' error opening zipped checkpoint file for write'
-# ifdef SHM
-      write(*,*) 'rank',rank,'file:',ffdm_zip0,ffdm_zip1,ffdm_zip2,ffdm_zip3
-# else
+      write(*,*) 'error opening zipped checkpoint file for write'
       write(*,*) 'rank',rank,'file:',fdm_zip0,fdm_zip1,fdm_zip2,fdm_zip3
-# endif
       call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
 #endif
@@ -180,24 +155,13 @@
       call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
 #else
-# ifdef SHM
-    open(unit=20, file=ffnu_zip0, status="replace", iostat=fstat0,access="stream", buffered='yes')
-    open(unit=21, file=ffnu_zip1, status="replace", iostat=fstat1,access="stream", buffered='yes')
-    open(unit=22, file=ffnu_zip2, status="replace", iostat=fstat2,access="stream", buffered='yes')
-    open(unit=23, file=ffnu_zip3, status="replace", iostat=fstat3,access="stream", buffered='yes')
-# else
     open(unit=20, file=fnu_zip0, status="replace", iostat=fstat0, access="stream", buffered='yes')
     open(unit=21, file=fnu_zip1, status="replace", iostat=fstat1, access="stream", buffered='yes')
     open(unit=22, file=fnu_zip2, status="replace", iostat=fstat2, access="stream", buffered='yes')
     open(unit=23, file=fnu_zip3, status="replace", iostat=fstat3, access="stream", buffered='yes')
-# endif
     if (fstat0 /= 0 .or. fstat1 /= 0 .or. fstat2 /= 0 .or. fstat3 /= 0) then
-      write(*,*) trim(myhost),' error opening zipped checkpoint file for write'
-# ifdef SHM
-      write(*,*) 'rank',rank,'file:',ffnu_zip0,ffnu_zip1,ffnu_zip2,ffnu_zip3
-# else
+      write(*,*) 'error opening zipped checkpoint file for write'
       write(*,*) 'rank',rank,'file:',fnu_zip0,fnu_zip1,fnu_zip2,fnu_zip3
-# endif
       call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
 #endif
@@ -247,8 +211,6 @@
     write(11) np_local,a,t,tau,nts,dt_f_acc,dt_pp_acc,dt_c_acc,cur_checkpoint,cur_proj,cur_halo,mass_p,v_r2i,shake_offset
 #endif
 #endif
-
-    t1 = mpi_wtime(ierr)
 
 #ifdef NEUTRINOS
 
@@ -516,15 +478,8 @@
 
     endif
 
-    t2 = mpi_wtime(ierr)
-    !ierr = hostnm(myhost)
-    write(*,*) 'Finished checkpoint:',rank, trim(myhost), (t2-t1)/60.
-#ifdef SHM
-  cmd='mv '//trim(shm_path)//'*zip* '//trim(output_path)//'node'//trim(rank_s)//'/ &'
-  call system(cmd)
-#endif
-    call mpi_barrier(mpi_comm_world,ierr)
-    if (rank==0) print*, 'checkpoint: after the barrier, about to return'
+    write(*,*) 'Finished checkpoint:',rank
+
     checkpoint_step=.false.
 
   end subroutine checkpoint

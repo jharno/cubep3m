@@ -1,6 +1,6 @@
 !! Frequently changed parameters are found in this header file:
 
-#include '../parameters'
+include '../parameters'
 
 !! files / paths 
 
@@ -55,10 +55,10 @@ integer(4), parameter   :: max_nts = 6000
 
 #ifdef NEUTRINOS
 logical, parameter  :: restart_ic =  .true.
-integer(4), parameter   :: restart_checkpoint = 37
+integer(4), parameter   :: restart_checkpoint = 1 ! line number in input/checkpoint
 #else
-logical, parameter	:: restart_ic =  .true.
-integer(4), parameter   :: restart_checkpoint = 37 ! line number in input/checkpoint 
+logical, parameter	:: restart_ic =  .false.
+integer(4), parameter   :: restart_checkpoint = 1 ! line number in input/checkpoint 
 #endif
 
 logical, parameter :: restart_kill = .false. !! Only matters if CHECKPOINT_KILL flag used
@@ -91,11 +91,7 @@ real, parameter         :: sep_inc=0.1
 !! particle-particle interaction parameters
 
 ! softening length (if (|r1-r2| < rsoft) then no force)
-#ifdef TH2
-real(4), parameter      :: rsoft = 0.3
-#else
 real(4), parameter      :: rsoft = 0.1
-#endif
 ! arbitrary timescale limiting parameter :: dt_max_pp=sqrt(dt_pp_scale*rsoft/max_pp_acceleration)
 real(4), parameter      :: dt_pp_scale = 0.05
 ! arbitrary pp bias (set to increase the force interaction)
@@ -113,7 +109,7 @@ real, parameter :: writeBoxAboveA = 1./(1.+writeBoxBelowZ)
 
 #if defined(ZIP) || defined(ZIPDM)
 !! Maximum number of particles that may exist in one coarse cell
-real(4), parameter :: dbuf_cell = 50000.
+real(4), parameter :: dbuf_cell = 10000.
 integer(4), parameter :: max_cell_np = int(8*dbuf_cell) + 1
 #endif
 
@@ -146,12 +142,8 @@ logical, parameter      :: halo_write = .true.
 real(4), parameter      :: halo_odc = 200. 
 
 ! maximum number of particles in one halo (used if HPID flag enabled)
-
-#ifdef TH2
-integer(4), parameter :: ngrid_max = 650
-#else
 integer(4), parameter :: ngrid_max = 300
-#endif
+
 
 ! lower density peak threshold for determining which peaks should be inspected
 ! as halos
@@ -160,7 +152,7 @@ real(4), parameter      :: den_peak_cutoff = 100.
 
 ! lower mass cutoff for cataloging a halo, in particles
 
-integer(4), parameter      :: min_halo_particles = 500 
+integer(4), parameter      :: min_halo_particles = 100 
 
 ! set .true. to limit initial halo mass calculation to exiting after only
 ! completing an entire radial shell
@@ -248,7 +240,7 @@ integer(4), parameter   :: dim_y = nodes_dim
 integer(4), parameter   :: dim_z = nodes_dim**2
 
 #ifdef COARSEPROJ
-integer, parameter :: writeCoarseProjEverySteps = 4
+integer, parameter :: writeCoarseProjEverySteps = 2
 real, parameter    :: writeCoarseProjBelowZ     = 100.
 real, parameter    :: writeCoarseProjAboveA     = 1./(1.+writeCoarseProjBelowZ)
 integer, parameter :: nc_coarseproj_start       = nc_node_dim/2 - nc_tile_dim/2

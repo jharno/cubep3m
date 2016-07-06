@@ -51,7 +51,7 @@ subroutine halofind
     integer(8) :: np_halo_local_vir, np_halo_vir
 
 #ifdef NEUTRINOS
-    real(4), parameter :: nu_search_radius = 1. !! Distance in Mpc/h to search for neutrino properties around each halo  
+    real(4), parameter :: nu_search_radius = 2. !! Distance in Mpc/h to search for neutrino properties around each halo  
     real(4), parameter :: nu_search_radius_cells = nu_search_radius * nf_physical_dim / box 
     real(4) :: g4 = box * nf_buf / real(nf_physical_dim) 
     if (rank == 0) write(*,*) "Neutrino search radius: ", nu_search_radius_cells
@@ -100,44 +100,22 @@ subroutine halofind
     !
 
     z_write = z_halofind(cur_halofind)
-#ifdef SUBV
-    z_write = z_checkpoint(restart_checkpoint)
-#endif
     call mpi_bcast(z_write, 1, mpi_real, 0, mpi_comm_world, ierr)
     write(z_s ,"(f7.3)") z_write 
     z_s = adjustl(z_s)
-#ifdef SUBV
-    write(r_s, "(i5)") rank_global
-#else 
+    
     write(r_s, "(i5)") rank
-#endif
     r_s = adjustl(r_s)
 
-#ifndef SUBV
-    ofile = output_path//'/node'//trim(r_s)//'/'//trim(z_s)//"halo"//trim(r_s)//".dat"
-#else
-    if (cart_coords(1)>0 .and. cart_coords(1)<=nodes_dim_subv .and. &
-        cart_coords(2)>0 .and. cart_coords(2)<=nodes_dim_subv .and. &
-        cart_coords(3)>0 .and. cart_coords(3)<=nodes_dim_subv) then
-#     ifdef NEUTRINOS
-        ofile='/WORK/bnu_ztj_1/yuanshuo/tildes/analysis'//'/node'//trim(r_s)//'/'//trim(z_s)//'halo'//trim(r_s)//'.dat'
-#     else
-        ofile='/WORK/bnu_ztj_1/yuanshuo/tildes/analysisdm'//'/node'//trim(r_s)//'/'//trim(z_s)//'halo'//trim(r_s)//'.dat'
-#     endif
-    else
-#     ifdef NEUTRINOS
-        ofile='/WORK/bnu_ztj_1/yuanshuo/tildes/analysis'//'/node'//trim(r_s)//'/garbage_'//trim(z_s)//'halo'//trim(r_s)//'.dat'
-#     else
-        ofile='/WORK/bnu_ztj_1/yuanshuo/tildes/analysisdm'//'/node'//trim(r_s)//'/garbage_'//trim(z_s)//'halo'//trim(r_s)//'.dat'
-#     endif
+    ofile = output_path//'/node'//r_s(1:len_trim(r_s))//'/'//z_s(1:len_trim(z_s))//"halo"//r_s(1:len_trim(r_s))//".dat"
+
+    open(unit=12, file=ofile, status="replace", iostat=fstat, access="stream")
+
+    if (fstat /= 0) then
+        write(*,*) "Error opening halo catalog for write"
+        write(*,*) "rank", rank, "file:", ofile
+        stop
     endif
-#endif
-open(unit=12, file=ofile, status="replace", iostat=fstat, access="stream", buffered='yes')
-if (fstat /= 0) then
-  write(*,*) "Error opening halo catalog for write"
-  write(*,*) "rank", rank, "file:", ofile
-  stop
-endif
 
     !
     ! Determine which candidates are to be considered halos and write their properties to file.
@@ -153,12 +131,6 @@ endif
     offset(1) = cart_coords(3)*nf_physical_node_dim
     offset(2) = cart_coords(2)*nf_physical_node_dim
     offset(3) = cart_coords(1)*nf_physical_node_dim
-
-#ifdef SUBV
-  offset(1)=offset(1)+(first_coord(3)-1)*nf_physical_node_dim
-  offset(2)=offset(2)+(first_coord(2)-1)*nf_physical_node_dim
-  offset(3)=offset(3)+(first_coord(1)-1)*nf_physical_node_dim
-#endif
 
     !! Initialize so that no particles are yet part of a halo
     hpart_odc = 0
@@ -186,7 +158,6 @@ endif
     write(12) nhalo
     write(12) halo_vir
     write(12) halo_odc
-    write(12) shake_offset
 
     if (rank == 0) then
 
@@ -203,7 +174,7 @@ endif
 
         !! Search for particles by looking at local particle distribution
         call find_halo_particles(halo_vir, mass_proxy, hpos(:), r_vir, i_vir, 1)
-        if (i_vir >= min_halo_particles) call find_halo_particles(halo_odc, mass_proxy, hpos(:), r_odc, i_odc, 2)
+        call find_halo_particles(halo_odc, mass_proxy, hpos(:), r_odc, i_odc, 2)
 
         !! The following conditions must pass to be considered a halo
         if (i_vir >= min_halo_particles .and. i_odc >= min_halo_particles) then
@@ -317,42 +288,21 @@ endif
             !! Subtract shake offset
             hpos = hpos - shake_offset
             x_mean = x_mean - shake_offset
-# ifdef NEUTRINOS 
+#ifdef NEUTRINOS 
             x_mean_nu = x_mean_nu - shake_offset
-# endif
 #endif
-
-!! fix the dm+nu offset problem
-#ifdef SUBV
-# ifdef NEUTRINOS
-    hpos = hpos + shake_offset
-    x_mean = x_mean + shake_offset
-    x_mean_nu = x_mean_nu + shake_offset
-# endif
 #endif
-
-!!
-!!#ifdef SUBV
-  !!nc/node_dim = nf_node_dim
-  !hpos=hpos+((/first_coord(3),first_coord(2),first_coord(1)/)-1)*(nc/nodes_dim)
-  !hpos=mod(hpos+nc/nodes_dim*nodes_dim_global,nc/nodes_dim*nodes_dim_global*1.)
-!if(rank==0) print*, 'nc=',nc, ' nc_node_dim=',nc_node_dim, ' nc/nodes_dim=',nc/nodes_dim
-!!#else
-  ! keep hpos
-!!#endif
-!!
-
-
 
 #ifndef NEUTRINOS
-# ifdef PID_FLAG
+#ifdef PID_FLAG
             if (halo_write) write(12) hpos(:), mass_vir, mass_odc, r_vir, r_odc, x_mean, v_mean, l_CM, v2_wrt_halo, var_x, pid_halo, xv_halo
-# else
+#else
             if (halo_write) write(12) hpos(:), mass_vir, mass_odc, r_vir, r_odc, x_mean, v_mean, l_CM, v2_wrt_halo, var_x
-# endif
+#endif
 #else
             if (halo_write) write(12) hpos(:), mass_vir, mass_odc, r_vir, r_odc, x_mean, v_mean, l_CM, v2_wrt_halo, var_x, I_ij, x_mean_nu, v_mean_nu, n_nu 
 #endif
+
 
         endif !! i_vir/i_odc test 
 
@@ -556,16 +506,7 @@ subroutine find_halo_particles(HODC, HMASS, HPOS, RODC, ITOT, DOVIR)
     integer(4), intent(in) :: DOVIR
     logical :: HALOVIR
 
-#ifdef NESTED_OMP
-    integer(4), parameter :: nt = cores * nested_threads
-#else
-    integer(4), parameter :: nt = cores
-#endif 
-    real(4), dimension(nt) :: maxfinegrid
-    integer(4), dimension(nt) :: imax, jmax, kmax
-    integer(4) :: thread
-
-    real :: r, dgrid, rrefine, rsearch
+    real :: r, dgrid, maxfinegrid, rrefine, rsearch
     integer :: pp, np_search, ii, jj, kk, i, j, k
     integer :: crbox(3, 2), csbox(3, 2), frbox(3, 2)
     integer :: ngrid(3)
@@ -573,13 +514,8 @@ subroutine find_halo_particles(HODC, HMASS, HPOS, RODC, ITOT, DOVIR)
 
     real :: odci, odcj, r1, r2, d1, d2, w1, w2
 
-#ifdef TH2
-    integer, parameter :: search_ratio = 2
-    integer, parameter :: refine_ratio = 2
-#else
     integer, parameter :: search_ratio = 4
     integer, parameter :: refine_ratio = 5
-#endif
 
     !
     ! Determine which overdensity we are trying to reach 
@@ -705,31 +641,21 @@ subroutine find_halo_particles(HODC, HMASS, HPOS, RODC, ITOT, DOVIR)
         ! Find refined mesh density maximum
         !
 
-        !$omp parallel num_threads(nt) default(shared) private(i,j,k,thread)
-        thread = 1
-        thread = omp_get_thread_num() + 1
-        maxfinegrid(thread) = 0.
-        !$omp do
+        maxfinegrid = 0.
+
         do k = 1, ngrid(3)
            do j = 1, ngrid(2)
               do i = 1, ngrid(1)
-                 if (finegrid(i, j, k) > maxfinegrid(thread)) then
-                    maxfinegrid(thread) = finegrid(i, j, k)
-                    imax(thread)        = i
-                    jmax(thread)        = j
-                    kmax(thread)        = k
+                 if (finegrid(i, j, k) > maxfinegrid) then
+                    maxfinegrid = finegrid(i, j, k)
+                    HPOS(1) = frbox(1,1) + (i-0.5)*dgrid
+                    HPOS(2) = frbox(2,1) + (j-0.5)*dgrid
+                    HPOS(3) = frbox(3,1) + (k-0.5)*dgrid
                  endif
                  finegrid(i, j, k) = 0. !! Set to zero for next candidate
               enddo
            enddo
         enddo
-        !$omp end do
-        !$omp end parallel
-
-        thread  = maxloc(maxfinegrid, dim=1)
-        HPOS(1) = frbox(1,1) + (imax(thread)-0.5)*dgrid
-        HPOS(2) = frbox(2,1) + (jmax(thread)-0.5)*dgrid
-        HPOS(3) = frbox(3,1) + (kmax(thread)-0.5)*dgrid
 
     endif
 
@@ -739,12 +665,10 @@ subroutine find_halo_particles(HODC, HMASS, HPOS, RODC, ITOT, DOVIR)
 
     if (np_search > max_halo_np) write(*,*) "ERROR: np_search, max_halo_np = ", np_search, max_halo_np
 
-    !$omp parallel do num_threads(nt) default(shared) private(i,dr)
     do i = 1, np_search
         dr = HPOS(:) - pos(i, 1:3)
         pos(i, 4) = sqrt(dr(1)**2 + dr(2)**2 + dr(3)**2)
     enddo
-    !$omp end parallel do
 
     isortpos(:np_search) = (/ (i, i=1, np_search) /)
     call indexedsort(np_search, pos(:, 4), isortpos(:))
@@ -804,7 +728,6 @@ subroutine neutrino_properties(HPOS, RSEARCH, XMEAN, VMEAN, NNU)
     ! the halo centre HPOS
     !
 
-    use omp_lib
     implicit none
 
 #    include "cubepm.fh"
@@ -815,14 +738,10 @@ subroutine neutrino_properties(HPOS, RSEARCH, XMEAN, VMEAN, NNU)
     real(4), dimension(3), intent(out) :: XMEAN, VMEAN
     integer(4), intent(out) :: NNU
 
-    real(8), dimension(3, cores, nested_threads) :: xsum, vsum
-    integer(4), dimension(cores, nested_threads) :: nsum
-    integer(4) :: thread, thread_n
-
     integer :: csbox(3, 2)
     integer :: pp, k, j, i
     real :: r  
-    real :: dr(3), p(6)
+    real :: dr(3), p(3)
 
     !! Coarse mesh cells within the search region
     csbox(:, 1) = int((HPOS(:)-RSEARCH)/mesh_scale) + 1
@@ -835,21 +754,13 @@ subroutine neutrino_properties(HPOS, RSEARCH, XMEAN, VMEAN, NNU)
     csbox(2, 2) = min(csbox(2, 2), hoc_nc_h)
     csbox(3, 1) = max(csbox(3, 1), hoc_nc_l)
     csbox(3, 2) = min(csbox(3, 2), hoc_nc_h)
+   
+    !! Initialize mean velocity and particle counter
+    XMEAN(:) = 0.
+    VMEAN(:) = 0.
+    NNU = 0
 
-    !! Initialize thread arrays
-    xsum = 0. ; vsum = 0. ; nsum = 0
-
-    !$omp parallel num_threads(cores) default(shared) private(i,j,k,pp,p,dr,r,thread,thread_n)
-    thread = 1
-    thread = omp_get_thread_num() + 1
-    !$omp do schedule(dynamic)   
     do k = csbox(3,1), csbox(3,2)
-#ifdef NESTED_OMP
-        !$omp parallel num_threads(nested_threads) default(shared) private(i,j,pp,p,dr,r,thread_n)
-        thread_n = 1
-        thread_n = omp_get_thread_num() + 1
-        !$omp do schedule(dynamic)
-#endif
         do j = csbox(2,1), csbox(2,2)
             do i = csbox(1,1), csbox(1,2)
                 pp = hoc(i, j, k)
@@ -860,33 +771,24 @@ subroutine neutrino_properties(HPOS, RSEARCH, XMEAN, VMEAN, NNU)
 #else
                     if (PID(pp) > 1) then !! this is a neutrino
 #endif
-                        p(:) = xv(:, pp)
-                        dr   = HPOS(:) - p(1:3)
+                        p(:) = xv(:3, pp)
+                        dr   = HPOS(:) - p(:)
                         r    = sqrt(dr(1)**2 + dr(2)**2 + dr(3)**2)
                         if (r <= RSEARCH) then
-                            xsum(:,thread,thread_n) = xsum(:,thread,thread_n) + p(1:3)
-                            vsum(:,thread,thread_n) = vsum(:,thread,thread_n) + p(4:6)
-                            nsum(thread,thread_n)   = nsum(thread,thread_n) + 1
+                            XMEAN(:) = XMEAN(:) + p(:)
+                            VMEAN(:) = VMEAN(:) + xv(4:6, pp)
+                            NNU = NNU + 1
                         endif
                     endif
                     pp = ll(pp)
                 enddo !! pp loop
             enddo !! i loop
         enddo !! j loop
-#ifdef NESTED_OMP 
-      !$omp end do
-      !$omp end parallel
-#endif
     enddo !! k loop
-    !$omp end do
-    !$omp end parallel
 
-    NNU   = sum(nsum)
     if (NNU > 0) then
-        do i = 1, 3
-            XMEAN(i) = sum(xsum(i,:,:)) / NNU
-            VMEAN(i) = sum(vsum(i,:,:)) / NNU
-        enddo
+        XMEAN(:) = XMEAN(:) / NNU
+        VMEAN(:) = VMEAN(:) / NNU
     endif
  
 end subroutine neutrino_properties 

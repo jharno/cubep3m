@@ -25,9 +25,9 @@
     if (ierr /= mpi_success) call mpi_abort(mpi_comm_world,ierr,ierr)
 
     if (mod(nc_dim,nodes_dim**2) /= 0) then
-      !write(*,*) 'cannot evenly decompose mesh into pencils'
-      !write(*,*) 'nc=',nf_physical_dim, 'nc coarse=',nc_dim,'nodes_dim**2=',nodes_dim**2,'mod(nc,nodes_dim**2)=', mod(nc_dim,nodes_dim**2)
-      !call mpi_abort(mpi_comm_world,ierr,ierr)
+      write(*,*) 'cannot evenly decompose mesh into pencils'
+      write(*,*) 'nc=',nf_physical_dim, 'nc coarse=',nc_dim,'nodes_dim**2=',nodes_dim**2,'mod(nc,nodes_dim**2)=', mod(nc_dim,nodes_dim**2)
+      call mpi_abort(mpi_comm_world,ierr,ierr)
     endif
 
 #ifdef DIAG
@@ -57,22 +57,11 @@
     reorder = .false.
     ndim = 3
 
-    call mpi_cart_create(mpi_comm_world, ndim,dims, periodic, reorder, mpi_comm_cart, ierr)
+    call mpi_cart_create(mpi_comm_world, ndim,dims, periodic, &
+                       reorder, mpi_comm_cart, ierr)
     call mpi_comm_rank(mpi_comm_cart, cart_rank, ierr)
-    call mpi_cart_coords(mpi_comm_cart, cart_rank, ndim, cart_coords, ierr)
-
-#   ifdef SUBV
-      cart_coords_global=cart_coords+first_coord-1
-      cart_coords_global=mod(cart_coords_global+nodes_dim_global,nodes_dim_global)
-      rank_global=nodes_dim_global**2*cart_coords_global(1)+nodes_dim_global*cart_coords_global(2)+cart_coords_global(3)
-      if (cart_coords(1)>0 .and. cart_coords(1)<=nodes_dim_subv .and. &
-          cart_coords(2)>0 .and. cart_coords(2)<=nodes_dim_subv .and. &
-          cart_coords(3)>0 .and. cart_coords(3)<=nodes_dim_subv) then
-        print*, rank,'=',cart_coords, rank_global,'write'
-      else
-        print*, rank,'=',cart_coords, rank_global
-      endif
-#   endif
+    call mpi_cart_coords(mpi_comm_cart, cart_rank, ndim,  &
+                         cart_coords, ierr)
 
 ! cart_neighbor(1) -> down (negative z)
 ! cart_neighbor(2) -> up (positive z)
@@ -92,6 +81,5 @@
     call mpi_barrier(mpi_comm_world,ierr)
   enddo 
 #endif
-call mpi_barrier(mpi_comm_world,ierr)
 
   end subroutine mpi_initialize

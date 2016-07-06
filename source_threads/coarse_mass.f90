@@ -15,10 +15,9 @@
    real(4), dimension(3) :: x,dx1,dx2
 
 #ifdef COARSEPROJ
-    character (len=max_path) :: ofile,oofile
+    character (len=max_path) :: ofile
     character (len=6) :: step_string
     character (len=6) :: rank_s
-    character (len=200) :: cmd
     integer :: fstat
     real(8) :: cpsum_local, cpsum
     integer, parameter :: ijstart = -1
@@ -27,10 +26,9 @@
     integer, parameter :: ijstart = 0
     integer, parameter :: ijstop  = nc_node_dim + 1 
 #endif
-    integer(4) :: hostnm
-    character(len=100) :: myhost
+
    call system_clock(count=count_i)
-   ierr = hostnm(myhost)
+
    rho_c= 0.0 !- mass_p * (mesh_scale / 2)**3  
 
 #ifdef MHD
@@ -137,11 +135,11 @@
         cpsum_local = sum(crhoproj(1:nc_node_dim,1:nc_node_dim,1:nc_node_dim))
         call mpi_reduce(cpsum_local, cpsum, 1, mpi_double_precision, mpi_sum, 0, mpi_comm_world, ierr) 
         if (rank == 0) write(*,*) "Dark matter coarsened projection sum = ", cpsum
-# ifdef NEUTRINOS 
+#ifdef NEUTRINOS 
         cpsum_local = sum(crhoproj_nu(1:nc_node_dim,1:nc_node_dim,1:nc_node_dim))
         call mpi_reduce(cpsum_local, cpsum, 1, mpi_double_precision, mpi_sum, 0, mpi_comm_world, ierr)
         if (rank == 0) write(*,*) "Neutrino coarsened projection sum = ", cpsum
-# endif
+#endif
         !! Write data using only those on the top xy slab of the box
         if (cart_coords(1) == 0) then
             !! Rank and time step strings
@@ -153,62 +151,40 @@
                 do j = 1, nc_node_dim
                     do i = 1, nc_node_dim
                         crhoprojsum(i, j) = crhoprojsum(i,j) + crhoproj(i,j,k) 
-# ifdef NEUTRINOS
+#ifdef NEUTRINOS
                         crhoprojsum_nu(i,j) = crhoprojsum_nu(i,j) + crhoproj_nu(i,j,k)
-# endif
+#endif
                     enddo
                 enddo
             enddo
             !! Write dark matter projection
-            oofile=shm_path//'cproj'//trim(rank_s)//'_'//step_string//'.dat'
-            ofile=output_path//'coarseproj/node'//trim(rank_s)//'/cproj'//trim(rank_s)//'_'//step_string//'.dat'
-#           ifdef SHMCP
-              open(unit=12, file=oofile,status="replace",iostat=fstat,access="stream")
-#           else
-              open(unit=12, file=ofile,status="replace",iostat=fstat,access="stream")
-#           endif
+            ofile=output_path//'coarseproj/node'//rank_s(1:len_trim(rank_s))//'/cproj'//rank_s(1:len_trim(rank_s))//'_'//step_string//'.dat'
+            open(unit=12, file=ofile, status="replace", iostat=fstat, access="stream")
             if (fstat /= 0) then
-              write(*,*) 'error opening coarse projection file for write'
-#             ifdef SHMCP
-                write(*,*) trim(myhost),' rank',rank,'file:',oofile
-#             else
-                write(*,*) trim(myhost),' rank',rank,'file:',ofile
-#             endif
-              call mpi_abort(mpi_comm_world,ierr,ierr)
+                write(*,*) 'error opening coarse projection file for write'
+                write(*,*) 'rank',rank,'file:',ofile
+                call mpi_abort(mpi_comm_world,ierr,ierr)
             endif
             write(12) shake_offset
             write(12) soffcproj
             write(12) crhoprojsum 
             close(12)
-# ifdef NEUTRINOS
+#ifdef NEUTRINOS
             !! Write neutrino projection
-            oofile=shm_path//'cproj'//trim(rank_s)//'_'//step_string//'_nu.dat'
-            ofile=output_path//'coarseproj/node'//trim(rank_s)//'/cproj'//trim(rank_s)//'_'//step_string//'_nu.dat'
-#           ifdef SHMCP
-              open(unit=13,file=oofile,status="replace",iostat=fstat,access="stream")
-#           else
-              open(unit=13,file=ofile,status="replace",iostat=fstat,access="stream")
-#           endif
+            ofile=output_path//'coarseproj/node'//rank_s(1:len_trim(rank_s))//'/cproj'//rank_s(1:len_trim(rank_s))//'_'//step_string//'_nu.dat'
+            open(unit=13, file=ofile, status="replace", iostat=fstat, access="stream")
             if (fstat /= 0) then
-              write(*,*) 'error opening coarse projection file for write'
-#             ifdef SHMCP
-                write(*,*) trim(myhost),' rank',rank,'file:',oofile
-#             else
-                write(*,*) trim(myhost),' rank',rank,'file:',ofile
-#             endif
-              call mpi_abort(mpi_comm_world,ierr,ierr)
+                write(*,*) 'error opening coarse projection file for write'
+                write(*,*) 'rank',rank,'file:',ofile
+                call mpi_abort(mpi_comm_world,ierr,ierr)
             endif
             write(13) shake_offset
             write(13) soffcproj
             write(13) crhoprojsum_nu
             close(13)
-# endif
+#endif
         endif !! cart_coord
         if (rank == 0) write(*,*) "Coarse Projection written"
-# ifdef SHMCP
-    cmd='mv '//trim(shm_path)//'*cproj* '//trim(output_path)//'coarseproj/node'//trim(rank_s)//'/ &'
-    call system(cmd)
-# endif
         call mpi_barrier(mpi_comm_world, ierr)
     endif !! doCoarseProj
 #endif

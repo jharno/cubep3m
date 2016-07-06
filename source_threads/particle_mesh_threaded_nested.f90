@@ -911,11 +911,6 @@
 
     call coarse_mesh
 
-! undo the random shift
-#ifdef MOVE_GRID_BACK
-    call move_grid_back
-#endif    
-
 !! delete all particles outside (1:nc_node_dim]
     
     call delete_particles
