@@ -7,7 +7,7 @@ P3DFFT_INC=/home/p/pen/emberson/lib/p3dfft_2.5.1_essl/include
 
 LDLIBS=-lp3dfft -lfftw3f -lmass -lesslsmpbg -lrt -lm -ldl
 
-FFLAGS=-q64 -O3 -qhot -qarch=qp -qtune=qp -qnosave -WF,-DDIAG,-DNGP,-DPPINT,-DMPI_TIME,-DLRCKCORR,-DNGPH,-DDISP_MESH,-DCHECKPOINT_KILL,-DNESTED_OMP,-DNEUTRINOS,-DPID_FLAG,-DESSL
+FFLAGS=-q64 -O3 -qhot -qarch=qp -qtune=qp -qnosave -WF,-DDIAG,-DNGP,-DPPINT,-DMPI_TIME,-DLRCKCORR,-DFPPKCORR,-DNGPH,-DDISP_MESH,-DCHECKPOINT_KILL,-DNESTED_OMP,-DNEUTRINOS,-DPID_FLAG,-DESSL
 
 OBJS=checkpoint.o checkpoint_kill.o coarse_cic_mass.o coarse_cic_mass_buffer.o coarse_force_p3dfft.o coarse_force_buffer.o coarse_mass.o coarse_max_dt.o coarse_mesh.o coarse_power_p3dfft.o coarse_velocity.o cubepm.o delete_particles.o p3dfft_coarse.o fine_cic_mass.o fine_cic_mass_buffer.o fine_ngp_mass.o halofind_particles.o fft_fine.o init_projection.o kernel_checkpoint.o kernel_initialization_p3dfft.o link_list.o move_grid_back.o mpi_initialization_p3dfft.o particle_initialization.o particle_mesh_threaded_nested.o particle_pass.o projection.o indexedsort.o timers.o timestep.o update_position.o variable_initialization.o 
 
