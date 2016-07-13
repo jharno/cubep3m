@@ -22,7 +22,7 @@ module Pencil
 	real, dimension(nc_node_dim,nc_node_dim,nc_node_dim) :: cube
 	real, dimension(nc_node_dim, nc_node_dim, nc_pen, 0:nodes_pen-1) :: recv_cube
 
-	real, dimension(nc, nc_node_dim, nc_pen+2) :: slab,slab2!,slab3
+	real, dimension(nc, nc_node_dim, nc_pen+2) :: slab,slab2,slab3
 	equivalence(cube, slab)
 
 	public :: nc_pen

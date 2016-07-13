@@ -36,10 +36,14 @@ contains
     real, dimension(nc, nc_node_dim, nc_pen+2) :: slabA
 #ifndef NGP
     integer, parameter :: interpExponent = 4
+#if (VERBOSITY>0)
     if (rank==0) write(*,*) "Assuming CIC particle interpolation"
+#endif
 #else
     integer, parameter :: interpExponent = 0
+#if (VERBOSITY>0)
     if (rank==0) write(*,*) "Using NGP particle interpolation"
+#endif
 #endif
     
 #if (VERBOSITY>0)
@@ -206,10 +210,14 @@ contains
     
 #ifndef NGP
     integer, parameter :: interpExponent = 4
+#if (VERBOSITY>0)
     if (rank==0) write(*,*) "Assuming CIC particle interpolation"
+#endif
 #else
     integer, parameter :: interpExponent = 2
+#if (VERBOSITY>0)
     if (rank==0) write(*,*) "Using NGP particle interpolation"
+#endif
 #endif
     
 #if (VERBOSITY>0)

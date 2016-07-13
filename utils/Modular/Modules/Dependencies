@@ -1,6 +1,7 @@
 Deriv3d.o: Variables.o Parameters.o mMPI.o Pencil.o
 Transfer.o: Variables.o Parameters.o mMPI.o Pencil.o
 Power.o: Variables.o Parameters.o mMPI.o Pencil.o
+Dipole.o: Variables.o Parameters.o mMPI.o
 Zip.o: Variables.o Parameters.o mMPI.o
 FieldIO.o: Variables.o Parameters.o mMPI.o
 HaloReader.o: Variables.o Parameters.o mMPI.o

@@ -11,6 +11,8 @@ module Variables
   integer, parameter :: nodes = Nmpi
   integer, parameter :: nodes_slab = nodes_dim*nodes_dim
   integer, parameter :: nc_buf = 24
+
+  integer, parameter :: nglobal_dim = nodes_dim ! nodes_dim in runing cubep3m. set to 24 for TianNu  
   
   !Particle parameters
   integer, parameter :: np_max = 25000000

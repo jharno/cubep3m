@@ -1,5 +1,5 @@
 fort=mpif90
-xflags=-O3 -q64 -O2 -qhot -qarch=qp -qtune=qp -qsmp=omp -WF,-DIBM,-DBGQ
+xflags=-O3 -q64 -qhot -qarch=qp -qtune=qp -qsmp=omp -WF,-DIBM,-DBGQ
 oflags=-c $(xflags)
 dflags=-O0 -C -B -O0
 
