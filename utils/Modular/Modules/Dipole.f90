@@ -12,7 +12,225 @@ module Dipole
   use mMPI
   
 contains
+
+  subroutine compute_monopole(denA,denB,rarr,xarr,sarr)
+    implicit none
+    real, dimension(Ncells,Ncells,Ncells), intent(in) :: denA, denB
+    real, dimension(:), intent(out) :: rarr, xarr, sarr
+    real, dimension(Ncells+1,Ncells+1,Ncells+1,2) :: g
   
+    real, parameter :: r1=1.0, r2=sqrt(2.)/2.0, r3=sqrt(3.)/3.0
+
+    integer, dimension(3), parameter :: cci = (/2,1,0/)
+    integer, dimension(3) :: ncoord
+    real(8) :: xi1,xi2,xi3 !dipole on node
+    real(8) :: xi1g,xi2g,xi3g !mean dipole
+    real(8) :: xi1s,xi2s,xi3s,xi1sm,xi2sm,xi3sm,xi1ss,xi2ss,xi3ss !error estimation
+
+    real :: r
+    integer :: i,j,k,l,m,n,nn,zip_factor,c,nume,err,lr,rr
+
+    !MPI Stuff
+    integer :: mpi_comm_sub, mpi_comm_sub_sub
+    integer :: sub_rank
+
+    g=0;
+
+    g(:Ncells,:Ncells,:Ncells,1) = denA
+    g(:Ncells,:Ncells,:Ncells,2) = denB
+
+    rarr = 0; xarr = 0; sarr = 0;
+
+    call mpi_cart_sub(mpi_comm_cart,(/.false.,.true.,.true./),mpi_comm_sub,err )
+    if (err/=mpi_success) call dipole_error_stop('Error in creating subvolume communicator')
+
+    call mpi_comm_rank(mpi_comm_sub,sub_rank,err )
+    if (err/=mpi_success) call dipole_error_stop('Error in computing subvolume slab rank')
+
+    call mpi_cart_sub(mpi_comm_cart,(/.true.,.false.,.false./),mpi_comm_sub_sub,err )
+    if (err/=mpi_success) call dipole_error_stop('Error in computing sub-sub volume communicator')
+
+    !First compute distributed piece
+    nn = nodes_dim
+    m = Ncells
+    c = 1
+    do
+       r = Lbox/m/nn
+       n = m+1
+       xi1=0; xi2=0; xi3=0
+       if (rank.eq.0) write(*,*) 'Scale: ',r,m
+
+       !Fill boundary cells
+       !!Pass x 
+       !if (rank.eq.0) write(*,*) 'Pass x'
+       call mpi_cart_shift( mpi_comm_cart,cci(1),1,lr,rr,err )
+       if (err/=mpi_success) call dipole_error_stop('Could not determine cart x')
+        
+       nume = size( g(1,:m,:m,:) )
+       if (nume/=size( g(n,:m,:m,:) )) call dipole_error_stop('Error: nume for g 1,n in x do not match')
+       call mpi_sendrecv( g(1,:m,:m,:),nume,mpi_real,lr,rank**2,g(n,:m,:m,:),nume,mpi_real,rr,rr**2,mpi_comm_world,mpi_status_ignore,err )
+       if (err/=mpi_success) call dipole_error_stop('Error in send_recv g in x')
+
+       !if (rank.eq.0) write(*,*) 'Pass y'
+       call mpi_cart_shift( mpi_comm_cart,cci(2),1,lr,rr,err )
+       if (err/=mpi_success) call dipole_error_stop('Could not determine cart y')
+
+       nume = size( g(:n,1,:m,:) )
+       if (nume/=size( g(:n,n,:m,:) )) call dipole_error_stop('Error: nume for g 1,n in y do not match')
+       call mpi_sendrecv( g(:n,1,:m,:),nume,mpi_real,lr,rank**2,g(:n,n,:m,:),nume,mpi_real,rr,rr**2,mpi_comm_world,mpi_status_ignore,err )
+       if (err/=mpi_success) call dipole_error_stop('Error in send_recv g in y')
+
+       !!Pass z
+       !if (rank.eq.0) write(*,*) 'Pass z'
+       call mpi_cart_shift( mpi_comm_cart,cci(3),1,lr,rr,err )
+       if (err/=mpi_success) call dipole_error_stop('Could not determine cart z')
+
+       nume = size( g(:n,:n,1,:) )
+       if (nume/=size( g(:n,:n,n,:) )) call dipole_error_stop('Error: nume for g 1,n in z do not match')
+       call mpi_sendrecv( g(:n,:n,1,:),nume,mpi_real,lr,rank**2,g(:n,:n,n,:),nume,mpi_real,rr,rr**2,mpi_comm_world,mpi_status_ignore,err )
+       if (err/=mpi_success) call dipole_error_stop('Error in send_recv g in z')
+
+       !Compute local dipole
+       !! 1 displacement
+       xi1=xi1+sum(g(1:m,1:m,1:m,1)*g(2:n,1:m,1:m,2)*1.d0)
+       xi1=xi1+sum(g(2:n,1:m,1:m,1)*g(1:m,1:m,1:m,2)*1.d0)
+
+       xi1=xi1+sum(g(1:m,1:m,1:m,1)*g(1:m,2:n,1:m,2)*1.d0)
+       xi1=xi1+sum(g(1:m,2:n,1:m,1)*g(1:m,1:m,1:m,2)*1.d0)
+
+       xi1=xi1+sum(g(1:m,1:m,1:m,1)*g(1:m,1:m,2:n,2)*1.d0)
+       xi1=xi1+sum(g(1:m,1:m,2:n,1)*g(1:m,1:m,1:m,2)*1.d0)
+
+       !! 2 displacements
+       xi2=xi2+sum(g(1:m,1:m,1:m,1)*g(1:m,2:n,2:n,2)*1.d0)
+       xi2=xi2+sum(g(1:m,1:m,2:n,1)*g(1:m,2:n,1:m,2)*1.d0)
+       xi2=xi2+sum(g(1:m,2:n,1:m,1)*g(1:m,1:m,2:n,2)*1.d0)
+       xi2=xi2+sum(g(1:m,2:n,2:n,1)*g(1:m,1:m,1:m,2)*1.d0)
+
+       xi2=xi2+sum(g(1:m,1:m,1:m,1)*g(2:n,2:n,1:m,2)*1.d0)
+       xi2=xi2+sum(g(1:m,2:n,1:m,1)*g(2:n,1:m,1:m,2)*1.d0)
+       xi2=xi2+sum(g(2:n,1:m,1:m,1)*g(1:m,2:n,1:m,2)*1.d0)
+       xi2=xi2+sum(g(2:n,2:n,1:m,1)*g(1:m,1:m,1:m,2)*1.d0)
+
+       xi2=xi2+sum(g(1:m,1:m,1:m,1)*g(2:n,1:m,2:n,2)*1.d0)
+       xi2=xi2+sum(g(1:m,1:m,2:n,1)*g(2:n,1:m,1:m,2)*1.d0)
+       xi2=xi2+sum(g(2:n,1:m,1:m,1)*g(1:m,1:m,2:n,2)*1.d0)
+       xi2=xi2+sum(g(2:n,1:m,2:n,1)*g(1:m,1:m,1:m,2)*1.d0)
+       
+
+       !! 3 displacements
+       xi3=xi3+sum(g(1:m,1:m,1:m,1)*g(2:n,2:n,2:n,2)*1.d0)
+
+       xi3=xi3+sum(g(1:m,1:m,2:n,1)*g(2:n,2:n,1:m,2)*1.d0)
+       xi3=xi3+sum(g(1:m,2:n,1:m,1)*g(2:n,1:m,2:n,2)*1.d0)
+       xi3=xi3+sum(g(2:n,1:m,1:m,1)*g(1:m,2:n,2:n,2)*1.d0)
+
+       xi3=xi3+sum(g(1:m,2:n,2:n,1)*g(2:n,1:m,1:m,2)*1.d0)
+       xi3=xi3+sum(g(2:n,1:m,2:n,1)*g(1:m,2:n,1:m,2)*1.d0)
+       xi3=xi3+sum(g(2:n,2:n,1:m,1)*g(1:m,1:m,2:n,2)*1.d0)
+
+       xi3=xi3+sum(g(2:n,2:n,2:n,1)*g(1:m,1:m,1:m,2)*1.d0)
+
+       !Local average
+       xi1=xi1/m**3/6.0
+       xi2=xi2/m**3/12.0
+       xi3=xi3/m**3/8.0
+       
+       !Reduce to one node
+       xi1g = 0; xi2g = 0; xi3g = 0;
+
+       call mpi_reduce( xi1,xi1g,1,mpi_real8,mpi_sum,0,mpi_comm_world,err )
+       if (err/=mpi_success) call dipole_error_stop('Error in xi1g reduction')
+       call mpi_reduce( xi2,xi2g,1,mpi_real8,mpi_sum,0,mpi_comm_world,err )
+       if (err/=mpi_success) call dipole_error_stop('Error in xi2g reduction')
+       call mpi_reduce( xi3,xi3g,1,mpi_real8,mpi_sum,0,mpi_comm_world,err )
+       if (err/=mpi_success) call dipole_error_stop('Error in xi3g reduction')       
+
+       !Global average
+       xi1g=xi1g/nn**3
+       xi2g=xi2g/nn**3
+       xi3g=xi3g/nn**3
+
+       !Compute fluctuations
+       xi1s = 0; xi2s = 0; xi3s = 0;
+       call mpi_reduce( xi1,xi1s,1,mpi_real8,mpi_sum,0,mpi_comm_sub,err )
+       if (err/=mpi_success) call dipole_error_stop('Error in xi1s reduction')
+       call mpi_reduce( xi2,xi2s,1,mpi_real8,mpi_sum,0,mpi_comm_sub,err )
+       if (err/=mpi_success) call dipole_error_stop('Error in xi2s reduction')
+       call mpi_reduce( xi3,xi3s,1,mpi_real8,mpi_sum,0,mpi_comm_sub,err )
+       if (err/=mpi_success) call dipole_error_stop('Error in xi3s reduction')
+
+       !Slab average
+       xi1s=xi1s/nn**2
+       xi2s=xi2s/nn**2
+       xi3s=xi3s/nn**2
+
+       xi1sm = 0; xi2sm = 0; xi3sm = 0;
+       call mpi_reduce( xi1s,xi1sm,1,mpi_real8,mpi_sum,0,mpi_comm_sub_sub,err )
+       if (err/=mpi_success) call dipole_error_stop('Error in xi1sm reduction')
+       call mpi_reduce( xi2s,xi2sm,1,mpi_real8,mpi_sum,0,mpi_comm_sub_sub,err )
+       if (err/=mpi_success) call dipole_error_stop('Error in xi2sm reduction')
+       call mpi_reduce( xi3s,xi3sm,1,mpi_real8,mpi_sum,0,mpi_comm_sub_sub,err )
+       if (err/=mpi_success) call dipole_error_stop('Error in xi3sm reduction')
+       
+       !Pencil average
+       xi1sm=xi1sm/nn
+       xi2sm=xi2sm/nn
+       xi3sm=xi3sm/nn
+       if ( abs(xi1sm-xi1g) .gt. 1e-5 ) call dipole_error_stop('Error in sm g comparison')
+
+       xi1ss = 0; xi2ss = 0; xi3ss = 0;
+       call mpi_reduce( xi1s**2.0,xi1ss,1,mpi_real8,mpi_sum,0,mpi_comm_sub_sub,err )
+       if (err/=mpi_success) call dipole_error_stop('Error in xi1ss reduction')
+       call mpi_reduce( xi2s**2.0,xi2ss,1,mpi_real8,mpi_sum,0,mpi_comm_sub_sub,err )
+       if (err/=mpi_success) call dipole_error_stop('Error in xi2ss reduction')
+       call mpi_reduce( xi3s**2.0,xi3ss,1,mpi_real8,mpi_sum,0,mpi_comm_sub_sub,err )
+       if (err/=mpi_success) call dipole_error_stop('Error in xi3ss reduction')
+       
+       !Pencil average
+       xi1ss=xi1ss/nn
+       xi2ss=xi2ss/nn
+       xi3ss=xi3ss/nn
+
+       !Save
+       if (rank.eq.0) then
+          rarr(c) = r
+          xarr(c) = xi1g
+          sarr(c) = (xi1ss-xi1sm**2)**0.5
+          c=c+1
+          rarr(c) = r*sqrt(2.0)
+          xarr(c) = xi2g
+          sarr(c) = (xi2ss-xi2sm**2)**0.5
+          c=c+1
+          rarr(c) = r*sqrt(3.0)
+          xarr(c) = xi3g
+          sarr(c) = (xi3ss-xi3sm**2)**0.5
+          c=c+1
+       end if
+
+       zip_factor = f(m)
+       if (m.lt.zip_factor .or. zip_factor.eq.-1) exit
+       
+       call zip(g(:m,:m,:m,1),zip_factor)
+       call zip(g(:m,:m,:m,2),zip_factor)
+
+       m=m/zip_factor
+
+    end do
+
+    !One node piece
+    if (Nmpi.gt.1) write(*,*) 'WARNING: 1 node piece not implemented in cf_2pt yet'
+    
+    nume=size(rarr)
+    call mpi_bcast(rarr,nume,mpi_real,0,mpi_comm_world,err)
+    if (err/=mpi_success) call dipole_error_stop('Error in mpi_bcast rarr')
+    call mpi_bcast(xarr,nume,mpi_real,0,mpi_comm_world,err)
+    if (err/=mpi_success) call dipole_error_stop('Error in mpi_bcast xarr')
+    call mpi_bcast(sarr,nume,mpi_real,0,mpi_comm_world,err)
+    if (err/=mpi_success) call dipole_error_stop('Error in mpi_bcast sarr')
+
+  end subroutine compute_monopole
+
   subroutine compute_dipole(denA,denB,velR,rarr,xarr,sarr)
     implicit none
     real, dimension(Ncells,Ncells,Ncells), intent(in) :: denA, denB
@@ -352,6 +570,8 @@ contains
     if (err/=mpi_success) call dipole_error_stop('Error in mpi_bcast rarr')
     call mpi_bcast(xarr,nume,mpi_real,0,mpi_comm_world,err)
     if (err/=mpi_success) call dipole_error_stop('Error in mpi_bcast xarr')
+    call mpi_bcast(sarr,nume,mpi_real,0,mpi_comm_world,err)
+    if (err/=mpi_success) call dipole_error_stop('Error in mpi_bcast sarr')
 
   end subroutine compute_dipole
 
