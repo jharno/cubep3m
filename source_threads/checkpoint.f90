@@ -52,7 +52,7 @@
 !! Open checkpoint
 
 #ifdef BINARY
-    open (unit=12,file=ofile,status='replace',iostat=fstat,form='binary')
+    open (unit=12,file=ofile,status='replace',iostat=fstat,form='unformatted',access='stream')
 #else
     open (unit=12,file=ofile,status='replace',iostat=fstat,form='unformatted')
 #endif
