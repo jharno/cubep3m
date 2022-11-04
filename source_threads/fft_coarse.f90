@@ -110,7 +110,7 @@
     implicit none
     include 'mpif.h'
     include 'fftw3-mpi.f03'
-    include 'cubepm.fh'
+    include 'cubepm_fftw3.fh'
     !include 'fftw_f77.i'
 
     !integer(4), parameter :: order=FFTW_NORMAL_ORDER ! FFTW_TRANSPOSED_ORDER
