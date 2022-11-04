@@ -6,7 +6,8 @@ FFTWINC=-I/usr/include
 FFTWLIB=-L/usr/lib/x86_64-linux-gnu/
 
 LDLIBS= -lfftw3_mpi -lfftw3 -lfftw3f_omp -lm -ldl
-FFLAGS=-cpp -ffree-line-length-none -fallow-argument-mismatch -g -O3 -fpic -DDIAG -DBINARY -DNGP -DPPINT -DMPI_TIME  -DLRCKCORR -DNGPH -DDISP_MESH #-DPP_EXT  #-DPID_FLAG #-DDEBUG_PP_EXT #-DREAD_SEED #-DDISP_MESH -DPID_FLAG #-DDEBUG
+FFLAGS=-cpp -ffree-line-length-none -fallow-argument-mismatch -g -O3 -fpic -rdynamic -mcmodel=medium -DDIAG -DBINARY -DNGP -DPPINT -DMPI_TIME  -DLRCKCORR -DNGPH -DDISP_MESH #-DPP_EXT  #-DPID_FLAG #-DDEBUG_PP_EXT #-DREAD_SEED #-DDISP_MESH -DPID_FLAG #-DDEBUG
+#FFLAGS=-cpp -g  -O3   -fpic -i_dynamic -mcmodel=medium -mt_mpi -DDIAG -DBINARY -DNGP -DPPINT -DOPENMP  -DMPI_TIME  -DLRCKCORR -DNGPH -DDISP_MESH
 #FFLAGS=-dyncom "divar,ivar,rvar,C2RAY_HALO,lvar" -fpp -g -CB -O3 -fpic -xT -DDIAG -DBINARY -DNGP -DPPINT -DDISP_MESH -DMPI_TIME #-DDEBUG 
 #-DSCALED_IC #-DDEBUG_VEL -fpe3 -check bounds -DDEBUG #-DMHD #-check bounds -DDEBUG #-DDEBUG_LOW #-DDEBUG_VEL -DDEBUG_CCIC -DDEBUG_RHOC -DDEBUG_LOW
 #FFLAGS=-fpp -g -O0 -CB -DDIAG -DBINARY -DNGP -DPPINT -DDISP_MESH -DMPI_TIME -DDEBUG
