@@ -59,7 +59,7 @@ subroutine datestamp
   implicit none
   character(len=8) :: t
   character(len=8) :: td
-  call time(t)
+  call date_and_time(t)
   call date_and_time(td)
   print *,td,' ',t
 end subroutine datestamp
