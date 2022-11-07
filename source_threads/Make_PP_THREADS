@@ -19,10 +19,10 @@ run: cubep3m
 
 
 cubep3m: $(OBJS)
-	$(FC) $(FFLAGS) -openmp  $^ -o $@  $(LDLIBS)
+	$(FC) $(FFLAGS)  $^ -o $@  $(LDLIBS)
 
 cubepm.o: cubepm.f90 
-	$(FC) $(FFLAGS) -openmp -c $<  
+	$(FC) $(FFLAGS) -c $<  
 
 checkpoint.o: checkpoint.f90 
 	$(FC) $(FFLAGS) -c $<
@@ -34,7 +34,7 @@ coarse_cic_mass_buffer.o: coarse_cic_mass_buffer.f90
 	$(FC) $(FFLAGS)  -c $<
 
 coarse_force.o: coarse_force.f90
-	$(FC) $(FFLAGS) -openmp -c $<
+	$(FC) $(FFLAGS) -c $<
 
 coarse_force_buffer.o: coarse_force_buffer.f90
 	$(FC) $(FFLAGS) -c $<
@@ -52,7 +52,7 @@ coarse_power.o: coarse_power.f90
 	$(FC) $(FFLAGS) -c $<
 
 coarse_velocity.o: coarse_velocity.f90 
-	$(FC) $(FFLAGS) -openmp -c $<
+	$(FC) $(FFLAGS) -c $<
 
 delete_particles.o: delete_particles.f90
 	$(FC) $(FFLAGS) -c $<
@@ -67,7 +67,7 @@ fine_cic_mass_buffer.o: fine_cic_mass_buffer.f90
 	$(FC) $(FFLAGS) -c $<
 
 fine_mesh.o: fine_mesh.f90 
-	$(FC) $(FFLAGS) -openmp -c $<
+	$(FC) $(FFLAGS) -c $<
 
 fine_ngp_mass.o: fine_ngp_mass.f90
 	$(FC) $(FFLAGS) -c $<
@@ -106,7 +106,7 @@ particle_initialization.o: particle_initialization.f90
 	$(FC) $(FFLAGS) -c $<
 
 particle_mesh_threaded.o: particle_mesh_threaded.f90
-	$(FC) $(FFLAGS) -openmp -c $<
+	$(FC) $(FFLAGS) -c $<
 
 particle_pass.o: particle_pass.f90
 	$(FC) $(FFLAGS) -c $<
@@ -133,7 +133,7 @@ timestep.o: timestep.f90
 	$(FC) $(FFLAGS) -c $<
 
 update_position.o: update_position.f90
-	$(FC) $(FFLAGS) -openmp -c $<
+	$(FC) $(FFLAGS) -c $<
 
 variable_initialization.o: variable_initialization.f90
 	$(FC) $(FFLAGS) -c $<
