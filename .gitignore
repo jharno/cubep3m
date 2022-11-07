@@ -1,0 +1,11 @@
+*.o
+batch/batch_parameters.csh
+batch/cubep3m.pbs
+batch/init_pp_threads.csh
+input/checkpoints
+input/halofinds
+input/projections
+parameters
+penmp
+utils/dist_init/cmbfast.lcdm
+
